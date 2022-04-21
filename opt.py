@@ -2,6 +2,11 @@ import configargparse
 
 def config_parser(cmd=None):
     parser = configargparse.ArgumentParser()
+    # custom params
+    parser.add_argument('--filter_rays', action='store_true')
+    parser.add_argument('--bundle_size', type=int, default=1)
+    parser.add_argument('--render_mode', type=str, default='mean')
+
     parser.add_argument('--config', is_config_file=True,
                         help='config file path')
     parser.add_argument("--expname", type=str,

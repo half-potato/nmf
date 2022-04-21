@@ -1,5 +1,6 @@
 
 import os
+from tracemalloc import start
 from tqdm.auto import tqdm
 from opt import config_parser
 
@@ -14,7 +15,9 @@ import datetime
 from dataLoader import dataset_dict
 import sys
 
+import time
 
+import matplotlib.pyplot as plt
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -33,8 +36,58 @@ class SimpleSampler:
         if self.curr + self.batch > self.total:
             self.ids = torch.LongTensor(np.random.permutation(self.total))
             self.curr = 0
-        return self.ids[self.curr:self.curr+self.batch]
+        ids = self.ids[self.curr:self.curr+self.batch]
+        return ids, ids
 
+class BlockSampler:
+    def __init__(self, total, batch, bundle_w, bundle_h, im_w, im_h, mask=None):
+        self.total = total
+        self.batch = batch
+        self.num_rays_per_batch = batch * bundle_h * bundle_w
+        self.padding = bundle_h // 2
+        self.bundles_per_im = (im_w-self.padding*2) * (im_h-self.padding*2)
+
+        self.ids = torch.LongTensor(range(self.total)).reshape(-1, im_h, im_w)
+
+        self.num_imgs = total // im_w // im_h
+        self.num_bundles = self.bundles_per_im*self.num_imgs
+
+        self.block_ids = torch.LongTensor(np.random.permutation(self.num_bundles))
+
+        self.mesh_y, self.mesh_x = torch.meshgrid(torch.arange(-self.padding, self.padding+1), torch.arange(-self.padding, self.padding+1), indexing='ij')
+        self.mesh_x = self.mesh_x.reshape(1, -1).long()
+        self.mesh_y = self.mesh_y.reshape(1, -1).long()
+        self.mesh_i = torch.zeros((self.mesh_x.numel()), dtype=torch.long)
+
+        self.curr = 0
+        self.bundle_h, self.bundle_w = bundle_h, bundle_w
+        self.im_h, self.im_w = im_h, im_w
+        self.curr = self.num_bundles
+
+    def nextids(self):
+        self.curr+=self.batch
+        if self.curr+self.batch > self.num_bundles:
+            self.block_ids = torch.LongTensor(np.random.permutation(self.num_bundles))
+            self.curr = 0
+        # start_time = time.time()
+        inds = self.block_ids[self.curr:self.curr+self.batch]
+        image_ind = inds // self.bundles_per_im
+
+        wh = inds % self.bundles_per_im
+
+        num_bundles_w = self.im_w - 2*self.padding
+        h = (wh // num_bundles_w) + self.padding
+        w = (wh % num_bundles_w) + self.padding
+        centers = image_ind*self.im_w*self.im_h + h*self.im_w + w
+        # centers = self.ids[image_ind, h, w]
+        bundle = (image_ind.reshape(-1, 1)+self.mesh_i)*self.im_w*self.im_h + \
+                 (h.reshape(-1, 1)+self.mesh_y)*self.im_w + \
+                 (w.reshape(-1, 1)+self.mesh_x)
+        # bundle = self.ids[image_ind.reshape(-1, 1)+self.mesh_i, h.reshape(-1, 1)+self.mesh_y, w.reshape(-1, 1)+self.mesh_x]
+        # print(time.time() - start_time)
+        bundle = bundle.reshape(-1)
+
+        return centers, bundle
 
 @torch.no_grad()
 def export_mesh(args):
@@ -72,19 +125,22 @@ def render_test(args):
         os.makedirs(f'{logfolder}/imgs_train_all', exist_ok=True)
         train_dataset = dataset(args.datadir, split='train', downsample=args.downsample_train, is_stack=True)
         PSNRs_test = evaluation(train_dataset,tensorf, args, renderer, f'{logfolder}/imgs_train_all/',
-                                N_vis=-1, N_samples=-1, white_bg = white_bg, ndc_ray=ndc_ray,device=device)
+                                N_vis=-1, N_samples=-1, white_bg = white_bg, ndc_ray=ndc_ray,device=device,
+                                bundle_size=args.bundle_size, render_mode=args.render_mode)
         print(f'======> {args.expname} train all psnr: {np.mean(PSNRs_test)} <========================')
 
     if args.render_test:
         os.makedirs(f'{logfolder}/{args.expname}/imgs_test_all', exist_ok=True)
         evaluation(test_dataset,tensorf, args, renderer, f'{logfolder}/{args.expname}/imgs_test_all/',
-                                N_vis=-1, N_samples=-1, white_bg = white_bg, ndc_ray=ndc_ray,device=device)
+                   N_vis=-1, N_samples=-1, white_bg = white_bg, ndc_ray=ndc_ray,device=device,
+                   bundle_size=args.bundle_size, render_mode=args.render_mode)
 
     if args.render_path:
         c2ws = test_dataset.render_path
         os.makedirs(f'{logfolder}/{args.expname}/imgs_path_all', exist_ok=True)
         evaluation_path(test_dataset,tensorf, c2ws, renderer, f'{logfolder}/{args.expname}/imgs_path_all/',
-                                N_vis=-1, N_samples=-1, white_bg = white_bg, ndc_ray=ndc_ray,device=device)
+                        N_vis=-1, N_samples=-1, white_bg = white_bg, ndc_ray=ndc_ray,device=device,
+                        bundle_size=args.bundle_size, render_mode=args.render_mode)
 
 def reconstruction(args):
 
@@ -135,7 +191,8 @@ def reconstruction(args):
         tensorf = eval(args.model_name)(aabb, reso_cur, device,
                     density_n_comp=n_lamb_sigma, appearance_n_comp=n_lamb_sh, app_dim=args.data_dim_color, near_far=near_far,
                     shadingMode=args.shadingMode, alphaMask_thres=args.alpha_mask_thre, density_shift=args.density_shift, distance_scale=args.distance_scale,
-                    pos_pe=args.pos_pe, view_pe=args.view_pe, fea_pe=args.fea_pe, featureC=args.featureC, step_ratio=args.step_ratio, fea2denseAct=args.fea2denseAct)
+                    pos_pe=args.pos_pe, view_pe=args.view_pe, fea_pe=args.fea_pe, featureC=args.featureC, step_ratio=args.step_ratio,
+                    fea2denseAct=args.fea2denseAct, bundle_size=args.bundle_size)
 
 
     grad_vars = tensorf.get_optparam_groups(args.lr_init, args.lr_basis)
@@ -158,9 +215,15 @@ def reconstruction(args):
     PSNRs,PSNRs_test = [],[0]
 
     allrays, allrgbs = train_dataset.all_rays, train_dataset.all_rgbs
-    if not args.ndc_ray:
-        allrays, allrgbs = tensorf.filtering_rays(allrays, allrgbs, bbox_only=True)
-    trainingSampler = SimpleSampler(allrays.shape[0], args.batch_size)
+    if not args.ndc_ray and args.filter_rays:
+        allrays, allrgbs, mask = tensorf.filtering_rays(allrays, allrgbs, bbox_only=True)
+    else:
+        mask = None
+    if args.bundle_size == 1:
+        trainingSampler = SimpleSampler(allrays.shape[0], args.batch_size)
+    else:
+        trainingSampler = BlockSampler(allrays.shape[0], args.batch_size, args.bundle_size, args.bundle_size, *train_dataset.img_wh, mask)
+    trainingSampler = BlockSampler(allrays.shape[0], args.batch_size, args.bundle_size, args.bundle_size, *train_dataset.img_wh, mask)
 
     Ortho_reg_weight = args.Ortho_weight
     print("initial Ortho_reg_weight", Ortho_reg_weight)
@@ -172,17 +235,26 @@ def reconstruction(args):
     print(f"initial TV_weight density: {TV_weight_density} appearance: {TV_weight_app}")
 
 
+    allrgbs = allrgbs.to(device)
+    allrays = allrays.to(device)
     pbar = tqdm(range(args.n_iters), miniters=args.progress_refresh_rate, file=sys.stdout)
     for iteration in pbar:
 
 
-        ray_idx = trainingSampler.nextids()
-        rays_train, rgb_train = allrays[ray_idx], allrgbs[ray_idx].to(device)
+        ray_idx, rgb_idx = trainingSampler.nextids()
+
+        # patches = allrgbs[ray_idx].reshape(-1, args.bundle_size, args.bundle_size, 3)
+        # plt.imshow(patches[0])
+        # plt.show()
+
+        # rays_train, rgb_train = allrays[ray_idx], allrgbs[rgb_idx].to(device).reshape(-1, args.bundle_size, args.bundle_size, 3)
+        rays_train, rgb_train = allrays[ray_idx], allrgbs[rgb_idx].reshape(-1, args.bundle_size, args.bundle_size, 3)
 
         #rgb_map, alphas_map, depth_map, weights, uncertainty
         rgb_map, alphas_map, depth_map, weights, uncertainty = renderer(rays_train, tensorf, chunk=args.batch_size,
                                 N_samples=nSamples, white_bg = white_bg, ndc_ray=ndc_ray, device=device, is_train=True)
 
+        # loss = torch.mean((rgb_map[:, 1, 1] - rgb_train[:, 1, 1]) ** 2)
         loss = torch.mean((rgb_map - rgb_train) ** 2)
 
 
@@ -235,7 +307,8 @@ def reconstruction(args):
 
         if iteration % args.vis_every == args.vis_every - 1 and args.N_vis!=0:
             PSNRs_test = evaluation(test_dataset,tensorf, args, renderer, f'{logfolder}/imgs_vis/', N_vis=args.N_vis,
-                                    prtx=f'{iteration:06d}_', N_samples=nSamples, white_bg = white_bg, ndc_ray=ndc_ray, compute_extra_metrics=False)
+                                    prtx=f'{iteration:06d}_', N_samples=nSamples, white_bg = white_bg, ndc_ray=ndc_ray,
+                                    compute_extra_metrics=False, bundle_size=args.bundle_size, render_mode=args.render_mode)
             summary_writer.add_scalar('test/psnr', np.mean(PSNRs_test), global_step=iteration)
 
 
@@ -252,10 +325,13 @@ def reconstruction(args):
                 print("continuing L1_reg_weight", L1_reg_weight)
 
 
-            if not args.ndc_ray and iteration == update_AlphaMask_list[1]:
+            if not args.ndc_ray and iteration == update_AlphaMask_list[1] and args.filter_rays:
                 # filter rays outside the bbox
-                allrays,allrgbs = tensorf.filtering_rays(allrays,allrgbs)
-                trainingSampler = SimpleSampler(allrgbs.shape[0], args.batch_size)
+                allrays,allrgbs,mask = tensorf.filtering_rays(allrays,allrgbs)
+                if args.bundle_size == 1:
+                    trainingSampler = SimpleSampler(allrays.shape[0], args.batch_size)
+                else:
+                    trainingSampler = BlockSampler(allrays.shape[0], args.batch_size, args.bundle_size, args.bundle_size, *train_dataset.img_wh, mask)
 
 
         if iteration in upsamp_list:
@@ -280,13 +356,13 @@ def reconstruction(args):
         os.makedirs(f'{logfolder}/imgs_train_all', exist_ok=True)
         train_dataset = dataset(args.datadir, split='train', downsample=args.downsample_train, is_stack=True)
         PSNRs_test = evaluation(train_dataset,tensorf, args, renderer, f'{logfolder}/imgs_train_all/',
-                                N_vis=-1, N_samples=-1, white_bg = white_bg, ndc_ray=ndc_ray,device=device)
+                                N_vis=-1, N_samples=-1, white_bg = white_bg, ndc_ray=ndc_ray,device=device, bundle_size=args.bundle_size, render_mode=args.render_mode)
         print(f'======> {args.expname} test all psnr: {np.mean(PSNRs_test)} <========================')
 
     if args.render_test:
         os.makedirs(f'{logfolder}/imgs_test_all', exist_ok=True)
         PSNRs_test = evaluation(test_dataset,tensorf, args, renderer, f'{logfolder}/imgs_test_all/',
-                                N_vis=-1, N_samples=-1, white_bg = white_bg, ndc_ray=ndc_ray,device=device)
+                                N_vis=-1, N_samples=-1, white_bg = white_bg, ndc_ray=ndc_ray,device=device, bundle_size=args.bundle_size, render_mode=args.render_mode)
         summary_writer.add_scalar('test/psnr_all', np.mean(PSNRs_test), global_step=iteration)
         print(f'======> {args.expname} test all psnr: {np.mean(PSNRs_test)} <========================')
 
@@ -296,7 +372,8 @@ def reconstruction(args):
         print('========>',c2ws.shape)
         os.makedirs(f'{logfolder}/imgs_path_all', exist_ok=True)
         evaluation_path(test_dataset,tensorf, c2ws, renderer, f'{logfolder}/imgs_path_all/',
-                                N_vis=-1, N_samples=-1, white_bg = white_bg, ndc_ray=ndc_ray,device=device)
+                        N_vis=-1, N_samples=-1, white_bg = white_bg, ndc_ray=ndc_ray,device=device,
+                        bundle_size=args.bundle_size, render_mode=args.render_mode)
 
 
 if __name__ == '__main__':
