@@ -6,6 +6,7 @@ import os
 from PIL import Image
 from torchvision import transforms as T
 
+from icecream import ic
 
 from .ray_utils import *
 
@@ -48,6 +49,12 @@ class BlenderDataset(Dataset):
 
         # ray directions for all pixels, same for all images (same H, W, focal)
         self.directions = get_ray_directions(h, w, [self.focal,self.focal])  # (h, w, 3)
+        self.rays_up = torch.stack([
+            torch.zeros_like(self.directions[..., 0]),
+            self.directions[..., 2],
+            -self.directions[..., 1],
+        ], dim=2)
+        self.rays_up /= torch.norm(self.rays_up, dim=2, keepdim=True)
         self.directions = self.directions / torch.norm(self.directions, dim=-1, keepdim=True)
         self.intrinsics = torch.tensor([[self.focal,0,w/2],[0,self.focal,h/2],[0,0,1]]).float()
 
@@ -81,7 +88,8 @@ class BlenderDataset(Dataset):
 
 
             rays_o, rays_d = get_rays(self.directions, c2w)  # both (h*w, 3)
-            self.all_rays += [torch.cat([rays_o, rays_d], 1)]  # (h*w, 6)
+            _, rays_up = get_rays(self.rays_up, c2w)  # both (h*w, 3)
+            self.all_rays += [torch.cat([rays_o, rays_d, rays_up], 1)]  # (h*w, 6)
 
 
         self.poses = torch.stack(self.poses)

@@ -192,12 +192,13 @@ class BundleMLPRender_Fea(torch.nn.Module):
         return rgb.reshape(-1,self.bundle_size,self.bundle_size,3)
 
 class BundleMLPRender_Fea_Grid(torch.nn.Module):
-    def __init__(self,inChanel, viewpe=6, feape=6, featureC=128, bundle_size=3, extra=4):
+    def __init__(self,inChanel, viewpe=6, feape=6, featureC=128, bundle_size=3, extra=4, ray_up_pe=3):
         super(BundleMLPRender_Fea_Grid, self).__init__()
 
-        self.in_mlpC = 2*viewpe*3 + 2*feape*inChanel + 3 + inChanel
+        self.in_mlpC = 2*viewpe*3 + 2*feape*inChanel + 3 + inChanel + 1 + 2*ray_up_pe*3
         self.viewpe = viewpe
         self.feape = feape
+        self.ray_up_pe = ray_up_pe
         self.bundle_size = bundle_size
         self.extra = extra
         layer1 = torch.nn.Linear(self.in_mlpC, featureC)
@@ -207,12 +208,14 @@ class BundleMLPRender_Fea_Grid(torch.nn.Module):
         self.mlp = torch.nn.Sequential(layer1, torch.nn.ReLU(inplace=True), layer2, torch.nn.ReLU(inplace=True), layer3)
         torch.nn.init.constant_(self.mlp[-1].bias, 0)
 
-    def forward(self, pts, viewdirs, features):
-        indata = [features, viewdirs]
+    def forward(self, pts, viewdirs, features, bundle_size_w, ray_up):
+        indata = [features, viewdirs, bundle_size_w]
         if self.feape > 0:
             indata += [positional_encoding(features, self.feape)]
         if self.viewpe > 0:
             indata += [positional_encoding(viewdirs, self.viewpe)]
+        if self.ray_up_pe > 0:
+            indata += [positional_encoding(ray_up, self.ray_up_pe)]
         mlp_in = torch.cat(indata, dim=-1)
         mlp_out = self.mlp(mlp_in)
         m = 3*self.bundle_size**2
@@ -243,7 +246,7 @@ class TensorBase(torch.nn.Module):
                     shadingMode = 'MLP_PE', alphaMask = None, near_far=[2.0,6.0],
                     density_shift = -10, alphaMask_thres=0.001, distance_scale=25, rayMarch_weight_thres=0.0001,
                     pos_pe = 6, view_pe = 6, fea_pe = 6, featureC=128, step_ratio=2.0,
-                    fea2denseAct = 'softplus', bundle_size = 1):
+                    fea2denseAct = 'softplus', bundle_size = 3):
         super(TensorBase, self).__init__()
 
         self.density_n_comp = density_n_comp
@@ -352,7 +355,8 @@ class TensorBase(torch.nn.Module):
             'pos_pe': self.pos_pe,
             'view_pe': self.view_pe,
             'fea_pe': self.fea_pe,
-            'featureC': self.featureC
+            'featureC': self.featureC,
+            'bundle_size': self.bundle_size
         }
 
     def save(self, path):
@@ -420,6 +424,7 @@ class TensorBase(torch.nn.Module):
     @torch.no_grad()
     def getDenseAlpha(self,gridSize=None):
         gridSize = self.gridSize if gridSize is None else gridSize
+        gridSize *= 2
 
         samples = torch.stack(torch.meshgrid(
             torch.linspace(0, 1, gridSize[0]),
@@ -524,7 +529,7 @@ class TensorBase(torch.nn.Module):
         return alpha
 
 
-    def forward(self, rays_chunk, white_bg=True, is_train=False, ndc_ray=False, N_samples=-1):
+    def forward(self, rays_chunk, focal, white_bg=True, is_train=False, ndc_ray=False, N_samples=-1):
         # rays_chunk: (N, 6)
 
         # sample points
@@ -543,7 +548,9 @@ class TensorBase(torch.nn.Module):
         # ray_valid.shape: (N, N_samples)
 
         viewdirs = viewdirs.view(-1, 1, 3).expand(xyz_sampled.shape)
-
+        rays_up = rays_chunk[:, 6:9]
+        rays_up = rays_up.view(-1, 1, 3).expand(xyz_sampled.shape)
+        n_samples = xyz_sampled.shape[1]
         # xyz_c = xyz_sampled.detach().cpu()
         # fig = px.scatter_3d(x=xyz_c[:64, :, 0].flatten(), y=xyz_c[:64, :, 1].flatten(), z=xyz_c[:64, :, 2].flatten())
         # fig.show()
@@ -583,11 +590,14 @@ class TensorBase(torch.nn.Module):
         # app stands for appearance
         app_mask = weight > self.rayMarch_weight_thres
         rgb_app_mask = app_mask[:, :, None, None].repeat(1, 1, self.bundle_size, self.bundle_size)
+        bundle_weight = weight[..., None, None].repeat(1, 1, self.bundle_size, self.bundle_size)
+        bundle_size_w = z_vals / focal * (self.bundle_size-1)
 
         if app_mask.any():
             app_features = self.compute_appfeature(xyz_sampled[app_mask])
             if self.shadingMode == 'BundleMLP_Fea_Grid':
-                valid_rgbs, rel_density_grid_feature = self.renderModule(xyz_sampled[app_mask], viewdirs[app_mask], app_features)
+                # bundle_size_w: (N, 1)
+                valid_rgbs, rel_density_grid_feature = self.renderModule(xyz_sampled[app_mask], viewdirs[app_mask], app_features, bundle_size_w[app_mask][:, None], rays_up[app_mask])
 
                 # [N_rays, N_samples, bundle_size, bundle_size]
                 # bundle_sigma = sigma[..., None, None].repeat(1, 1, self.bundle_size, self.bundle_size)
@@ -605,17 +615,14 @@ class TensorBase(torch.nn.Module):
                 # ic(bundle_weight[app_mask][:10], rel_density_grid[:10], rel_density, extra)
 
                 # reshape to align with how raw2alpha expects
-                bundle_sigma = bundle_sigma.permute(0, 2, 3, 1).reshape(-1, N_samples)
-                bundle_dists = dists.reshape(-1, 1, N_samples).repeat(1, self.bundle_size**2, 1).reshape(-1, N_samples)
+                bundle_sigma = bundle_sigma.permute(0, 2, 3, 1).reshape(-1, n_samples)
+                bundle_dists = dists.reshape(-1, 1, n_samples).repeat(1, self.bundle_size**2, 1).reshape(-1, n_samples)
                 _, bundle_weight, _ = raw2alpha(bundle_sigma, bundle_dists * self.distance_scale)
                 # reshape back to original
-                bundle_weight = bundle_weight.reshape(-1, self.bundle_size, self.bundle_size, N_samples).permute(0, 3, 1, 2)
+                bundle_weight = bundle_weight.reshape(-1, self.bundle_size, self.bundle_size, n_samples).permute(0, 3, 1, 2)
             else:
                 valid_rgbs = self.renderModule(xyz_sampled[app_mask], viewdirs[app_mask], app_features)
-                bundle_weight = weight[..., None, None]
             rgb[rgb_app_mask] = valid_rgbs.reshape(-1, 3)
-        else:
-            bundle_weight = weight[..., None, None]
 
         acc_map = torch.sum(bundle_weight, 1)
         rgb_map = torch.sum(bundle_weight[..., None] * rgb, 1)
@@ -632,7 +639,30 @@ class TensorBase(torch.nn.Module):
             bundle_z_vals = z_vals[..., None, None].repeat(1, 1, self.bundle_size, self.bundle_size)
             bundle_rays_chunk = rays_chunk[:, None, None, :].repeat(1, self.bundle_size, self.bundle_size, 1)
             depth_map = torch.sum(bundle_weight * bundle_z_vals, 1)
+            # (N, bundle_size, bundle_size)
             depth_map = depth_map + (1. - acc_map) * bundle_rays_chunk[..., -1]
 
-        return rgb_map, depth_map # rgb, sigma, alpha, weight, bg_weight
+            # Compute normal map
+            if self.bundle_size == 3:
+                f_blur = torch.tensor([1, 2, 1], device=depth_map.device) / 4
+                f_edge = torch.tensor([-1, 0, 1], device=depth_map.device) / 2
+                dy = (depth_map * (f_blur[None, :] * f_edge[:, None]).reshape(1, 3, 3)).sum(1).sum(1)
+                dx = (depth_map * (f_blur[:, None] * f_edge[None, :]).reshape(1, 3, 3)).sum(1).sum(1)
+
+                dx = dx * focal * 2 / depth_map[..., self.bundle_size//2, self.bundle_size//2]
+                dy = dy * focal * 2 / depth_map[..., self.bundle_size//2, self.bundle_size//2]
+                inv_denom = 1 / torch.sqrt(1 + dx**2 + dy**2)
+                # (N, 3)
+                normal_map = torch.stack([dx * inv_denom, -dy * inv_denom, inv_denom], -1)
+            else:
+                normal_map = None
+            """
+
+            # reflected vector: r = d - 2(d*n)n
+            # d = (0, 0, 1) relative to the normal
+
+            r_valid_rgbs = self.reflectionModule(xyz_sampled[app_mask], viewdirs[app_mask], app_features)
+            """
+
+        return rgb_map, depth_map, normal_map, acc_map
 

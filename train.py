@@ -130,14 +130,16 @@ def render_test(args):
         print(f'======> {args.expname} train all psnr: {np.mean(PSNRs_test)} <========================')
 
     if args.render_test:
-        os.makedirs(f'{logfolder}/{args.expname}/imgs_test_all', exist_ok=True)
-        evaluation(test_dataset,tensorf, args, renderer, f'{logfolder}/{args.expname}/imgs_test_all/',
+        folder = f'{logfolder}/imgs_test_all'
+        os.makedirs(folder, exist_ok=True)
+        print(f"Saving test to {folder}")
+        evaluation(test_dataset,tensorf, args, renderer, folder,
                    N_vis=-1, N_samples=-1, white_bg = white_bg, ndc_ray=ndc_ray,device=device,
                    bundle_size=args.bundle_size, render_mode=args.render_mode)
 
     if args.render_path:
         c2ws = test_dataset.render_path
-        os.makedirs(f'{logfolder}/{args.expname}/imgs_path_all', exist_ok=True)
+        os.makedirs(f'{logfolder}/imgs_path_all', exist_ok=True)
         evaluation_path(test_dataset,tensorf, c2ws, renderer, f'{logfolder}/{args.expname}/imgs_path_all/',
                         N_vis=-1, N_samples=-1, white_bg = white_bg, ndc_ray=ndc_ray,device=device,
                         bundle_size=args.bundle_size, render_mode=args.render_mode)
@@ -238,6 +240,7 @@ def reconstruction(args):
     allrgbs = allrgbs.to(device)
     allrays = allrays.to(device)
     pbar = tqdm(range(args.n_iters), miniters=args.progress_refresh_rate, file=sys.stdout)
+    focal = (train_dataset.focal[0] if ndc_ray else train_dataset.focal) / train_dataset.img_wh[0]
     for iteration in pbar:
 
 
@@ -251,8 +254,9 @@ def reconstruction(args):
         rays_train, rgb_train = allrays[ray_idx], allrgbs[rgb_idx].reshape(-1, args.bundle_size, args.bundle_size, 3)
 
         #rgb_map, alphas_map, depth_map, weights, uncertainty
-        rgb_map, alphas_map, depth_map, weights, uncertainty = renderer(rays_train, tensorf, chunk=args.batch_size,
-                                N_samples=nSamples, white_bg = white_bg, ndc_ray=ndc_ray, device=device, is_train=True)
+        rgb_map, alphas_map, depth_map, weights, uncertainty, normal_map = renderer(
+            rays_train, tensorf, focal=focal, chunk=args.batch_size,
+            N_samples=nSamples, white_bg = white_bg, ndc_ray=ndc_ray, device=device, is_train=True)
 
         # loss = torch.mean((rgb_map[:, 1, 1] - rgb_train[:, 1, 1]) ** 2)
         loss = torch.mean((rgb_map - rgb_train) ** 2)

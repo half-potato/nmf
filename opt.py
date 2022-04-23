@@ -91,11 +91,11 @@ def config_parser(cmd=None):
 
     parser.add_argument("--ckpt", type=str, default=None,
                         help='specific weights npy file to reload for coarse network')
-    parser.add_argument("--render_only", type=int, default=0)
-    parser.add_argument("--render_test", type=int, default=0)
-    parser.add_argument("--render_train", type=int, default=0)
-    parser.add_argument("--render_path", type=int, default=0)
-    parser.add_argument("--export_mesh", type=int, default=0)
+    parser.add_argument("--render_only", action='store_true')
+    parser.add_argument("--render_test", action='store_true')
+    parser.add_argument("--render_train", action='store_true')
+    parser.add_argument("--render_path", action='store_true')
+    parser.add_argument("--export_mesh", action='store_true')
 
     # rendering options
     parser.add_argument('--lindisp', default=False, action="store_true",
