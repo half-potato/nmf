@@ -16,7 +16,7 @@ def raw2alpha(sigma, dist):
     T = torch.cumprod(torch.cat([
         torch.ones(alpha.shape[0], 1, device=alpha.device),
         1. - alpha + 1e-10
-    ], -1), -1)
+    ], dim=-1), dim=-1)
 
     weights = alpha * T[:, :-1]  # [N_rays, N_samples]
     return alpha, weights, T[:,-1:]
@@ -391,16 +391,18 @@ class TensorBase(torch.nn.Module):
 
         # sigma.shape: (N, N_samples)
         sigma = torch.zeros(xyz_sampled.shape[:-1], device=xyz_sampled.device)
+        normal = torch.zeros(xyz_sampled.shape, device=xyz_sampled.device)
         all_sigma_feature = torch.zeros(xyz_sampled.shape[:-1], device=xyz_sampled.device)
         rgb = torch.zeros((*xyz_sampled.shape[:2], self.bundle_size, self.bundle_size, 3), device=xyz_sampled.device)
 
         if ray_valid.any():
             xyz_sampled = self.normalize_coord(xyz_sampled)
-            sigma_feature = self.compute_densityfeature(xyz_sampled[ray_valid])
+            sigma_feature, normal_feature = self.compute_density_norm(xyz_sampled[ray_valid])
 
             validsigma = self.feature2density(sigma_feature)
             all_sigma_feature[ray_valid] = sigma_feature
             sigma[ray_valid] = validsigma
+            normal[ray_valid] = normal_feature
 
         # xyz_c = xyz_sampled.detach().cpu()
         # fig = px.scatter_3d(x=xyz_c[:64, :, 0].flatten(), y=xyz_c[:64, :, 1].flatten(), z=xyz_c[:64, :, 2].flatten(), color=sigma.detach().cpu()[:64].flatten())
@@ -417,11 +419,15 @@ class TensorBase(torch.nn.Module):
         bundle_weight = weight[..., None, None].repeat(1, 1, self.bundle_size, self.bundle_size)
         bundle_size_w = z_vals / focal * (self.bundle_size-1)
 
+        normal_map = torch.sum(weight[..., None] * normal, 1)
+        world_normal = normal_map
+        refdirs = viewdirs - 2 * (viewdirs * world_normal[:, None]).sum(-1, keepdim=True) * world_normal[:, None]
+
         if app_mask.any():
             app_features = self.compute_appfeature(xyz_sampled[app_mask])
             if self.has_grid:
                 # bundle_size_w: (N, 1)
-                valid_rgbs, rel_density_grid_feature, roughness = self.renderModule(xyz_sampled[app_mask], viewdirs[app_mask], app_features, bundle_size_w[app_mask][:, None], rays_up[app_mask])
+                valid_rgbs, rel_density_grid_feature, roughness = self.renderModule(xyz_sampled[app_mask], refdirs[app_mask], app_features, bundle_size_w[app_mask][:, None], rays_up[app_mask])
 
                 # [N_rays, N_samples, bundle_size, bundle_size]
                 # bundle_sigma = sigma[..., None, None].repeat(1, 1, self.bundle_size, self.bundle_size)
@@ -457,17 +463,18 @@ class TensorBase(torch.nn.Module):
         # (N, bundle_size, bundle_size)
         depth_map = depth_map + (1. - acc_map) * bundle_rays_chunk[..., -1]
 
-        normal_map = self.compute_normal(depth_map, focal)
+        # normal_map = self.compute_normal(depth_map, focal)
 
         inds = bundle_weight[:, :, self.bundle_size//2, self.bundle_size//2].max(dim=1).indices
         xyz = xyz_sampled[range(xyz_sampled.shape[0]), inds]#.cpu().numpy()
         # ref_mask = reflectivity > 0.1
-        if self.enable_reflection and self.bundle_size == 3 and app_mask.any():
+        if self.enable_reflection and self.bundle_size == 3 and app_mask.any() and False:
 
             # project normal map from camera space to world space
-            z_basis = -torch.cross(-viewdirs[:, 0], rays_up[:, 0])
+            # z_basis = -torch.cross(-viewdirs[:, 0], rays_up[:, 0])
             # world_normal.shape: (N, 3)
-            world_normal = normal_map[..., 0:1] * z_basis + normal_map[..., 1:2] * rays_up[:, 0] + normal_map[..., 2:3] * -viewdirs[:, 0]
+            # world_normal = normal_map[..., 0:1] * z_basis + normal_map[..., 1:2] * rays_up[:, 0] + normal_map[..., 2:3] * -viewdirs[:, 0]
+            world_normal = normal_map
             # world_normal = -viewdirs[:, 0]
             # world_normal = normal_map
             # world_normal = rays_up[:, 0]

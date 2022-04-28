@@ -1,5 +1,5 @@
+from tkinter import W
 from .tensorBase import *
-
 
 class TensorVM(TensorBase):
     def __init__(self, aabb, gridSize, device, **kargs):
@@ -141,6 +141,9 @@ class TensorVM(TensorBase):
 class TensorVMSplit(TensorBase):
     def __init__(self, aabb, gridSize, device, **kargs):
         super(TensorVMSplit, self).__init__(aabb, gridSize, device, **kargs)
+        # self.f_blur = torch.tensor([1, 2, 1], device=device) / 4
+        self.f_blur = torch.tensor([0, 1, 0], device=device)
+        self.f_edge = torch.tensor([-1, 0, 1], device=device) / 2
 
 
     def init_svd_volume(self, res, device):
@@ -222,6 +225,102 @@ class TensorVMSplit(TensorBase):
             sigma_feature = sigma_feature + torch.sum(plane_coef_point * line_coef_point, dim=0)
 
         return sigma_feature
+
+    def compute_density_norm(self, xyz_sampled):
+
+        # plane + line basis
+        normal_feature = torch.zeros((xyz_sampled.shape[0], 3), device=xyz_sampled.device)
+
+        dy_filter = (self.f_blur[None, :] * self.f_edge[:, None]).reshape(1, 1, 3, 3)#.expand(1, self.density_n_comp[0], 3, 3)
+        dx_filter = dy_filter.permute(0, 1, 3, 2)
+        dz_filter = self.f_edge.reshape(1, 1, 3)#.expand(1, self.density_n_comp[0], 3)
+
+        coordinate_plane = torch.stack((xyz_sampled[..., self.matMode[0]], xyz_sampled[..., self.matMode[1]], xyz_sampled[..., self.matMode[2]])).detach().view(3, -1, 1, 2)
+        coordinate_line = torch.stack((xyz_sampled[..., self.vecMode[0]], xyz_sampled[..., self.vecMode[1]], xyz_sampled[..., self.vecMode[2]]))
+        coordinate_line = torch.stack((torch.zeros_like(coordinate_line), coordinate_line), dim=-1).detach().view(3, -1, 1, 2)
+
+        sigma_feature = torch.zeros((xyz_sampled.shape[0],), device=xyz_sampled.device)
+        for idx_plane in range(len(self.density_plane)):
+            plane_coef_point = F.grid_sample(self.density_plane[idx_plane], coordinate_plane[[idx_plane]],
+                                                align_corners=True).view(-1, *xyz_sampled.shape[:1])
+            line_coef_point = F.grid_sample(self.density_line[idx_plane], coordinate_line[[idx_plane]],
+                                            align_corners=True).view(-1, *xyz_sampled.shape[:1])
+            sigma_feature = sigma_feature + torch.sum(plane_coef_point * line_coef_point, dim=0)
+
+            plane = (self.density_plane[idx_plane]).permute(1, 0, 2, 3)
+            line = (self.density_line[idx_plane]).permute(1, 0, 2, 3)
+            dx_plane = F.conv2d(plane, dx_filter, stride=1, padding=1).permute(1, 0, 2, 3)
+            dy_plane = F.conv2d(plane, dy_filter, stride=1, padding=1).permute(1, 0, 2, 3)
+            dz_line = F.conv1d(line.squeeze(-1), dz_filter, stride=1, padding=1).unsqueeze(-1).permute(1, 0, 2, 3)
+
+            dx_point = F.grid_sample(dx_plane, coordinate_plane[[idx_plane]],
+                                     align_corners=True).view(-1, *xyz_sampled.shape[:1])
+            dy_point = F.grid_sample(dy_plane, coordinate_plane[[idx_plane]],
+                                     align_corners=True).view(-1, *xyz_sampled.shape[:1])
+            dz_point = F.grid_sample(dz_line, coordinate_line[[idx_plane]],
+                                     align_corners=True).view(-1, *xyz_sampled.shape[:1])
+            # orient based on mat mode
+            normal_feature[:, self.matMode[idx_plane][0]] += (F.relu(line_coef_point)*dx_point).sum(dim=0)
+            normal_feature[:, self.matMode[idx_plane][1]] += (F.relu(line_coef_point)*dy_point).sum(dim=0)
+            normal_feature[:, self.vecMode[idx_plane]] += (F.relu(plane_coef_point)*dz_point).sum(dim=0)
+
+        normal_feature = normal_feature / (torch.norm(normal_feature, dim=1, keepdim=True)+1e-6)
+
+        return sigma_feature, normal_feature
+
+    def compute_normalfeature(self, xyz_sampled, activation_fn, sigma):
+        # plane + line basis
+        coordinate_plane = torch.stack((xyz_sampled[..., self.matMode[0]], xyz_sampled[..., self.matMode[1]], xyz_sampled[..., self.matMode[2]])).detach().view(3, -1, 1, 2)
+        coordinate_line = torch.stack((xyz_sampled[..., self.vecMode[0]], xyz_sampled[..., self.vecMode[1]], xyz_sampled[..., self.vecMode[2]]))
+        coordinate_line = torch.stack((torch.zeros_like(coordinate_line), coordinate_line), dim=-1).detach().view(3, -1, 1, 2)
+
+        normal_feature = torch.zeros((xyz_sampled.shape[0], 3), device=xyz_sampled.device)
+
+        dy_filter = (self.f_blur[None, :] * self.f_edge[:, None]).reshape(1, 1, 3, 3)#.expand(1, self.density_n_comp[0], 3, 3)
+        dx_filter = dy_filter.permute(0, 1, 3, 2)
+        dz_filter = self.f_edge.reshape(1, 1, 3)#.expand(1, self.density_n_comp[0], 3)
+        exp_sigma = torch.exp(sigma)
+        for idx_plane in range(len(self.density_plane)):
+        # for idx_plane in [0]:
+            plane_coef_point = F.grid_sample(self.density_plane[idx_plane], coordinate_plane[[idx_plane]],
+                                                align_corners=True).view(-1, *xyz_sampled.shape[:1])
+            line_coef_point = F.grid_sample(self.density_line[idx_plane], coordinate_line[[idx_plane]],
+                                            align_corners=True).view(-1, *xyz_sampled.shape[:1])
+
+            coef_point = F.relu(plane_coef_point * line_coef_point)
+            # coef_point /= coef_point.sum(dim=0, keepdim=True)
+
+            # plane = activation_fn(self.density_plane[idx_plane]).permute(1, 0, 2, 3)
+            # line = activation_fn(self.density_line[idx_plane]).permute(1, 0, 2, 3)
+            plane = (self.density_plane[idx_plane]).permute(1, 0, 2, 3)
+            line = (self.density_line[idx_plane]).permute(1, 0, 2, 3)
+            dx_plane = F.conv2d(plane, dx_filter, stride=1, padding=1).permute(1, 0, 2, 3)
+            dy_plane = F.conv2d(plane, dy_filter, stride=1, padding=1).permute(1, 0, 2, 3)
+            dz_line = F.conv1d(line.squeeze(-1), dz_filter, stride=1, padding=1).unsqueeze(-1).permute(1, 0, 2, 3)
+            # import matplotlib.pyplot as plt
+            # for i in range(self.density_n_comp[0]):
+            #     plt.imshow(self.density_plane[idx_plane][0, i].detach().cpu().numpy().squeeze())
+            #     plt.figure()
+            #     plt.imshow(dx_plane[0, i].detach().cpu().numpy().squeeze())
+            #     # plt.figure()
+            #     # plt.imshow(line[0, i, :].expand(-1, 128).detach().cpu().numpy().squeeze())
+            #     # plt.figure()
+            #     # plt.imshow(dz_line[0, i, :].expand(-1, 128).detach().cpu().numpy().squeeze())
+            #     plt.show()
+
+            dx_point = F.grid_sample(dx_plane, coordinate_plane[[idx_plane]],
+                                     align_corners=True).view(-1, *xyz_sampled.shape[:1])
+            dy_point = F.grid_sample(dy_plane, coordinate_plane[[idx_plane]],
+                                     align_corners=True).view(-1, *xyz_sampled.shape[:1])
+            dz_point = F.grid_sample(dz_line, coordinate_line[[idx_plane]],
+                                     align_corners=True).view(-1, *xyz_sampled.shape[:1])
+            # orient based on mat mode
+            normal_feature[:, self.matMode[idx_plane][0]] += (F.relu(line_coef_point)*dx_point).sum(dim=0)
+            normal_feature[:, self.matMode[idx_plane][1]] += (F.relu(line_coef_point)*dy_point).sum(dim=0)
+            normal_feature[:, self.vecMode[idx_plane]] += (F.relu(plane_coef_point)*dz_point).sum(dim=0)
+
+        normal_feature /= (torch.norm(normal_feature, dim=1, keepdim=True)+1e-6)
+        return normal_feature
 
 
     def compute_appfeature(self, xyz_sampled):

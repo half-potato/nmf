@@ -273,7 +273,6 @@ def reconstruction(args):
 
         # loss
         total_loss = loss
-        """
         if Ortho_reg_weight > 0:
             loss_reg = tensorf.vector_comp_diffs()
             total_loss += Ortho_reg_weight*loss_reg
@@ -293,7 +292,6 @@ def reconstruction(args):
             loss_tv = loss_tv + tensorf.TV_loss_app(tvreg)*TV_weight_app
             total_loss = total_loss + loss_tv
             summary_writer.add_scalar('train/reg_tv_app', loss_tv.detach().item(), global_step=iteration)
-        """
 
         optimizer.zero_grad()
         total_loss.backward()
