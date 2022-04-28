@@ -49,7 +49,7 @@ class BlenderDataset(Dataset):
 
         # ray directions for all pixels, same for all images (same H, W, focal)
         self.directions = get_ray_directions(h, w, [self.focal,self.focal])  # (h, w, 3)
-        self.rays_up = torch.stack([
+        self.rays_up = -torch.stack([
             torch.zeros_like(self.directions[..., 0]),
             self.directions[..., 2],
             -self.directions[..., 1],

@@ -1,16 +1,19 @@
 
 dataset_name = blender
 datadir = /data/nerf_synthetic/lego
-expname =  tensorf_lego_VM_bundle
+expname =  ref_tensorf_lego_VM_bundle
 basedir = ./log
 
 n_iters = 30000
+#n_iters = 5000
 batch_size = 4096
 bundle_size = 3
 #render_mode = decimate
 render_mode = center
+density_grid_dims = 8
 
-featureC = 128
+featureC = 196
+#featureC = 128
 N_voxel_init = 2097156 # 128**3
 N_voxel_final = 27000000 # 300**3
 upsamp_list = [2000,3000,4000,5500,7000]

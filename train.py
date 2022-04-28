@@ -19,6 +19,8 @@ import time
 
 import matplotlib.pyplot as plt
 
+from torch.profiler import profile, record_function, ProfilerActivity
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 renderer = OctreeRender_trilinear_fast
@@ -194,7 +196,7 @@ def reconstruction(args):
                     density_n_comp=n_lamb_sigma, appearance_n_comp=n_lamb_sh, app_dim=args.data_dim_color, near_far=near_far,
                     shadingMode=args.shadingMode, alphaMask_thres=args.alpha_mask_thre, density_shift=args.density_shift, distance_scale=args.distance_scale,
                     pos_pe=args.pos_pe, view_pe=args.view_pe, fea_pe=args.fea_pe, featureC=args.featureC, step_ratio=args.step_ratio,
-                    fea2denseAct=args.fea2denseAct, bundle_size=args.bundle_size)
+                    fea2denseAct=args.fea2denseAct, bundle_size=args.bundle_size, density_grid_dims=args.density_grid_dims)
 
 
     grad_vars = tensorf.get_optparam_groups(args.lr_init, args.lr_basis)
@@ -241,6 +243,9 @@ def reconstruction(args):
     allrays = allrays.to(device)
     pbar = tqdm(range(args.n_iters), miniters=args.progress_refresh_rate, file=sys.stdout)
     focal = (train_dataset.focal[0] if ndc_ray else train_dataset.focal) / train_dataset.img_wh[0]
+    # with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], with_stack=True) as prof:
+    N = 0
+    bundle_psnrs = 0
     for iteration in pbar:
 
 
@@ -260,10 +265,15 @@ def reconstruction(args):
 
         # loss = torch.mean((rgb_map[:, 1, 1] - rgb_train[:, 1, 1]) ** 2)
         loss = torch.mean((rgb_map - rgb_train) ** 2)
+        diff = (rgb_map - rgb_train) ** 2
+        bundle_loss = diff.permute(0, 3, 1, 2).reshape(-1, 3, 3).mean(dim=0)
+        bundle_psnr = -10.0 * torch.log(bundle_loss) / np.log(10.0)
+        bundle_psnrs += bundle_psnr.detach().cpu()
 
 
         # loss
         total_loss = loss
+        """
         if Ortho_reg_weight > 0:
             loss_reg = tensorf.vector_comp_diffs()
             total_loss += Ortho_reg_weight*loss_reg
@@ -283,6 +293,7 @@ def reconstruction(args):
             loss_tv = loss_tv + tensorf.TV_loss_app(tvreg)*TV_weight_app
             total_loss = total_loss + loss_tv
             summary_writer.add_scalar('train/reg_tv_app', loss_tv.detach().item(), global_step=iteration)
+        """
 
         optimizer.zero_grad()
         total_loss.backward()
@@ -300,13 +311,20 @@ def reconstruction(args):
 
         # Print the current values of the losses.
         if iteration % args.progress_refresh_rate == 0:
+            bundle_psnrs = bundle_psnrs / args.progress_refresh_rate
+            center_psnr = bundle_psnrs[1, 1].clone().item()
+            bundle_psnrs[1, 1] = 0
+            surround_psnr = bundle_psnrs.sum().item() / 8
             pbar.set_description(
                 f'Iteration {iteration:05d}:'
                 + f' train_psnr = {float(np.mean(PSNRs)):.2f}'
                 + f' test_psnr = {float(np.mean(PSNRs_test)):.2f}'
+                + f' center_psnr = {center_psnr:.2f}'
+                + f' surround_psnr = {surround_psnr:.2f}'
                 + f' mse = {loss:.6f}'
             )
             PSNRs = []
+            bundle_psnrs = 0
 
 
         if iteration % args.vis_every == args.vis_every - 1 and args.N_vis!=0:
@@ -314,6 +332,7 @@ def reconstruction(args):
                                     prtx=f'{iteration:06d}_', N_samples=nSamples, white_bg = white_bg, ndc_ray=ndc_ray,
                                     compute_extra_metrics=False, bundle_size=args.bundle_size, render_mode=args.render_mode)
             summary_writer.add_scalar('test/psnr', np.mean(PSNRs_test), global_step=iteration)
+            tensorf.save(f'{logfolder}/{args.expname}_{iteration}.th')
 
 
 
@@ -351,6 +370,7 @@ def reconstruction(args):
                 lr_scale = args.lr_decay_target_ratio ** (iteration / args.n_iters)
             grad_vars = tensorf.get_optparam_groups(args.lr_init*lr_scale, args.lr_basis*lr_scale)
             optimizer = torch.optim.Adam(grad_vars, betas=(0.9, 0.99))
+    # prof.export_chrome_trace('trace.json')
         
 
     tensorf.save(f'{logfolder}/{args.expname}.th')
@@ -396,4 +416,5 @@ if __name__ == '__main__':
         render_test(args)
     else:
         reconstruction(args)
+        # reconstruction(args)
 

@@ -19,6 +19,8 @@ class TensorVM(TensorBase):
                          {'params': self.basis_mat.parameters(), 'lr':lr_init_network}]
         if isinstance(self.renderModule, torch.nn.Module):
             grad_vars += [{'params':self.renderModule.parameters(), 'lr':lr_init_network}]
+        if hasattr(self, 'reflectionModule') and isinstance(self.reflectionModule, torch.nn.Module):
+            grad_vars += [{'params':self.reflectionModule.parameters(), 'lr':lr_init_network}]
         return grad_vars
 
     def compute_features(self, xyz_sampled):
@@ -167,6 +169,8 @@ class TensorVMSplit(TensorBase):
                          {'params': self.basis_mat.parameters(), 'lr':lr_init_network}]
         if isinstance(self.renderModule, torch.nn.Module):
             grad_vars += [{'params':self.renderModule.parameters(), 'lr':lr_init_network}]
+        if hasattr(self, 'reflectionModule') and isinstance(self.reflectionModule, torch.nn.Module):
+            grad_vars += [{'params':self.reflectionModule.parameters(), 'lr':lr_init_network}]
         return grad_vars
 
 
@@ -329,6 +333,8 @@ class TensorCP(TensorBase):
                      {'params': self.basis_mat.parameters(), 'lr':lr_init_network}]
         if isinstance(self.renderModule, torch.nn.Module):
             grad_vars += [{'params':self.renderModule.parameters(), 'lr':lr_init_network}]
+        if hasattr(self, 'reflectionModule') and isinstance(self.reflectionModule, torch.nn.Module):
+            grad_vars += [{'params':self.reflectionModule.parameters(), 'lr':lr_init_network}]
         return grad_vars
 
     def compute_densityfeature(self, xyz_sampled):

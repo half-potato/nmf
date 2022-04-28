@@ -5,6 +5,7 @@ def config_parser(cmd=None):
     # custom params
     parser.add_argument('--filter_rays', action='store_true')
     parser.add_argument('--bundle_size', type=int, default=1)
+    parser.add_argument('--density_grid_dims', type=int, default=9)
     parser.add_argument('--render_mode', type=str, default='mean')
 
     parser.add_argument('--config', is_config_file=True,

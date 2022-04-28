@@ -8,26 +8,30 @@ from dataLoader.ray_utils import ndc_rays_blender
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
 from icecream import ic
+import plotly.express as px
+import plotly.graph_objects as go
 
 def OctreeRender_trilinear_fast(rays, tensorf, focal, chunk=4096, N_samples=-1, ndc_ray=False, white_bg=True, is_train=False, device='cuda'):
 
     rgbs, alphas, depth_maps, normal_maps, uncertainties = [], [], [], [], []
+    points = []
     N_rays_all = rays.shape[0]
     for chunk_idx in range(N_rays_all // chunk + int(N_rays_all % chunk > 0)):
         rays_chunk = rays[chunk_idx * chunk:(chunk_idx + 1) * chunk]#.to(device)
     
-        rgb_map, depth_map, normal_map, acc_map = tensorf(rays_chunk, focal, is_train=is_train, white_bg=white_bg, ndc_ray=ndc_ray, N_samples=N_samples)
+        rgb_map, depth_map, normal_map, acc_map, point = tensorf(rays_chunk, focal, is_train=is_train, white_bg=white_bg, ndc_ray=ndc_ray, N_samples=N_samples)
 
         rgbs.append(rgb_map)
         depth_maps.append(depth_map)
         normal_maps.append(normal_map)
+        points.append(point)
         alphas.append(acc_map)
     
     normal_maps = torch.cat(normal_maps) if normal_maps[0] is not None else None
-    return torch.cat(rgbs), torch.cat(alphas), torch.cat(depth_maps), None, None, normal_maps
+    return torch.cat(rgbs), torch.cat(alphas), torch.cat(depth_maps), torch.cat(points), None, normal_maps
 
 class BundleRender:
-    def __init__(self, base_renderer, render_mode, bundle_size, H, W, focal, scale_normal=False):
+    def __init__(self, base_renderer, render_mode, bundle_size, H, W, focal, chunk=2*4096, scale_normal=False):
         self.render_mode = render_mode
         self.base_renderer = base_renderer
         self.bundle_size = bundle_size
@@ -35,15 +39,17 @@ class BundleRender:
         self.W = W
         self.scale_normal = scale_normal
         self.focal = focal
+        self.chunk = chunk
 
     def __call__(self, rays, tensorf, chunk=4096, N_samples=-1, ndc_ray=False, white_bg=True, is_train=False, device='cuda'):
         height, width = self.H, self.W
+        ray_dim = rays.shape[-1]
         if self.render_mode == 'decimate':
-            rays = rays.reshape(self.H, self.W, 6)
+            rays = rays.reshape(self.H, self.W, ray_dim)
             rays = rays[::self.bundle_size, ::self.bundle_size]
             height = rays.shape[0]
             width = rays.shape[1]
-            rays = rays.reshape(-1, 6)
+            rays = rays.reshape(-1, ray_dim)
             fH = height * self.bundle_size
             fW = width * self.bundle_size
         else:
@@ -51,9 +57,11 @@ class BundleRender:
             fW = width
         num_rays = height * width
 
-        rgb_map, acc_map, depth_map, _, _, normal_map = self.base_renderer(rays, tensorf, focal=self.focal, chunk=4096, N_samples=N_samples,
+        rgb_map, acc_map, depth_map, points, _, normal_map = self.base_renderer(rays, tensorf, focal=self.focal, chunk=self.chunk, N_samples=N_samples,
                                         ndc_ray=ndc_ray, white_bg = white_bg, device=device)
         if self.render_mode == 'decimate':
+            # plt.imshow(normal_map.reshape(height, width, 3).cpu())
+            # plt.figure()
             normal_map = None
 
         def reshape(val_map):
@@ -74,27 +82,13 @@ class BundleRender:
 
         rgb_map, depth_map, acc_map = reshape(rgb_map).cpu(), depth_map.cpu(), reshape(acc_map).cpu()
         rgb_map = rgb_map.clamp(0.0, 1.0)
-        normal_map = normal_map.reshape(height, width, 3).cpu() if normal_map is not None else None
-
-        # scale depth to be isotropic
-        if self.scale_normal:
-            mask = ~torch.isnan(depth_map)
-            x, y = torch.meshgrid(
-                torch.arange(depth_map.shape[1]), torch.arange(depth_map.shape[0]), indexing='xy')
-            x = x.float()
-            y = y.float()
-            xy_var = (torch.var(x[mask]) + torch.var(y[mask])) / 2
-            z_var = torch.var(depth_map[mask])
-            scaling = torch.sqrt(xy_var / z_var)
-        else:
-            scaling = 1
+        normal_map = normal_map.reshape(height, width, 3).cpu() if normal_map is not None else depth_to_normals(depth_map, self.focal)
 
         # normal_map = acc_map * normal_map + (1-acc_map) * 0
         # plt.imshow(normal_map/2+0.5)
         # plt.figure()
 
-        # normal_map = depth_to_normals(depth_map, self.focal) if normal_map is None else normal_map
-        normal_map = depth_to_normals(depth_map, self.focal)
+        # normal_map = depth_to_normals(depth_map, self.focal)
         normal_map = acc_map * normal_map + (1-acc_map) * 0
         # plt.imshow(depth_map)
         # plt.figure()
@@ -102,6 +96,22 @@ class BundleRender:
         # plt.figure()
         # plt.imshow(normal_map/2+0.5)
         # plt.show()
+        # points = points.cpu()
+        # ic(points.shape, acc_map.shape)
+        # mask = acc_map.flatten() > 0.1
+        # fig = go.Figure(data=go.Cone(
+        #     x=points[mask, 0],
+        #     y=points[mask, 1],
+        #     z=points[mask, 2],
+        #     # u=normal_map.reshape(-1, 3)[mask, 0],
+        #     # v=normal_map.reshape(-1, 3)[mask, 2],
+        #     # w=normal_map.reshape(-1, 3)[mask, 1],
+        #     u=normal_map.reshape(-1, 3)[mask, 0],
+        #     v=normal_map.reshape(-1, 3)[mask, 1],
+        #     w=normal_map.reshape(-1, 3)[mask, 2],
+        # ))
+        # fig.show()
+        # assert(False)
 
         return rgb_map, depth_map, normal_map
 
@@ -141,6 +151,7 @@ def evaluation(test_dataset,tensorf, args, renderer, savePath=None, N_vis=5, prt
     W, H = test_dataset.img_wh
     focal = (test_dataset.focal[0] if ndc_ray else test_dataset.focal)
     brender = BundleRender(renderer, render_mode, bundle_size, H, W, focal)
+    print(f"Using {render_mode} render mode")
 
     for idx, samples in tqdm(enumerate(test_dataset.all_rays[0::img_eval_interval]), file=sys.stdout):
 
@@ -151,13 +162,8 @@ def evaluation(test_dataset,tensorf, args, renderer, savePath=None, N_vis=5, prt
         # rgb_map = rgb_map.clamp(0.0, 1.0)
         rgb_map, depth_map, normal_map = brender(rays, tensorf, chunk=4096, N_samples=N_samples,
                                      ndc_ray=ndc_ray, white_bg = white_bg, device=device)
+        
         normal_map = (normal_map * 127 + 128).clamp(0, 255).byte()
-        # plt.imshow(rgb_map)
-        # plt.figure()
-        # plt.imshow(normal_map)
-        # plt.figure()
-        # plt.imshow(depth_map)
-        # plt.show()
 
         depth_map, _ = visualize_depth_numpy(depth_map.numpy(),near_far)
         if len(test_dataset.all_rgbs):
@@ -165,10 +171,18 @@ def evaluation(test_dataset,tensorf, args, renderer, savePath=None, N_vis=5, prt
             loss = torch.mean((rgb_map - gt_rgb) ** 2)
             PSNRs.append(-10.0 * np.log(loss.item()) / np.log(10.0))
 
+            # fig, axs = plt.subplots(2, 2)
+            # axs[0, 0].imshow(rgb_map)
+            # axs[1, 0].imshow(gt_rgb)
+            # axs[0, 1].imshow(rgb_map-gt_rgb)
+            # axs[1, 1].imshow(normal_map)
+            # plt.show()
+
             if compute_extra_metrics:
                 ssim = rgb_ssim(rgb_map, gt_rgb, 1)
                 l_a = rgb_lpips(gt_rgb.numpy(), rgb_map.numpy(), 'alex', tensorf.device)
                 l_v = rgb_lpips(gt_rgb.numpy(), rgb_map.numpy(), 'vgg', tensorf.device)
+                # ic(PSNRs[-1], ssim)
                 ssims.append(ssim)
                 l_alex.append(l_a)
                 l_vgg.append(l_v)

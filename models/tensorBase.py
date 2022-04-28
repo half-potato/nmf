@@ -1,45 +1,26 @@
 import torch
 import torch.nn
 import torch.nn.functional as F
-from .sh import eval_sh_bases
 import numpy as np
 import time
 from icecream import ic
 
+from . import render_modules
 import plotly.express as px
-
-def positional_encoding(positions, freqs):
-    
-        freq_bands = (2**torch.arange(freqs).float()).to(positions.device)  # (F,)
-        pts = (positions[..., None] * freq_bands).reshape(
-            positions.shape[:-1] + (freqs * positions.shape[-1], ))  # (..., DF)
-        pts = torch.cat([torch.sin(pts), torch.cos(pts)], dim=-1)
-        return pts
+import plotly.graph_objects as go
 
 def raw2alpha(sigma, dist):
     # sigma, dist  [N_rays, N_samples]
     alpha = 1. - torch.exp(-sigma*dist)
 
     T = torch.cumprod(torch.cat([
-        torch.ones(alpha.shape[0], 1).to(alpha.device),
+        torch.ones(alpha.shape[0], 1, device=alpha.device),
         1. - alpha + 1e-10
     ], -1), -1)
 
     weights = alpha * T[:, :-1]  # [N_rays, N_samples]
     return alpha, weights, T[:,-1:]
 
-
-def SHRender(xyz_sampled, viewdirs, features):
-    sh_mult = eval_sh_bases(2, viewdirs)[:, None]
-    rgb_sh = features.view(-1, 3, sh_mult.shape[-1])
-    rgb = torch.relu(torch.sum(sh_mult * rgb_sh, dim=-1) + 0.5)
-    return rgb
-
-
-def RGBRender(xyz_sampled, viewdirs, features):
-
-    rgb = features
-    return rgb
 
 class AlphaGridMask(torch.nn.Module):
     def __init__(self, device, aabb, alpha_volume):
@@ -62,191 +43,12 @@ class AlphaGridMask(torch.nn.Module):
         return (xyz_sampled-self.aabb[0]) * self.invgridSize - 1
 
 
-class MLPRender_Fea(torch.nn.Module):
-    def __init__(self,inChanel, viewpe=6, feape=6, featureC=128):
-        super(MLPRender_Fea, self).__init__()
-
-        self.in_mlpC = 2*viewpe*3 + 2*feape*inChanel + 3 + inChanel
-        self.viewpe = viewpe
-        self.feape = feape
-        layer1 = torch.nn.Linear(self.in_mlpC, featureC)
-        layer2 = torch.nn.Linear(featureC, featureC)
-        layer3 = torch.nn.Linear(featureC,3)
-
-        self.mlp = torch.nn.Sequential(layer1, torch.nn.ReLU(inplace=True), layer2, torch.nn.ReLU(inplace=True), layer3)
-        torch.nn.init.constant_(self.mlp[-1].bias, 0)
-
-    def forward(self, pts, viewdirs, features):
-        indata = [features, viewdirs]
-        if self.feape > 0:
-            indata += [positional_encoding(features, self.feape)]
-        if self.viewpe > 0:
-            indata += [positional_encoding(viewdirs, self.viewpe)]
-        mlp_in = torch.cat(indata, dim=-1)
-        rgb = self.mlp(mlp_in)
-        rgb = torch.sigmoid(rgb)
-
-        return rgb
-
-class MLPRender_PE(torch.nn.Module):
-    def __init__(self,inChanel, viewpe=6, pospe=6, featureC=128):
-        super(MLPRender_PE, self).__init__()
-
-        self.in_mlpC = (3+2*viewpe*3)+ (3+2*pospe*3)  + inChanel #
-        self.viewpe = viewpe
-        self.pospe = pospe
-        layer1 = torch.nn.Linear(self.in_mlpC, featureC)
-        layer2 = torch.nn.Linear(featureC, featureC)
-        layer3 = torch.nn.Linear(featureC,3)
-
-        self.mlp = torch.nn.Sequential(layer1, torch.nn.ReLU(inplace=True), layer2, torch.nn.ReLU(inplace=True), layer3)
-        torch.nn.init.constant_(self.mlp[-1].bias, 0)
-
-    def forward(self, pts, viewdirs, features):
-        indata = [features, viewdirs]
-        if self.pospe > 0:
-            indata += [positional_encoding(pts, self.pospe)]
-        if self.viewpe > 0:
-            indata += [positional_encoding(viewdirs, self.viewpe)]
-        mlp_in = torch.cat(indata, dim=-1)
-        rgb = self.mlp(mlp_in)
-        rgb = torch.sigmoid(rgb)
-
-        return rgb
-
-class MLPRender(torch.nn.Module):
-    def __init__(self,inChanel, viewpe=6, featureC=128):
-        super(MLPRender, self).__init__()
-
-        self.in_mlpC = (3+2*viewpe*3) + inChanel
-        self.viewpe = viewpe
-        
-        layer1 = torch.nn.Linear(self.in_mlpC, featureC)
-        layer2 = torch.nn.Linear(featureC, featureC)
-        layer3 = torch.nn.Linear(featureC,3)
-
-        self.mlp = torch.nn.Sequential(layer1, torch.nn.ReLU(inplace=True), layer2, torch.nn.ReLU(inplace=True), layer3)
-        torch.nn.init.constant_(self.mlp[-1].bias, 0)
-
-    def forward(self, pts, viewdirs, features):
-        indata = [features, viewdirs]
-        if self.viewpe > 0:
-            indata += [positional_encoding(viewdirs, self.viewpe)]
-        mlp_in = torch.cat(indata, dim=-1)
-        rgb = self.mlp(mlp_in)
-        rgb = torch.sigmoid(rgb)
-
-        return rgb
-
-
-class BundleMLPRender(torch.nn.Module):
-    def __init__(self,inChanel, viewpe=6, featureC=128, bundle_size=3):
-        super(BundleMLPRender, self).__init__()
-
-        self.in_mlpC = (3+2*viewpe*3) + inChanel
-        self.viewpe = viewpe
-        self.bundle_size = bundle_size
-        
-        layer1 = torch.nn.Linear(self.in_mlpC, featureC)
-        layer2 = torch.nn.Linear(featureC, featureC)
-        layer3 = torch.nn.Linear(featureC,3*self.bundle_size**2)
-
-        self.mlp = torch.nn.Sequential(layer1, torch.nn.ReLU(inplace=True), layer2, torch.nn.ReLU(inplace=True), layer3)
-        torch.nn.init.constant_(self.mlp[-1].bias, 0)
-
-    def forward(self, pts, viewdirs, features):
-        indata = [features, viewdirs]
-        if self.viewpe > 0:
-            indata += [positional_encoding(viewdirs, self.viewpe)]
-        mlp_in = torch.cat(indata, dim=-1)
-        rgb = self.mlp(mlp_in)
-        rgb = torch.sigmoid(rgb)
-
-        return rgb.reshape(-1,self.bundle_size,self.bundle_size,3)
-
-class BundleMLPRender_Fea(torch.nn.Module):
-    def __init__(self,inChanel, viewpe=6, feape=6, featureC=128, bundle_size=3):
-        super(BundleMLPRender_Fea, self).__init__()
-
-        self.in_mlpC = 2*viewpe*3 + 2*feape*inChanel + 3 + inChanel
-        self.viewpe = viewpe
-        self.feape = feape
-        self.bundle_size = bundle_size
-        layer1 = torch.nn.Linear(self.in_mlpC, featureC)
-        layer2 = torch.nn.Linear(featureC, featureC)
-        layer3 = torch.nn.Linear(featureC,3*self.bundle_size**2)
-
-        self.mlp = torch.nn.Sequential(layer1, torch.nn.ReLU(inplace=True), layer2, torch.nn.ReLU(inplace=True), layer3)
-        torch.nn.init.constant_(self.mlp[-1].bias, 0)
-
-    def forward(self, pts, viewdirs, features):
-        indata = [features, viewdirs]
-        if self.feape > 0:
-            indata += [positional_encoding(features, self.feape)]
-        if self.viewpe > 0:
-            indata += [positional_encoding(viewdirs, self.viewpe)]
-        mlp_in = torch.cat(indata, dim=-1)
-        mlp_out = self.mlp(mlp_in)
-        rgb = torch.sigmoid(mlp_out)
-
-        return rgb.reshape(-1,self.bundle_size,self.bundle_size,3)
-
-class BundleMLPRender_Fea_Grid(torch.nn.Module):
-    def __init__(self,inChanel, viewpe=6, feape=6, featureC=128, bundle_size=3, extra=4, ray_up_pe=3):
-        super(BundleMLPRender_Fea_Grid, self).__init__()
-
-        self.in_mlpC = 2*viewpe*3 + 2*feape*inChanel + 3 + inChanel + 1 + 2*ray_up_pe*3
-        self.viewpe = viewpe
-        self.feape = feape
-        self.ray_up_pe = ray_up_pe
-        self.bundle_size = bundle_size
-        self.extra = extra
-        layer1 = torch.nn.Linear(self.in_mlpC, featureC)
-        layer2 = torch.nn.Linear(featureC, featureC)
-        layer3 = torch.nn.Linear(featureC, 3*self.bundle_size**2+self.extra)
-
-        self.mlp = torch.nn.Sequential(layer1, torch.nn.ReLU(inplace=True), layer2, torch.nn.ReLU(inplace=True), layer3)
-        torch.nn.init.constant_(self.mlp[-1].bias, 0)
-
-    def forward(self, pts, viewdirs, features, bundle_size_w, ray_up):
-        indata = [features, viewdirs, bundle_size_w]
-        if self.feape > 0:
-            indata += [positional_encoding(features, self.feape)]
-        if self.viewpe > 0:
-            indata += [positional_encoding(viewdirs, self.viewpe)]
-        if self.ray_up_pe > 0:
-            indata += [positional_encoding(ray_up, self.ray_up_pe)]
-        mlp_in = torch.cat(indata, dim=-1)
-        mlp_out = self.mlp(mlp_in)
-        m = 3*self.bundle_size**2
-        rgb = mlp_out[:, :m]
-        extra = mlp_out[:, m:]
-        rgb = torch.sigmoid(rgb)
-
-        # rel_density = torch.tanh(extra)
-        rel_density = extra
-        left_density = torch.stack([
-            rel_density[:, 0],
-            torch.zeros_like(rel_density[:, 0]),
-            rel_density[:, 1],
-        ], dim=1)
-        top_density = torch.stack([
-            rel_density[:, 2],
-            torch.zeros_like(rel_density[:, 0]),
-            rel_density[:, 3],
-        ], dim=1)
-        # (-1, bundle_size, bundle_size)
-        rel_density_grid = left_density.reshape(-1, 3, 1) + top_density.reshape(-1, 1, 3)
-
-        return rgb.reshape(-1,self.bundle_size,self.bundle_size,3), rel_density_grid
-
-
 class TensorBase(torch.nn.Module):
     def __init__(self, aabb, gridSize, device, density_n_comp = 8, appearance_n_comp = 24, app_dim = 27,
-                    shadingMode = 'MLP_PE', alphaMask = None, near_far=[2.0,6.0],
+                    shadingMode = 'MLP_PE', alphaMask = None, near_far=[2.0,6.0], enable_reflection = True,
                     density_shift = -10, alphaMask_thres=0.001, distance_scale=25, rayMarch_weight_thres=0.0001,
                     pos_pe = 6, view_pe = 6, fea_pe = 6, featureC=128, step_ratio=2.0,
-                    fea2denseAct = 'softplus', bundle_size = 3):
+                    fea2denseAct = 'softplus', bundle_size = 3, density_grid_dims=8):
         super(TensorBase, self).__init__()
 
         self.density_n_comp = density_n_comp
@@ -255,6 +57,7 @@ class TensorBase(torch.nn.Module):
         self.aabb = aabb
         self.alphaMask = alphaMask
         self.device=device
+        self.enable_reflection = enable_reflection
 
         self.density_shift = density_shift
         self.alphaMask_thres = alphaMask_thres
@@ -266,6 +69,7 @@ class TensorBase(torch.nn.Module):
         self.step_ratio = step_ratio
 
         self.bundle_size = bundle_size
+        self.density_grid_dims = density_grid_dims
 
         self.update_stepSize(gridSize)
 
@@ -273,6 +77,8 @@ class TensorBase(torch.nn.Module):
         self.vecMode =  [2, 1, 0]
         self.comp_w = [1,1,1]
 
+        self.f_blur = torch.tensor([1, 2, 1], device=device) / 4
+        self.f_edge = torch.tensor([-1, 0, 1], device=device) / 2
 
         self.init_svd_volume(gridSize[0], device)
 
@@ -280,27 +86,35 @@ class TensorBase(torch.nn.Module):
         self.init_render_func(shadingMode, pos_pe, view_pe, fea_pe, featureC, device)
 
     def init_render_func(self, shadingMode, pos_pe, view_pe, fea_pe, featureC, device):
+        self.has_grid = False
         if shadingMode == 'MLP_PE':
-            self.renderModule = MLPRender_PE(self.app_dim, view_pe, pos_pe, featureC).to(device)
+            self.renderModule = render_modules.MLPRender_PE(self.app_dim, view_pe, pos_pe, featureC).to(device)
         elif shadingMode == 'MLP_Fea':
-            self.renderModule = MLPRender_Fea(self.app_dim, view_pe, fea_pe, featureC).to(device)
+            self.renderModule = render_modules.MLPRender_Fea(self.app_dim, view_pe, fea_pe, featureC).to(device)
         elif shadingMode == 'BundleMLP_Fea':
-            self.renderModule = BundleMLPRender_Fea(self.app_dim, view_pe, fea_pe, featureC, self.bundle_size).to(device)
+            self.renderModule = render_modules.BundleMLPRender_Fea(self.app_dim, view_pe, fea_pe, featureC, self.bundle_size).to(device)
         elif shadingMode == 'MLP':
-            self.renderModule = MLPRender(self.app_dim, view_pe, featureC).to(device)
+            self.renderModule = render_modules.MLPRender(self.app_dim, view_pe, featureC).to(device)
         elif shadingMode == 'BundleMLP':
-            self.renderModule = BundleMLPRender(self.app_dim, view_pe, featureC, self.bundle_size).to(device)
+            self.renderModule = render_modules.BundleMLPRender(self.app_dim, view_pe, featureC, self.bundle_size).to(device)
         elif shadingMode == 'BundleMLP_Fea_Grid':
-            self.renderModule = BundleMLPRender_Fea_Grid(self.app_dim, view_pe, fea_pe, featureC, self.bundle_size).to(device)
+            self.renderModule = render_modules.BundleMLPRender_Fea_Grid(self.app_dim, view_pe, fea_pe, featureC, self.bundle_size, extra=self.density_grid_dims).to(device)
+            self.reflectionModule = render_modules.BundleMLPRender_Fea(self.app_dim, view_pe, fea_pe, featureC, self.bundle_size).to(device)
+            self.has_grid = True
+        elif shadingMode == 'BundleMLPSphEncGrid':
+            self.renderModule = render_modules.BundleMLPRender_Fea_Grid(self.app_dim, view_pe, fea_pe, featureC, self.bundle_size, extra=self.density_grid_dims).to(device)
+            self.reflectionModule = render_modules.BundleSphEncoding(self.app_dim, view_pe, fea_pe, featureC, self.bundle_size).to(device)
+            # self.reflectionModule = render_modules.BundleDirectSphEncoding(self.app_dim, view_pe, fea_pe, featureC, self.bundle_size).to(device)
+            self.has_grid = True
         elif shadingMode == 'SH':
-            self.renderModule = SHRender
+            self.renderModule = render_modules.SHRender
         elif shadingMode == 'RGB':
             assert self.app_dim == 3
-            self.renderModule = RGBRender
+            self.renderModule = render_modules.RGBRender
         else:
             print("Unrecognized shading module")
             exit()
-        print("pos_pe", pos_pe, "view_pe", view_pe, "fea_pe", fea_pe)
+        print("pos_pe", pos_pe, "view_pe", view_pe, "fea_pe", fea_pe, "density_grid_dims", self.density_grid_dims)
         print(self.renderModule)
 
     def update_stepSize(self, gridSize):
@@ -356,7 +170,8 @@ class TensorBase(torch.nn.Module):
             'view_pe': self.view_pe,
             'fea_pe': self.fea_pe,
             'featureC': self.featureC,
-            'bundle_size': self.bundle_size
+            'bundle_size': self.bundle_size,
+            'density_grid_dims': self.density_grid_dims,
         }
 
     def save(self, path):
@@ -376,6 +191,18 @@ class TensorBase(torch.nn.Module):
             self.alphaMask = AlphaGridMask(self.device, ckpt['alphaMask.aabb'].to(self.device), alpha_volume.float().to(self.device))
         self.load_state_dict(ckpt['state_dict'])
 
+
+    def compute_normal(self, depth_map, focal):
+        # Compute normal map
+        dy = (depth_map * (self.f_blur[None, :] * self.f_edge[:, None]).reshape(1, 3, 3)).sum(1).sum(1)
+        dx = (depth_map * (self.f_blur[:, None] * self.f_edge[None, :]).reshape(1, 3, 3)).sum(1).sum(1)
+
+        dx = dx * focal * 2 / depth_map[..., self.bundle_size//2, self.bundle_size//2]
+        dy = dy * focal * 2 / depth_map[..., self.bundle_size//2, self.bundle_size//2]
+        inv_denom = 1 / torch.sqrt(1 + dx**2 + dy**2)
+        # (N, 3)
+        normal_map = torch.stack([dx * inv_denom, -dy * inv_denom, inv_denom], -1)
+        return normal_map
 
     def sample_ray_ndc(self, rays_o, rays_d, is_train=True, N_samples=-1):
         N_samples = N_samples if N_samples > 0 else self.nSamples
@@ -398,7 +225,7 @@ class TensorBase(torch.nn.Module):
         rate_b = (self.aabb[0].to(rays_o) - rays_o) / vec
         t_min = torch.minimum(rate_a, rate_b).amax(-1).clamp(min=near, max=far)
 
-        rng = torch.arange(N_samples)[None].float()
+        rng = torch.arange(N_samples, device=rays_o.device)[None].float()
         if is_train:
             rng = rng.repeat(rays_d.shape[-2],1)
             # N, N_samples
@@ -409,7 +236,7 @@ class TensorBase(torch.nn.Module):
             r = torch.rand_like(brng[:, 0:1])
             brng = brng + r
             rng = brng.reshape(-1, N_samples)
-        step = stepsize * rng.to(rays_o.device)
+        step = stepsize * rng
         interpx = (t_min[...,None] + step)
 
         rays_pts = rays_o[...,None,:] + rays_d[...,None,:] * interpx[...,None]
@@ -549,12 +376,9 @@ class TensorBase(torch.nn.Module):
 
         viewdirs = viewdirs.view(-1, 1, 3).expand(xyz_sampled.shape)
         rays_up = rays_chunk[:, 6:9]
+        rays_o = rays_chunk[:, :3]
         rays_up = rays_up.view(-1, 1, 3).expand(xyz_sampled.shape)
         n_samples = xyz_sampled.shape[1]
-        # xyz_c = xyz_sampled.detach().cpu()
-        # fig = px.scatter_3d(x=xyz_c[:64, :, 0].flatten(), y=xyz_c[:64, :, 1].flatten(), z=xyz_c[:64, :, 2].flatten())
-        # fig.show()
-        # assert(False)
         
         if self.alphaMask is not None:
             alphas = self.alphaMask.sample_alpha(xyz_sampled[ray_valid])
@@ -595,9 +419,9 @@ class TensorBase(torch.nn.Module):
 
         if app_mask.any():
             app_features = self.compute_appfeature(xyz_sampled[app_mask])
-            if self.shadingMode == 'BundleMLP_Fea_Grid':
+            if self.has_grid:
                 # bundle_size_w: (N, 1)
-                valid_rgbs, rel_density_grid_feature = self.renderModule(xyz_sampled[app_mask], viewdirs[app_mask], app_features, bundle_size_w[app_mask][:, None], rays_up[app_mask])
+                valid_rgbs, rel_density_grid_feature, roughness = self.renderModule(xyz_sampled[app_mask], viewdirs[app_mask], app_features, bundle_size_w[app_mask][:, None], rays_up[app_mask])
 
                 # [N_rays, N_samples, bundle_size, bundle_size]
                 # bundle_sigma = sigma[..., None, None].repeat(1, 1, self.bundle_size, self.bundle_size)
@@ -625,6 +449,58 @@ class TensorBase(torch.nn.Module):
             rgb[rgb_app_mask] = valid_rgbs.reshape(-1, 3)
 
         acc_map = torch.sum(bundle_weight, 1)
+
+        # calculate depth
+        bundle_z_vals = z_vals[..., None, None].repeat(1, 1, self.bundle_size, self.bundle_size)
+        bundle_rays_chunk = rays_chunk[:, None, None, :].repeat(1, self.bundle_size, self.bundle_size, 1)
+        depth_map = torch.sum(bundle_weight * bundle_z_vals, 1)
+        # (N, bundle_size, bundle_size)
+        depth_map = depth_map + (1. - acc_map) * bundle_rays_chunk[..., -1]
+
+        normal_map = self.compute_normal(depth_map, focal)
+
+        inds = bundle_weight[:, :, self.bundle_size//2, self.bundle_size//2].max(dim=1).indices
+        xyz = xyz_sampled[range(xyz_sampled.shape[0]), inds]#.cpu().numpy()
+        # ref_mask = reflectivity > 0.1
+        if self.enable_reflection and self.bundle_size == 3 and app_mask.any():
+
+            # project normal map from camera space to world space
+            z_basis = -torch.cross(-viewdirs[:, 0], rays_up[:, 0])
+            # world_normal.shape: (N, 3)
+            world_normal = normal_map[..., 0:1] * z_basis + normal_map[..., 1:2] * rays_up[:, 0] + normal_map[..., 2:3] * -viewdirs[:, 0]
+            # world_normal = -viewdirs[:, 0]
+            # world_normal = normal_map
+            # world_normal = rays_up[:, 0]
+            # world_normal = normal_map[..., 1:2] * rays_up[:, 0]
+
+            # ic(rays_up[:, 0].max(dim=0), rays_up[:, 0].min(dim=0))
+            # ic(viewdirs[:, 0].max(dim=0), viewdirs[:, 0].min(dim=0))
+
+            # right_vec = (z_basis).cpu()
+            # up_vec = (rays_up[:, 0]).cpu()
+            # front_vec = (-viewdirs[:, 0]).cpu()
+            # v_world_normal = world_normal.cpu()
+            # v_normal_map = normal_map.cpu()
+
+            # g1 = go.Scatter3d(x=right_vec[:, 0], y=right_vec[:, 1], z=right_vec[:, 2], marker=dict(color='red'), mode='markers')
+            # g3 = go.Scatter3d(x=front_vec[:, 0], y=front_vec[:, 1], z=front_vec[:, 2], marker=dict(color='blue'), mode='markers')
+            # g2 = go.Scatter3d(x=up_vec[:, 0], y=up_vec[:, 1], z=up_vec[:, 2], marker=dict(color='green'), mode='markers')
+            # g4 = go.Scatter3d(x=v_world_normal[:, 0], y=v_world_normal[:, 1], z=v_world_normal[:, 2], marker=dict(color='purple'), mode='markers')
+            # g5 = go.Scatter3d(x=v_normal_map[:, 0], y=v_normal_map[:, 1], z=v_normal_map[:, 2], marker=dict(color='orange'), mode='markers')
+
+            # fig = go.Figure(data=[g1, g2, g3, g4, g5])
+            # fig.show()
+            # assert(False)
+
+            # reflected vector: r = d - 2(d*n)n
+            # d = (0, 0, 1) relative to the normal
+            refdirs = viewdirs - 2 * (viewdirs * world_normal[:, None]).sum(-1, keepdim=True) * world_normal[:, None]
+
+            ref_valid_rgbs = self.reflectionModule(xyz_sampled[app_mask], refdirs[app_mask], app_features, bundle_size_w[app_mask][:, None], rays_up[app_mask], roughness)
+            rgb[rgb_app_mask] += ref_valid_rgbs.reshape(-1, 3)
+        else:
+            world_normal = normal_map
+
         rgb_map = torch.sum(bundle_weight[..., None] * rgb, 1)
 
         if white_bg or (is_train and torch.rand((1,))<0.5):
@@ -633,36 +509,6 @@ class TensorBase(torch.nn.Module):
         
         rgb_map = rgb_map.clamp(0,1)
 
-        with torch.no_grad():
-            # bundle_weight.shape: (N, N_samples, bundle_size, bundle_size)
-            # z_vals.shape: (N, N_samples)
-            bundle_z_vals = z_vals[..., None, None].repeat(1, 1, self.bundle_size, self.bundle_size)
-            bundle_rays_chunk = rays_chunk[:, None, None, :].repeat(1, self.bundle_size, self.bundle_size, 1)
-            depth_map = torch.sum(bundle_weight * bundle_z_vals, 1)
-            # (N, bundle_size, bundle_size)
-            depth_map = depth_map + (1. - acc_map) * bundle_rays_chunk[..., -1]
-
-            # Compute normal map
-            if self.bundle_size == 3:
-                f_blur = torch.tensor([1, 2, 1], device=depth_map.device) / 4
-                f_edge = torch.tensor([-1, 0, 1], device=depth_map.device) / 2
-                dy = (depth_map * (f_blur[None, :] * f_edge[:, None]).reshape(1, 3, 3)).sum(1).sum(1)
-                dx = (depth_map * (f_blur[:, None] * f_edge[None, :]).reshape(1, 3, 3)).sum(1).sum(1)
-
-                dx = dx * focal * 2 / depth_map[..., self.bundle_size//2, self.bundle_size//2]
-                dy = dy * focal * 2 / depth_map[..., self.bundle_size//2, self.bundle_size//2]
-                inv_denom = 1 / torch.sqrt(1 + dx**2 + dy**2)
-                # (N, 3)
-                normal_map = torch.stack([dx * inv_denom, -dy * inv_denom, inv_denom], -1)
-            else:
-                normal_map = None
-            """
-
-            # reflected vector: r = d - 2(d*n)n
-            # d = (0, 0, 1) relative to the normal
-
-            r_valid_rgbs = self.reflectionModule(xyz_sampled[app_mask], viewdirs[app_mask], app_features)
-            """
-
-        return rgb_map, depth_map, normal_map, acc_map
+        return rgb_map, depth_map, normal_map, acc_map, xyz
+        # return rgb_map, depth_map, world_normal, acc_map, xyz
 

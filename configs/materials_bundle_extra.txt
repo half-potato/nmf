@@ -1,20 +1,24 @@
 
 dataset_name = blender
 datadir = /data/nerf_synthetic/materials
-expname =  tensorf_materials_VM_bundle
+expname =  ref_tensorf_materials_VM_bundle_sph_enc
 basedir = ./log
 
-n_iters = 30000
+n_iters = 120000
+#n_iters = 5000
+#n_iters = 10
 batch_size = 4096
 bundle_size = 3
-render_mode = decimate
-#render_mode = center
+#render_mode = decimate
+render_mode = center
 #step_ratio = 0.25
+density_grid_dims = 8
 
 featureC = 128
 N_voxel_init = 2097156 # 128**3
 N_voxel_final = 27000000 # 300**3
-upsamp_list = [2000,3000,4000,5500,7000]
+#upsamp_list = [2000,3000,4000,5500,7000]
+upsamp_list = [8000,12000,16000,22000,28000]
 update_AlphaMask_list = [2000,4000]
 
 N_vis = 5
@@ -27,7 +31,8 @@ n_lamb_sh = [48,48,48]
 model_name = TensorVMSplit
 
 
-shadingMode = BundleMLP_Fea_Grid
+#shadingMode = BundleMLP_Fea_Grid
+shadingMode = BundleMLPSphEncGrid
 fea2denseAct = softplus
 
 view_pe = 2
