@@ -56,7 +56,7 @@ class TensorNeRF(torch.nn.Module):
                     fea2denseAct = 'softplus', bundle_size = 3, density_grid_dims=8):
         super(TensorNeRF, self).__init__()
         self.rf = eval(model_name)(aabb, gridSize, device, density_n_comp,
-                                   appearance_n_comp, app_dim, step_ratio, num_levels=3)
+                                   appearance_n_comp, app_dim, step_ratio, num_levels=1)
 
         self.app_dim = app_dim
         self.alphaMask = alphaMask
@@ -467,7 +467,7 @@ class TensorNeRF(torch.nn.Module):
             # v_normal_map = self.compute_normal(depth_map, focal)
             v_normal_map = torch.sum(weight[..., None] * v_normal_all, 1)
 
-            l = 1
+            l = 0
             l_normal_map = l*v_normal_map + (1-l)*d_normal_map
             # v_normal_map = v_normal_map / v_normal_map.norm(dim=-1, keepdim=True)
 
