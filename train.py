@@ -343,8 +343,8 @@ def reconstruction(args):
                 reso_mask = reso_cur
             new_aabb = tensorf.updateAlphaMask(tuple(reso_mask))
             if iteration == update_AlphaMask_list[0]:
-                print(tensorf.alphaMask.aabb, new_aabb)
-                tensorf.rf.shrink(new_aabb)
+                apply_correction = not torch.all(tensorf.alphaMask.gridSize == tensorf.rf.gridSize)
+                tensorf.rf.shrink(new_aabb, apply_correction)
                 # tensorVM.alphaMask = None
                 L1_reg_weight = args.L1_weight_rest
                 print("continuing L1_reg_weight", L1_reg_weight)
@@ -361,9 +361,9 @@ def reconstruction(args):
 
         if iteration in upsamp_list:
             n_voxels = N_voxel_list.pop(0)
-            reso_cur = N_to_reso(n_voxels, tensorf.aabb)
+            reso_cur = N_to_reso(n_voxels, tensorf.rf.aabb)
             nSamples = min(args.nSamples, cal_n_samples(reso_cur,args.step_ratio))
-            tensorf.upsample_volume_grid(reso_cur)
+            tensorf.rf.upsample_volume_grid(reso_cur)
 
             if args.lr_upsample_reset:
                 print("reset lr to initial")

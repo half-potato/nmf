@@ -89,7 +89,6 @@ class TensorVM(TensorBase):
         return total
 
     def vector_comp_diffs(self):
-        
         return self.vectorDiffs(self.line_coef[:,-self.density_n_comp:]) + self.vectorDiffs(self.line_coef[:,:self.app_n_comp])
     
     
@@ -105,22 +104,6 @@ class TensorVM(TensorBase):
                               align_corners=True))
             line_coef[i] = torch.nn.Parameter(
                 F.interpolate(line_coef[i].data, size=(res_target[vec_id], 1), mode='bilinear', align_corners=True))
-
-        # plane_coef[0] = torch.nn.Parameter(
-        #     F.interpolate(plane_coef[0].data, size=(res_target[1], res_target[0]), mode='bilinear',
-        #                   align_corners=True))
-        # line_coef[0] = torch.nn.Parameter(
-        #     F.interpolate(line_coef[0].data, size=(res_target[2], 1), mode='bilinear', align_corners=True))
-        # plane_coef[1] = torch.nn.Parameter(
-        #     F.interpolate(plane_coef[1].data, size=(res_target[2], res_target[0]), mode='bilinear',
-        #                   align_corners=True))
-        # line_coef[1] = torch.nn.Parameter(
-        #     F.interpolate(line_coef[1].data, size=(res_target[1], 1), mode='bilinear', align_corners=True))
-        # plane_coef[2] = torch.nn.Parameter(
-        #     F.interpolate(plane_coef[2].data, size=(res_target[2], res_target[1]), mode='bilinear',
-        #                   align_corners=True))
-        # line_coef[2] = torch.nn.Parameter(
-        #     F.interpolate(line_coef[2].data, size=(res_target[0], 1), mode='bilinear', align_corners=True))
 
         return plane_coef, line_coef
 
@@ -355,7 +338,6 @@ class TensorVMSplit(TensorBase):
             line_coef[i] = torch.nn.Parameter(
                 F.interpolate(line_coef[i].data, size=(res_target[vec_id], 1), mode='bilinear', align_corners=True))
 
-
         return plane_coef, line_coef
 
     @torch.no_grad()
@@ -367,7 +349,7 @@ class TensorVMSplit(TensorBase):
         print(f'upsamping to {res_target}')
 
     @torch.no_grad()
-    def shrink(self, new_aabb):
+    def shrink(self, new_aabb, apply_correction):
         print("====> shrinking ...")
         xyz_min, xyz_max = new_aabb
         t_l, b_r = (xyz_min - self.aabb[0]) / self.units, (xyz_max - self.aabb[0]) / self.units
@@ -393,7 +375,8 @@ class TensorVMSplit(TensorBase):
             )
 
 
-        if not torch.all(self.alphaMask.gridSize == self.gridSize):
+        # if not torch.all(self.alphaMask.gridSize == self.gridSize):
+        if apply_correction:
             t_l_r, b_r_r = t_l / (self.gridSize-1), (b_r-1) / (self.gridSize-1)
             correct_aabb = torch.zeros_like(new_aabb)
             correct_aabb[0] = (1-t_l_r)*self.aabb[0] + t_l_r*self.aabb[1]

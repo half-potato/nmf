@@ -5,6 +5,7 @@ class TensorBase:
                  app_dim, step_ratio):
         self.density_n_comp = density_n_comp
         self.app_n_comp = appearance_n_comp
+        self.gridSize = gridSize
         self.app_dim = app_dim
         self.aabb = aabb
         self.device = device
@@ -19,6 +20,7 @@ class TensorBase:
 
     def get_kwargs(self):
         return {
+            'gridSize':self.gridSize.tolist(),
             'aabb': self.aabb,
             'density_n_comp': self.density_n_comp,
             'appearance_n_comp': self.app_n_comp,
@@ -41,6 +43,9 @@ class TensorBase:
 
     def normalize_coord(self, xyz_sampled):
         return (xyz_sampled-self.aabb[0]) * self.invaabbSize - 1
+
+    def get_optparam_groups(self, lr_init_spatialxyz = 0.02, lr_init_network = 0.001):
+        raise Exception("Not implemented")
 
     def init_svd_volume(self, res, device):
         raise Exception("Not implemented")
