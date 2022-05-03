@@ -10,6 +10,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 from .tensoRF import TensorCP, TensorVM, TensorVMSplit
+from .multi_level_rf import MultiLevelRF
 
 def raw2alpha(sigma, dist):
     # sigma, dist  [N_rays, N_samples]
@@ -42,7 +43,9 @@ class AlphaGridMask(torch.nn.Module):
         return alpha_vals
 
     def normalize_coord(self, xyz_sampled):
-        return (xyz_sampled-self.aabb[0]) * self.invgridSize - 1
+        coords = (xyz_sampled[..., :3]-self.aabb[0]) * self.invaabbSize - 1
+        size = xyz_sampled[..., 3:4]
+        return torch.cat((coords, size), dim=-1)
 
 
 class TensorNeRF(torch.nn.Module):
@@ -53,7 +56,7 @@ class TensorNeRF(torch.nn.Module):
                     fea2denseAct = 'softplus', bundle_size = 3, density_grid_dims=8):
         super(TensorNeRF, self).__init__()
         self.rf = eval(model_name)(aabb, gridSize, device, density_n_comp,
-                                   appearance_n_comp, app_dim, step_ratio)
+                                   appearance_n_comp, app_dim, step_ratio, num_levels=3)
 
         self.app_dim = app_dim
         self.alphaMask = alphaMask
@@ -176,7 +179,7 @@ class TensorNeRF(torch.nn.Module):
         normal_map = torch.stack([dx * inv_denom, -dy * inv_denom, inv_denom], -1)
         return normal_map
 
-    def sample_ray_ndc(self, rays_o, rays_d, is_train=True, N_samples=-1):
+    def sample_ray_ndc(self, rays_o, rays_d, focal, is_train=True, N_samples=-1):
         N_samples = N_samples if N_samples > 0 else self.nSamples
         near, far = self.near_far
         interpx = torch.linspace(near, far, N_samples).unsqueeze(0).to(rays_o)
@@ -186,9 +189,14 @@ class TensorNeRF(torch.nn.Module):
 
         rays_pts = rays_o[..., None, :] + rays_d[..., None, :] * interpx[..., None]
         mask_outbbox = ((self.rf.aabb[0] > rays_pts) | (rays_pts > self.rf.aabb[1])).any(dim=-1)
+
+        # add size
+        rays_pts = torch.cat([rays_pts, interpx.unsqueeze(-1)/focal], dim=-1)
+
         return rays_pts, interpx, ~mask_outbbox
 
-    def sample_ray(self, rays_o, rays_d, is_train=True, N_samples=-1):
+    def sample_ray(self, rays_o, rays_d, focal, is_train=True, N_samples=-1):
+        # focal: ratio of meters to pixels at a distance of 1 meter
         N_samples = N_samples if N_samples>0 else self.nSamples
         stepsize = self.rf.stepSize
         near, far = self.near_far
@@ -213,6 +221,9 @@ class TensorNeRF(torch.nn.Module):
 
         rays_pts = rays_o[...,None,:] + rays_d[...,None,:] * interpx[...,None]
         mask_outbbox = ((self.rf.aabb[0]>rays_pts) | (rays_pts>self.rf.aabb[1])).any(dim=-1)
+
+        # add size
+        rays_pts = torch.cat([rays_pts, interpx.unsqueeze(-1)/focal], dim=-1)
 
         return rays_pts, interpx, ~mask_outbbox
 
@@ -262,7 +273,7 @@ class TensorNeRF(torch.nn.Module):
         return new_aabb
 
     @torch.no_grad()
-    def filtering_rays(self, all_rays, all_rgbs, N_samples=256, chunk=10240*5, bbox_only=False):
+    def filtering_rays(self, all_rays, all_rgbs, focal, N_samples=256, chunk=10240*5, bbox_only=False):
         print('========> filtering rays ...')
         tt = time.time()
 
@@ -283,7 +294,8 @@ class TensorNeRF(torch.nn.Module):
                 mask_inbbox = t_max > t_min
 
             else:
-                xyz_sampled, _,_ = self.sample_ray(rays_o, rays_d, N_samples=N_samples, is_train=False)
+                xyz_sampled, _,_ = self.sample_ray(rays_o, rays_d, focal, N_samples=N_samples, is_train=False)
+                # Issue: calculate size
                 mask_inbbox= (self.alphaMask.sample_alpha(xyz_sampled).view(xyz_sampled.shape[:-1]) > 0).any(-1)
 
             mask_filtered.append(mask_inbbox.cpu())
@@ -352,23 +364,25 @@ class TensorNeRF(torch.nn.Module):
         # sample points
         viewdirs = rays_chunk[:, 3:6]
         if ndc_ray:
-            xyz_sampled, z_vals, ray_valid = self.sample_ray_ndc(rays_chunk[:, :3], viewdirs, is_train=is_train,N_samples=N_samples)
+            xyz_sampled, z_vals, ray_valid = self.sample_ray_ndc(rays_chunk[:, :3], viewdirs, focal, is_train=is_train,N_samples=N_samples)
             dists = torch.cat((z_vals[:, 1:] - z_vals[:, :-1], torch.zeros_like(z_vals[:, :1])), dim=-1)
             rays_norm = torch.norm(viewdirs, dim=-1, keepdim=True)
             dists = dists * rays_norm
             viewdirs = viewdirs / rays_norm
         else:
-            xyz_sampled, z_vals, ray_valid = self.sample_ray(rays_chunk[:, :3], viewdirs, is_train=is_train,N_samples=N_samples)
+            xyz_sampled, z_vals, ray_valid = self.sample_ray(rays_chunk[:, :3], viewdirs, focal, is_train=is_train,N_samples=N_samples)
             dists = torch.cat((z_vals[:, 1:] - z_vals[:, :-1], torch.zeros_like(z_vals[:, :1])), dim=-1)
-        # xyz_sampled.shape: (N, N_samples, 3)
+        # xyz_sampled_shape: (N, N_samples, 3+1)
         # z_vals.shape: (N, N_samples)
         # ray_valid.shape: (N, N_samples)
+        # ic(z_vals, z_vals/focal, z_vals.shape, xyz_sampled_shape)
+        xyz_sampled_shape = xyz_sampled[:, :, :3].shape
 
-        viewdirs = viewdirs.view(-1, 1, 3).expand(xyz_sampled.shape)
+        viewdirs = viewdirs.view(-1, 1, 3).expand(xyz_sampled_shape)
         rays_up = rays_chunk[:, 6:9]
         rays_o = rays_chunk[:, :3]
-        rays_up = rays_up.view(-1, 1, 3).expand(xyz_sampled.shape)
-        n_samples = xyz_sampled.shape[1]
+        rays_up = rays_up.view(-1, 1, 3).expand(xyz_sampled_shape)
+        n_samples = xyz_sampled_shape[1]
         
         if self.alphaMask is not None:
             alphas = self.alphaMask.sample_alpha(xyz_sampled[ray_valid])
@@ -376,14 +390,14 @@ class TensorNeRF(torch.nn.Module):
             ray_invalid = ~ray_valid
             ray_invalid[ray_valid] |= (~alpha_mask)
             ray_valid = ~ray_invalid
-            all_alphas = self.alphaMask.sample_alpha(xyz_sampled).detach().cpu().reshape(xyz_sampled.shape[0], xyz_sampled.shape[1])
+            all_alphas = self.alphaMask.sample_alpha(xyz_sampled).detach().cpu().reshape(xyz_sampled_shape[0], xyz_sampled.shape[1])
 
 
         # sigma.shape: (N, N_samples)
-        sigma = torch.zeros(xyz_sampled.shape[:-1], device=xyz_sampled.device)
-        world_normal = torch.zeros(xyz_sampled.shape, device=xyz_sampled.device)
-        all_sigma_feature = torch.zeros(xyz_sampled.shape[:-1], device=xyz_sampled.device)
-        rgb = torch.zeros((*xyz_sampled.shape[:2], self.bundle_size, self.bundle_size, 3), device=xyz_sampled.device)
+        sigma = torch.zeros(xyz_sampled_shape[:-1], device=xyz_sampled.device)
+        world_normal = torch.zeros(xyz_sampled_shape, device=xyz_sampled.device)
+        all_sigma_feature = torch.zeros(xyz_sampled_shape[:-1], device=xyz_sampled.device)
+        rgb = torch.zeros((*xyz_sampled_shape[:2], self.bundle_size, self.bundle_size, 3), device=xyz_sampled.device)
 
         if ray_valid.any():
             xyz_sampled = self.rf.normalize_coord(xyz_sampled)
@@ -408,7 +422,7 @@ class TensorNeRF(torch.nn.Module):
         rgb_app_mask = app_mask[:, :, None, None].repeat(1, 1, self.bundle_size, self.bundle_size)
         bundle_weight = weight[..., None, None].repeat(1, 1, self.bundle_size, self.bundle_size)
         bundle_size_w = z_vals / focal * (self.bundle_size-1)
-        v_normal_all = torch.zeros((*xyz_sampled.shape[:2], 3), device=xyz_sampled.device)
+        v_normal_all = torch.zeros((*xyz_sampled_shape[:2], 3), device=xyz_sampled.device)
 
         d_world_normal_map = torch.sum(weight[..., None] * world_normal, 1)
         d_refdirs = viewdirs - 2 * (viewdirs * world_normal).sum(-1, keepdim=True) * world_normal
@@ -447,7 +461,7 @@ class TensorNeRF(torch.nn.Module):
         # d_normal_map = rays_up[:, 0] / rays_up[:, 0].norm(dim=-1, keepdim=True)
 
         inds = bundle_weight[:, :, self.bundle_size//2, self.bundle_size//2].max(dim=1).indices
-        xyz = xyz_sampled[range(xyz_sampled.shape[0]), inds]#.cpu().numpy()
+        xyz = xyz_sampled[range(xyz_sampled_shape[0]), inds]#.cpu().numpy()
         # ref_mask = reflectivity > 0.1
         if self.bundle_size == 3 and app_mask.any():
             # v_normal_map = self.compute_normal(depth_map, focal)

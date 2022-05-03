@@ -42,7 +42,9 @@ class TensorBase:
         print("sampling number: ", self.nSamples)
 
     def normalize_coord(self, xyz_sampled):
-        return (xyz_sampled-self.aabb[0]) * self.invaabbSize - 1
+        coords = (xyz_sampled[..., :3]-self.aabb[0]) * self.invaabbSize - 1
+        size = xyz_sampled[..., 3:4]
+        return torch.cat((coords, size), dim=-1)
 
     def get_optparam_groups(self, lr_init_spatialxyz = 0.02, lr_init_network = 0.001):
         raise Exception("Not implemented")

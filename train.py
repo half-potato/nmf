@@ -221,7 +221,7 @@ def reconstruction(args):
 
     allrays, allrgbs = train_dataset.all_rays, train_dataset.all_rgbs
     if not args.ndc_ray and args.filter_rays:
-        allrays, allrgbs, mask = tensorf.filtering_rays(allrays, allrgbs, bbox_only=True)
+        allrays, allrgbs, mask = tensorf.filtering_rays(allrays, allrgbs, focal, bbox_only=True)
     else:
         mask = None
     if args.bundle_size == 1:
@@ -243,7 +243,9 @@ def reconstruction(args):
     allrgbs = allrgbs.to(device)
     allrays = allrays.to(device)
     pbar = tqdm(range(args.n_iters), miniters=args.progress_refresh_rate, file=sys.stdout)
-    focal = (train_dataset.focal[0] if ndc_ray else train_dataset.focal) / train_dataset.img_wh[0]
+    # ratio of meters to pixels at a distance of 1 meter
+    focal = (train_dataset.focal[0] if ndc_ray else train_dataset.focal)
+    # / train_dataset.img_wh[0]
     # with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], with_stack=True) as prof:
     N = 0
     bundle_psnrs = 0
@@ -352,7 +354,7 @@ def reconstruction(args):
 
             if not args.ndc_ray and iteration == update_AlphaMask_list[1] and args.filter_rays:
                 # filter rays outside the bbox
-                allrays,allrgbs,mask = tensorf.filtering_rays(allrays,allrgbs)
+                allrays,allrgbs,mask = tensorf.filtering_rays(allrays, allrgbs, focal)
                 if args.bundle_size == 1:
                     trainingSampler = SimpleSampler(allrays.shape[0], args.batch_size)
                 else:

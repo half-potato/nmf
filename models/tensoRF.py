@@ -215,6 +215,7 @@ class TensorVMSplit(TensorBase):
 
         # plane + line basis
         normal_feature = torch.zeros((xyz_sampled.shape[0], 3), device=xyz_sampled.device)
+        sigma_feature = torch.zeros((xyz_sampled.shape[0],), device=xyz_sampled.device)
 
         l = self.dx_filter.shape[-1]
 
@@ -222,8 +223,8 @@ class TensorVMSplit(TensorBase):
         coordinate_line = torch.stack((xyz_sampled[..., self.vecMode[0]], xyz_sampled[..., self.vecMode[1]], xyz_sampled[..., self.vecMode[2]]))
         coordinate_line = torch.stack((torch.zeros_like(coordinate_line), coordinate_line), dim=-1).detach().view(3, -1, 1, 2)
 
-        sigma_feature = torch.zeros((xyz_sampled.shape[0],), device=xyz_sampled.device)
         for idx_plane in range(len(self.density_plane)):
+            # print(idx_plane, self.density_plane[idx_plane].shape)
             plane_coef_point = F.grid_sample(self.density_plane[idx_plane], coordinate_plane[[idx_plane]],
                                                 mode='bicubic', align_corners=True).view(-1, *xyz_sampled.shape[:1])
             line_coef_point = F.grid_sample(self.density_line[idx_plane], coordinate_line[[idx_plane]],
