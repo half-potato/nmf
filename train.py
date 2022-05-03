@@ -2,6 +2,7 @@
 import os
 from tracemalloc import start
 from tqdm.auto import tqdm
+from models.tensor_nerf import TensorNeRF
 from opt import config_parser
 
 
@@ -97,7 +98,7 @@ def export_mesh(args):
     ckpt = torch.load(args.ckpt, map_location=device)
     kwargs = ckpt['kwargs']
     kwargs.update({'device': device})
-    tensorf = eval(args.model_name)(**kwargs)
+    tensorf = TensorNeRF(**kwargs)
     tensorf.load(ckpt)
 
     alpha,_ = tensorf.getDenseAlpha()
@@ -119,7 +120,7 @@ def render_test(args):
     ckpt = torch.load(args.ckpt, map_location=device)
     kwargs = ckpt['kwargs']
     kwargs.update({'device': device})
-    tensorf = eval(args.model_name)(**kwargs)
+    tensorf = TensorNeRF(**kwargs)
     tensorf.load(ckpt)
 
     logfolder = os.path.dirname(args.ckpt)
@@ -189,14 +190,14 @@ def reconstruction(args):
         ckpt = torch.load(args.ckpt, map_location=device)
         kwargs = ckpt['kwargs']
         kwargs.update({'device':device})
-        tensorf = eval(args.model_name)(**kwargs)
+        tensorf = TensorNeRF(**kwargs)
         tensorf.load(ckpt)
     else:
-        tensorf = eval(args.model_name)(aabb, reso_cur, device,
+        tensorf = TensorNeRF(args.model_name, aabb, reso_cur, device,
                     density_n_comp=n_lamb_sigma, appearance_n_comp=n_lamb_sh, app_dim=args.data_dim_color, near_far=near_far,
                     shadingMode=args.shadingMode, alphaMask_thres=args.alpha_mask_thre, density_shift=args.density_shift, distance_scale=args.distance_scale,
                     pos_pe=args.pos_pe, view_pe=args.view_pe, fea_pe=args.fea_pe, featureC=args.featureC, step_ratio=args.step_ratio,
-                    fea2denseAct=args.fea2denseAct, bundle_size=args.bundle_size, density_grid_dims=args.density_grid_dims)
+                    fea2denseAct=args.fea2denseAct, bundle_size=args.bundle_size, density_grid_dims=args.density_grid_dims, enable_reflections=args.enable_reflections)
 
 
     grad_vars = tensorf.get_optparam_groups(args.lr_init, args.lr_basis)
@@ -259,12 +260,13 @@ def reconstruction(args):
         rays_train, rgb_train = allrays[ray_idx], allrgbs[rgb_idx].reshape(-1, args.bundle_size, args.bundle_size, 3)
 
         #rgb_map, alphas_map, depth_map, weights, uncertainty
-        rgb_map, alphas_map, depth_map, weights, uncertainty, normal_map = renderer(
+        rgb_map, alphas_map, depth_map, weights, normal_sim, normal_map = renderer(
             rays_train, tensorf, focal=focal, chunk=args.batch_size,
             N_samples=nSamples, white_bg = white_bg, ndc_ray=ndc_ray, device=device, is_train=True)
 
-        # loss = torch.mean((rgb_map[:, 1, 1] - rgb_train[:, 1, 1]) ** 2)
-        loss = torch.mean((rgb_map - rgb_train) ** 2)
+        loss = torch.mean((rgb_map[:, 1, 1] - rgb_train[:, 1, 1]) ** 2)
+        normal_loss = -normal_sim
+        # loss = torch.mean((rgb_map - rgb_train) ** 2)
         diff = (rgb_map - rgb_train) ** 2
         bundle_loss = diff.permute(0, 3, 1, 2).reshape(-1, 3, 3).mean(dim=0)
         bundle_psnr = -10.0 * torch.log(bundle_loss) / np.log(10.0)
@@ -272,24 +274,24 @@ def reconstruction(args):
 
 
         # loss
-        total_loss = loss
+        total_loss = loss + args.normal_lambda*normal_loss
         if Ortho_reg_weight > 0:
-            loss_reg = tensorf.vector_comp_diffs()
+            loss_reg = tensorf.rf.vector_comp_diffs()
             total_loss += Ortho_reg_weight*loss_reg
             summary_writer.add_scalar('train/reg', loss_reg.detach().item(), global_step=iteration)
         if L1_reg_weight > 0:
-            loss_reg_L1 = tensorf.density_L1()
+            loss_reg_L1 = tensorf.rf.density_L1()
             total_loss += L1_reg_weight*loss_reg_L1
             summary_writer.add_scalar('train/reg_l1', loss_reg_L1.detach().item(), global_step=iteration)
 
         if TV_weight_density>0:
             TV_weight_density *= lr_factor
-            loss_tv = tensorf.TV_loss_density(tvreg) * TV_weight_density
+            loss_tv = tensorf.rf.TV_loss_density(tvreg) * TV_weight_density
             total_loss = total_loss + loss_tv
             summary_writer.add_scalar('train/reg_tv_density', loss_tv.detach().item(), global_step=iteration)
         if TV_weight_app>0:
             TV_weight_app *= lr_factor
-            loss_tv = loss_tv + tensorf.TV_loss_app(tvreg)*TV_weight_app
+            loss_tv = loss_tv + tensorf.rf.TV_loss_app(tvreg)*TV_weight_app
             total_loss = total_loss + loss_tv
             summary_writer.add_scalar('train/reg_tv_app', loss_tv.detach().item(), global_step=iteration)
 
@@ -319,6 +321,7 @@ def reconstruction(args):
                 + f' test_psnr = {float(np.mean(PSNRs_test)):.2f}'
                 + f' center_psnr = {center_psnr:.2f}'
                 + f' surround_psnr = {surround_psnr:.2f}'
+                + f' normal_loss = {normal_loss:.6f}'
                 + f' mse = {loss:.6f}'
             )
             PSNRs = []
@@ -340,7 +343,8 @@ def reconstruction(args):
                 reso_mask = reso_cur
             new_aabb = tensorf.updateAlphaMask(tuple(reso_mask))
             if iteration == update_AlphaMask_list[0]:
-                tensorf.shrink(new_aabb)
+                print(tensorf.alphaMask.aabb, new_aabb)
+                tensorf.rf.shrink(new_aabb)
                 # tensorVM.alphaMask = None
                 L1_reg_weight = args.L1_weight_rest
                 print("continuing L1_reg_weight", L1_reg_weight)

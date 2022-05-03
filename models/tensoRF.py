@@ -1,9 +1,12 @@
 from tkinter import W
-from .tensorBase import *
+from .tensor_base import TensorBase
+import torch
+import torch.nn.functional as F
+from icecream import ic
 
 class TensorVM(TensorBase):
-    def __init__(self, aabb, gridSize, device, **kargs):
-        super(TensorVM, self).__init__(aabb, gridSize, device, **kargs)
+    def __init__(self, aabb, gridSize, device, *args, **kargs):
+        super(TensorVM, self).__init__(aabb, gridSize, device, *args, **kargs)
         
 
     def init_svd_volume(self, res, device):
@@ -17,10 +20,6 @@ class TensorVM(TensorBase):
     def get_optparam_groups(self, lr_init_spatialxyz = 0.02, lr_init_network = 0.001):
         grad_vars = [{'params': self.line_coef, 'lr': lr_init_spatialxyz}, {'params': self.plane_coef, 'lr': lr_init_spatialxyz},
                          {'params': self.basis_mat.parameters(), 'lr':lr_init_network}]
-        if isinstance(self.renderModule, torch.nn.Module):
-            grad_vars += [{'params':self.renderModule.parameters(), 'lr':lr_init_network}]
-        if hasattr(self, 'reflectionModule') and isinstance(self.reflectionModule, torch.nn.Module):
-            grad_vars += [{'params':self.reflectionModule.parameters(), 'lr':lr_init_network}]
         return grad_vars
 
     def compute_features(self, xyz_sampled):
@@ -139,11 +138,20 @@ class TensorVM(TensorBase):
 
 
 class TensorVMSplit(TensorBase):
-    def __init__(self, aabb, gridSize, device, **kargs):
-        super(TensorVMSplit, self).__init__(aabb, gridSize, device, **kargs)
+    def __init__(self, aabb, gridSize, device, *args, **kargs):
+        super(TensorVMSplit, self).__init__(aabb, gridSize, device, *args, **kargs)
         # self.f_blur = torch.tensor([1, 2, 1], device=device) / 4
-        self.f_blur = torch.tensor([0, 1, 0], device=device)
-        self.f_edge = torch.tensor([-1, 0, 1], device=device) / 2
+        f_blur = torch.tensor([0, 1, 0], device=device)
+        f_edge = torch.tensor([-1, 0, 1], device=device) / 2
+        # f_blur = torch.tensor([1, 1], device=device) / 2
+        # f_edge = torch.tensor([-1, 1], device=device) / 2
+        l = len(f_blur)
+
+        self.dy_filter = (f_blur[None, :] * f_edge[:, None]).reshape(1, 1, l, l)#.expand(1, self.density_n_comp[0], 3, 3)
+        self.dx_filter = self.dy_filter.permute(0, 1, 3, 2)
+        self.dz_filter = f_edge.reshape(1, 1, l)#.expand(1, self.density_n_comp[0], 3)
+        # random_offset = torch.rand(1, self.density_n_comp[0], 3)
+        # self.register_buffer('random_offset', random_offset)
 
 
     def init_svd_volume(self, res, device):
@@ -165,17 +173,11 @@ class TensorVMSplit(TensorBase):
         return torch.nn.ParameterList(plane_coef).to(device), torch.nn.ParameterList(line_coef).to(device)
     
     
-
     def get_optparam_groups(self, lr_init_spatialxyz = 0.02, lr_init_network = 0.001):
         grad_vars = [{'params': self.density_line, 'lr': lr_init_spatialxyz}, {'params': self.density_plane, 'lr': lr_init_spatialxyz},
                      {'params': self.app_line, 'lr': lr_init_spatialxyz}, {'params': self.app_plane, 'lr': lr_init_spatialxyz},
-                         {'params': self.basis_mat.parameters(), 'lr':lr_init_network}]
-        if isinstance(self.renderModule, torch.nn.Module):
-            grad_vars += [{'params':self.renderModule.parameters(), 'lr':lr_init_network}]
-        if hasattr(self, 'reflectionModule') and isinstance(self.reflectionModule, torch.nn.Module):
-            grad_vars += [{'params':self.reflectionModule.parameters(), 'lr':lr_init_network}]
+                     {'params': self.basis_mat.parameters(), 'lr':lr_init_network}]
         return grad_vars
-
 
     def vectorDiffs(self, vector_comps):
         total = 0
@@ -219,9 +221,9 @@ class TensorVMSplit(TensorBase):
         sigma_feature = torch.zeros((xyz_sampled.shape[0],), device=xyz_sampled.device)
         for idx_plane in range(len(self.density_plane)):
             plane_coef_point = F.grid_sample(self.density_plane[idx_plane], coordinate_plane[[idx_plane]],
-                                                align_corners=True).view(-1, *xyz_sampled.shape[:1])
+                                                mode='bicubic', align_corners=True).view(-1, *xyz_sampled.shape[:1])
             line_coef_point = F.grid_sample(self.density_line[idx_plane], coordinate_line[[idx_plane]],
-                                            align_corners=True).view(-1, *xyz_sampled.shape[:1])
+                                            mode='bicubic', align_corners=True).view(-1, *xyz_sampled.shape[:1])
             sigma_feature = sigma_feature + torch.sum(plane_coef_point * line_coef_point, dim=0)
 
         return sigma_feature
@@ -231,9 +233,7 @@ class TensorVMSplit(TensorBase):
         # plane + line basis
         normal_feature = torch.zeros((xyz_sampled.shape[0], 3), device=xyz_sampled.device)
 
-        dy_filter = (self.f_blur[None, :] * self.f_edge[:, None]).reshape(1, 1, 3, 3)#.expand(1, self.density_n_comp[0], 3, 3)
-        dx_filter = dy_filter.permute(0, 1, 3, 2)
-        dz_filter = self.f_edge.reshape(1, 1, 3)#.expand(1, self.density_n_comp[0], 3)
+        l = self.dx_filter.shape[-1]
 
         coordinate_plane = torch.stack((xyz_sampled[..., self.matMode[0]], xyz_sampled[..., self.matMode[1]], xyz_sampled[..., self.matMode[2]])).detach().view(3, -1, 1, 2)
         coordinate_line = torch.stack((xyz_sampled[..., self.vecMode[0]], xyz_sampled[..., self.vecMode[1]], xyz_sampled[..., self.vecMode[2]]))
@@ -242,23 +242,23 @@ class TensorVMSplit(TensorBase):
         sigma_feature = torch.zeros((xyz_sampled.shape[0],), device=xyz_sampled.device)
         for idx_plane in range(len(self.density_plane)):
             plane_coef_point = F.grid_sample(self.density_plane[idx_plane], coordinate_plane[[idx_plane]],
-                                                align_corners=True).view(-1, *xyz_sampled.shape[:1])
+                                                mode='bicubic', align_corners=True).view(-1, *xyz_sampled.shape[:1])
             line_coef_point = F.grid_sample(self.density_line[idx_plane], coordinate_line[[idx_plane]],
-                                            align_corners=True).view(-1, *xyz_sampled.shape[:1])
+                                            mode='bicubic', align_corners=True).view(-1, *xyz_sampled.shape[:1])
             sigma_feature = sigma_feature + torch.sum(plane_coef_point * line_coef_point, dim=0)
 
             plane = (self.density_plane[idx_plane]).permute(1, 0, 2, 3)
             line = (self.density_line[idx_plane]).permute(1, 0, 2, 3)
-            dx_plane = F.conv2d(plane, dx_filter, stride=1, padding=1).permute(1, 0, 2, 3)
-            dy_plane = F.conv2d(plane, dy_filter, stride=1, padding=1).permute(1, 0, 2, 3)
-            dz_line = F.conv1d(line.squeeze(-1), dz_filter, stride=1, padding=1).unsqueeze(-1).permute(1, 0, 2, 3)
+            dx_plane = F.conv2d(plane, self.dx_filter, stride=1, padding=1).permute(1, 0, 2, 3)
+            dy_plane = F.conv2d(plane, self.dy_filter, stride=1, padding=1).permute(1, 0, 2, 3)
+            dz_line = F.conv1d(line.squeeze(-1), self.dz_filter, stride=1, padding=1).unsqueeze(-1).permute(1, 0, 2, 3)
 
             dx_point = F.grid_sample(dx_plane, coordinate_plane[[idx_plane]],
-                                     align_corners=True).view(-1, *xyz_sampled.shape[:1])
+                                     mode='bicubic', align_corners=True).view(-1, *xyz_sampled.shape[:1])
             dy_point = F.grid_sample(dy_plane, coordinate_plane[[idx_plane]],
-                                     align_corners=True).view(-1, *xyz_sampled.shape[:1])
+                                     mode='bicubic', align_corners=True).view(-1, *xyz_sampled.shape[:1])
             dz_point = F.grid_sample(dz_line, coordinate_line[[idx_plane]],
-                                     align_corners=True).view(-1, *xyz_sampled.shape[:1])
+                                     mode='bicubic', align_corners=True).view(-1, *xyz_sampled.shape[:1])
             # orient based on mat mode
             normal_feature[:, self.matMode[idx_plane][0]] += (F.relu(line_coef_point)*dx_point).sum(dim=0)
             normal_feature[:, self.matMode[idx_plane][1]] += (F.relu(line_coef_point)*dy_point).sum(dim=0)
@@ -407,8 +407,8 @@ class TensorVMSplit(TensorBase):
 
 
 class TensorCP(TensorBase):
-    def __init__(self, aabb, gridSize, device, **kargs):
-        super(TensorCP, self).__init__(aabb, gridSize, device, **kargs)
+    def __init__(self, aabb, gridSize, device, *args, **kargs):
+        super(TensorCP, self).__init__(aabb, gridSize, device, *args, **kargs)
 
 
     def init_svd_volume(self, res, device):
@@ -430,10 +430,6 @@ class TensorCP(TensorBase):
         grad_vars = [{'params': self.density_line, 'lr': lr_init_spatialxyz},
                      {'params': self.app_line, 'lr': lr_init_spatialxyz},
                      {'params': self.basis_mat.parameters(), 'lr':lr_init_network}]
-        if isinstance(self.renderModule, torch.nn.Module):
-            grad_vars += [{'params':self.renderModule.parameters(), 'lr':lr_init_network}]
-        if hasattr(self, 'reflectionModule') and isinstance(self.reflectionModule, torch.nn.Module):
-            grad_vars += [{'params':self.reflectionModule.parameters(), 'lr':lr_init_network}]
         return grad_vars
 
     def compute_densityfeature(self, xyz_sampled):

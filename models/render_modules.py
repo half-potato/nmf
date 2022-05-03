@@ -193,7 +193,7 @@ class BundleMLPRender_Fea(torch.nn.Module):
             inplace=True), layer2, torch.nn.ReLU(inplace=True), layer3)
         torch.nn.init.constant_(self.mlp[-1].bias, 0)
 
-    def forward(self, pts, viewdirs, features, bundle_size_w, ray_up):
+    def forward(self, pts, viewdirs, features, bundle_size_w, ray_up, roughness=None):
         indata = [features, viewdirs, bundle_size_w]
         if self.feape > 0:
             indata += [positional_encoding(features, self.feape)]
@@ -329,12 +329,17 @@ class BundleSphEncoding(torch.nn.Module):
         return rgb.reshape(-1, self.bundle_size, self.bundle_size, 3)
 
 class BundleMLPRender_Fea_Grid(torch.nn.Module):
-    def __init__(self, in_channels, viewpe=6, feape=6, featureC=128, bundle_size=3, extra=4, ray_up_pe=4):
+    def __init__(self, in_channels, viewpe=6, feape=6, featureC=128, bundle_size=3, extra=4, ray_up_pe=4, refpe=6):
         super(BundleMLPRender_Fea_Grid, self).__init__()
 
-        self.in_mlpC = 2*viewpe*3 + 2*feape*in_channels + 3 + in_channels + 1 + 2*ray_up_pe*3
+        self.in_mlpC = 2*viewpe*3 + 3
+        self.in_mlpC += 2*feape*in_channels + in_channels
+        self.in_mlpC += 1 + 2*ray_up_pe*3 # ray up + size
+        if refpe > 0:
+            self.in_mlpC += 2*refpe*3 + 3 # ref dir
         self.viewpe = viewpe
         self.feape = feape
+        self.refpe = refpe
         self.ray_up_pe = ray_up_pe
         self.bundle_size = bundle_size
         assert(extra == 4 or extra == 8 or extra == 9)
@@ -346,13 +351,22 @@ class BundleMLPRender_Fea_Grid(torch.nn.Module):
         self.mlp = torch.nn.Sequential(layer1, torch.nn.ReLU(
             inplace=True), layer2, torch.nn.ReLU(inplace=True), layer3)
         torch.nn.init.constant_(self.mlp[-1].bias, 0)
+        f_blur = torch.tensor([1, 2, 1]) / 4
+        f_edge = torch.tensor([-1, 0, 1]) / 2
+        dy = (f_blur[None, :] * f_edge[:, None]).reshape(1, 3, 3)
+        dx = (f_blur[:, None] * f_edge[None, :]).reshape(1, 3, 3)
 
-    def forward(self, pts, viewdirs, features, bundle_size_w, ray_up):
+        self.register_buffer('dy', dy)
+        self.register_buffer('dx', dx)
+
+    def forward(self, pts, viewdirs, features, bundle_size_w, ray_up, refdirs=None):
         indata = [features, viewdirs, bundle_size_w]
         if self.feape > 0:
             indata += [positional_encoding(features, self.feape)]
         if self.viewpe > 0:
             indata += [positional_encoding(viewdirs, self.viewpe)]
+        if self.refpe > 0:
+            indata += [positional_encoding(refdirs, self.refpe), refdirs]
         if self.ray_up_pe > 0:
             indata += [positional_encoding(ray_up, self.ray_up_pe)]
         mlp_in = torch.cat(indata, dim=-1)
@@ -394,6 +408,61 @@ class BundleMLPRender_Fea_Grid(torch.nn.Module):
         else:
             rel_density_grid = rel_density.reshape(-1, 3, 3)
 
+
+        dx = (self.dx * F.relu(rel_density_grid)).sum(-1).sum(-1)
+        dy = (self.dy * F.relu(rel_density_grid)).sum(-1).sum(-1)
+        normal = torch.stack([
+            dx, dy, torch.ones_like(dx)
+        ], dim=1)
         rgb = rgb.reshape(-1, self.bundle_size, self.bundle_size, 3)
         # rgb[:, 0, 0, :] = 0
-        return rgb, rel_density_grid, roughness
+        return rgb, rel_density_grid, roughness, normal
+
+class BundleMLPRender_Fea_Normal(torch.nn.Module):
+    def __init__(self, in_channels, viewpe=6, feape=6, featureC=128, bundle_size=3, ray_up_pe=4, refpe=6):
+        super(BundleMLPRender_Fea_Grid, self).__init__()
+
+        self.in_mlpC = 2*viewpe*3 + 3
+        self.in_mlpC += 2*feape*in_channels + in_channels
+        self.in_mlpC += 1 + 2*ray_up_pe*3 # ray up + size
+        if refpe > 0:
+            self.in_mlpC += 2*refpe*3 + 3 # ref dir
+        self.viewpe = viewpe
+        self.feape = feape
+        self.refpe = refpe
+        self.ray_up_pe = ray_up_pe
+        self.bundle_size = bundle_size
+        layer1 = torch.nn.Linear(self.in_mlpC, featureC)
+        layer2 = torch.nn.Linear(featureC, featureC)
+        layer3 = torch.nn.Linear(featureC, 3*self.bundle_size**2+3+1)
+
+        self.mlp = torch.nn.Sequential(layer1, torch.nn.ReLU(
+            inplace=True), layer2, torch.nn.ReLU(inplace=True), layer3)
+        torch.nn.init.constant_(self.mlp[-1].bias, 0)
+
+    def forward(self, pts, viewdirs, features, bundle_size_w, ray_up, refdirs=None):
+        indata = [features, viewdirs, bundle_size_w]
+        if self.feape > 0:
+            indata += [positional_encoding(features, self.feape)]
+        if self.viewpe > 0:
+            indata += [positional_encoding(viewdirs, self.viewpe)]
+        if self.refpe > 0:
+            indata += [positional_encoding(refdirs, self.refpe), refdirs]
+        if self.ray_up_pe > 0:
+            indata += [positional_encoding(ray_up, self.ray_up_pe)]
+        mlp_in = torch.cat(indata, dim=-1)
+        mlp_out = self.mlp(mlp_in)
+        m = 3*self.bundle_size**2
+        rgb = mlp_out[:, :m]
+        extra = mlp_out[:, m:]
+        roughness = torch.sigmoid(extra[:, 0])*60/180*pi
+        rgb = torch.sigmoid(rgb)
+
+        # rel_density = torch.tanh(extra)
+        normal = extra[:, 1:]
+        normal = normal / torch.norm(normal, dim=1, keepdim=True)
+        rel_density_grid = torch.zeros((3, 3), device=pts.device)
+
+        rgb = rgb.reshape(-1, self.bundle_size, self.bundle_size, 3)
+        # rgb[:, 0, 0, :] = 0
+        return rgb, rel_density_grid, roughness, normal

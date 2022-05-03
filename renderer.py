@@ -1,7 +1,7 @@
 import torch,os,imageio,sys
 from tqdm.auto import tqdm
 from dataLoader.ray_utils import get_rays
-from models.tensoRF import TensorVM, TensorCP, raw2alpha, TensorVMSplit, AlphaGridMask
+# from models.tensoRF import TensorVM, TensorCP, raw2alpha, TensorVMSplit, AlphaGridMask
 from utils import *
 from dataLoader.ray_utils import ndc_rays_blender
 
@@ -14,21 +14,22 @@ import plotly.graph_objects as go
 def OctreeRender_trilinear_fast(rays, tensorf, focal, chunk=4096, N_samples=-1, ndc_ray=False, white_bg=True, is_train=False, device='cuda'):
 
     rgbs, alphas, depth_maps, normal_maps, uncertainties = [], [], [], [], []
-    points = []
+    points, normal_sims = [], []
     N_rays_all = rays.shape[0]
     for chunk_idx in range(N_rays_all // chunk + int(N_rays_all % chunk > 0)):
         rays_chunk = rays[chunk_idx * chunk:(chunk_idx + 1) * chunk]#.to(device)
     
-        rgb_map, depth_map, normal_map, acc_map, point = tensorf(rays_chunk, focal, is_train=is_train, white_bg=white_bg, ndc_ray=ndc_ray, N_samples=N_samples)
+        rgb_map, depth_map, normal_map, acc_map, point, normal_sim = tensorf(rays_chunk, focal, is_train=is_train, white_bg=white_bg, ndc_ray=ndc_ray, N_samples=N_samples)
 
         rgbs.append(rgb_map)
         depth_maps.append(depth_map)
         normal_maps.append(normal_map)
         points.append(point)
         alphas.append(acc_map)
+        normal_sims.append(normal_sim)
     
     normal_maps = torch.cat(normal_maps) if normal_maps[0] is not None else None
-    return torch.cat(rgbs), torch.cat(alphas), torch.cat(depth_maps), torch.cat(points), None, normal_maps
+    return torch.cat(rgbs), torch.cat(alphas), torch.cat(depth_maps), torch.cat(points), sum(normal_sims)/len(normal_sims), normal_maps
 
 class BundleRender:
     def __init__(self, base_renderer, render_mode, bundle_size, H, W, focal, chunk=2*4096, scale_normal=False):
@@ -82,7 +83,11 @@ class BundleRender:
 
         rgb_map, depth_map, acc_map = reshape(rgb_map).cpu(), depth_map.cpu(), reshape(acc_map).cpu()
         rgb_map = rgb_map.clamp(0.0, 1.0)
-        normal_map = normal_map.reshape(height, width, 3).cpu() if normal_map is not None else depth_to_normals(depth_map, self.focal)
+        if normal_map is not None:
+            normal_map = normal_map.reshape(height, width, 3).cpu()
+        else:
+            print(f"Falling back to normals from depth map. Render mode: {self.render_mode}")
+            normal_map = depth_to_normals(depth_map, self.focal)
 
         # normal_map = acc_map * normal_map + (1-acc_map) * 0
         # plt.imshow(normal_map/2+0.5)
@@ -90,6 +95,8 @@ class BundleRender:
 
         # normal_map = depth_to_normals(depth_map, self.focal)
         normal_map = acc_map * normal_map + (1-acc_map) * 0
+        # plt.imshow(acc_map)
+        # plt.figure()
         # plt.imshow(depth_map)
         # plt.figure()
         # plt.imshow(rgb_map)
