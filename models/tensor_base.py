@@ -2,7 +2,7 @@ import torch
 
 class TensorBase:
     def __init__(self, aabb, gridSize, device, density_n_comp, appearance_n_comp,
-                 app_dim, step_ratio):
+                 app_dim, step_ratio, *args, **kwargs):
         self.density_n_comp = density_n_comp
         self.app_n_comp = appearance_n_comp
         self.gridSize = gridSize

@@ -38,12 +38,12 @@ class AlphaGridMask(torch.nn.Module):
 
     def sample_alpha(self, xyz_sampled):
         xyz_sampled = self.normalize_coord(xyz_sampled)
-        alpha_vals = F.grid_sample(self.alpha_volume, xyz_sampled.view(1,-1,1,1,3), align_corners=True).view(-1)
+        alpha_vals = F.grid_sample(self.alpha_volume, xyz_sampled[..., :3].view(1,-1,1,1,3), align_corners=True).view(-1)
 
         return alpha_vals
 
     def normalize_coord(self, xyz_sampled):
-        coords = (xyz_sampled[..., :3]-self.aabb[0]) * self.invaabbSize - 1
+        coords = (xyz_sampled[..., :3]-self.aabb[0]) * self.invgridSize - 1
         size = xyz_sampled[..., 3:4]
         return torch.cat((coords, size), dim=-1)
 
@@ -56,7 +56,7 @@ class TensorNeRF(torch.nn.Module):
                     fea2denseAct = 'softplus', bundle_size = 3, density_grid_dims=8):
         super(TensorNeRF, self).__init__()
         self.rf = eval(model_name)(aabb, gridSize, device, density_n_comp,
-                                   appearance_n_comp, app_dim, step_ratio, num_levels=1)
+                                   appearance_n_comp, app_dim, step_ratio, num_levels=3)
 
         self.app_dim = app_dim
         self.alphaMask = alphaMask
@@ -180,7 +180,7 @@ class TensorNeRF(torch.nn.Module):
         return normal_map
 
     def sample_ray_ndc(self, rays_o, rays_d, focal, is_train=True, N_samples=-1):
-        N_samples = N_samples if N_samples > 0 else self.nSamples
+        N_samples = N_samples if N_samples > 0 else self.rf.nSamples
         near, far = self.near_far
         interpx = torch.linspace(near, far, N_samples).unsqueeze(0).to(rays_o)
         if is_train:
@@ -197,7 +197,7 @@ class TensorNeRF(torch.nn.Module):
 
     def sample_ray(self, rays_o, rays_d, focal, is_train=True, N_samples=-1):
         # focal: ratio of meters to pixels at a distance of 1 meter
-        N_samples = N_samples if N_samples>0 else self.nSamples
+        N_samples = N_samples if N_samples>0 else self.rf.nSamples
         stepsize = self.rf.stepSize
         near, far = self.near_far
         vec = torch.where(rays_d==0, torch.full_like(rays_d, 1e-6), rays_d)
@@ -232,18 +232,20 @@ class TensorNeRF(torch.nn.Module):
         gridSize = self.gridSize if gridSize is None else gridSize
         gridSize *= 2
 
-        samples = torch.stack(torch.meshgrid(
+        dense_xyz = torch.stack([*torch.meshgrid(
             torch.linspace(0, 1, gridSize[0]),
             torch.linspace(0, 1, gridSize[1]),
-            torch.linspace(0, 1, gridSize[2]),
-        ), -1).to(self.device)
-        dense_xyz = self.rf.aabb[0] * (1-samples) + self.rf.aabb[1] * samples
+            torch.linspace(0, 1, gridSize[2])), 
+            torch.ones((gridSize[0], gridSize[1], gridSize[2]))*self.rf.units.max().cpu()
+        ], -1).to(self.device)
+
+        dense_xyz[..., :3] = self.rf.aabb[0] * (1-dense_xyz[..., :3]) + self.rf.aabb[1] * dense_xyz[..., :3]
 
         # dense_xyz = dense_xyz
         # print(self.rf.stepSize, self.distance_scale*self.rf.aabbDiag)
         alpha = torch.zeros_like(dense_xyz[...,0])
         for i in range(gridSize[0]):
-            alpha[i] = self.compute_alpha(dense_xyz[i].view(-1,3), self.rf.stepSize).view((gridSize[1], gridSize[2]))
+            alpha[i] = self.compute_alpha(dense_xyz[i].view(-1,4), self.rf.stepSize).view((gridSize[1], gridSize[2]))
         return alpha, dense_xyz
 
     @torch.no_grad()
@@ -263,14 +265,14 @@ class TensorNeRF(torch.nn.Module):
 
         valid_xyz = dense_xyz[alpha>0.5]
 
-        xyz_min = valid_xyz.amin(0)
-        xyz_max = valid_xyz.amax(0)
+        xyz_min = valid_xyz.amin(0)[:3]
+        xyz_max = valid_xyz.amax(0)[:3]
 
         new_aabb = torch.stack((xyz_min, xyz_max))
 
         total = torch.sum(alpha)
         print(f"bbox: {xyz_min, xyz_max} alpha rest %%%f"%(total/total_voxels*100))
-        return new_aabb
+        return new_aabb[:3]
 
     @torch.no_grad()
     def filtering_rays(self, all_rays, all_rgbs, focal, N_samples=256, chunk=10240*5, bbox_only=False):
@@ -309,6 +311,7 @@ class TensorNeRF(torch.nn.Module):
     def feature2density(self, density_features):
         if self.fea2denseAct == "softplus":
             return F.softplus(density_features+self.density_shift)
+            # return F.softplus(density_features, beta=10)
         elif self.fea2denseAct == "relu":
             return F.relu(density_features)
 

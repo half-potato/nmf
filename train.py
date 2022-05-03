@@ -246,134 +246,135 @@ def reconstruction(args):
     # ratio of meters to pixels at a distance of 1 meter
     focal = (train_dataset.focal[0] if ndc_ray else train_dataset.focal)
     # / train_dataset.img_wh[0]
-    # with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], with_stack=True) as prof:
     N = 0
     bundle_psnrs = 0
-    for iteration in pbar:
+    # with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], with_stack=True, record_shapes=True) as prof:
+    if True:
+        for iteration in pbar:
 
 
-        ray_idx, rgb_idx = trainingSampler.nextids()
+            ray_idx, rgb_idx = trainingSampler.nextids()
 
-        # patches = allrgbs[ray_idx].reshape(-1, args.bundle_size, args.bundle_size, 3)
-        # plt.imshow(patches[0])
-        # plt.show()
+            # patches = allrgbs[ray_idx].reshape(-1, args.bundle_size, args.bundle_size, 3)
+            # plt.imshow(patches[0])
+            # plt.show()
 
-        # rays_train, rgb_train = allrays[ray_idx], allrgbs[rgb_idx].to(device).reshape(-1, args.bundle_size, args.bundle_size, 3)
-        rays_train, rgb_train = allrays[ray_idx], allrgbs[rgb_idx].reshape(-1, args.bundle_size, args.bundle_size, 3)
+            # rays_train, rgb_train = allrays[ray_idx], allrgbs[rgb_idx].to(device).reshape(-1, args.bundle_size, args.bundle_size, 3)
+            rays_train, rgb_train = allrays[ray_idx], allrgbs[rgb_idx].reshape(-1, args.bundle_size, args.bundle_size, 3)
 
-        #rgb_map, alphas_map, depth_map, weights, uncertainty
-        rgb_map, alphas_map, depth_map, weights, normal_sim, normal_map = renderer(
-            rays_train, tensorf, focal=focal, chunk=args.batch_size,
-            N_samples=nSamples, white_bg = white_bg, ndc_ray=ndc_ray, device=device, is_train=True)
+            #rgb_map, alphas_map, depth_map, weights, uncertainty
+            rgb_map, alphas_map, depth_map, weights, normal_sim, normal_map = renderer(
+                rays_train, tensorf, focal=focal, chunk=args.batch_size,
+                N_samples=nSamples, white_bg = white_bg, ndc_ray=ndc_ray, device=device, is_train=True)
 
-        loss = torch.mean((rgb_map[:, 1, 1] - rgb_train[:, 1, 1]) ** 2)
-        normal_loss = -normal_sim
-        # loss = torch.mean((rgb_map - rgb_train) ** 2)
-        diff = (rgb_map - rgb_train) ** 2
-        bundle_loss = diff.permute(0, 3, 1, 2).reshape(-1, 3, 3).mean(dim=0)
-        bundle_psnr = -10.0 * torch.log(bundle_loss) / np.log(10.0)
-        bundle_psnrs += bundle_psnr.detach().cpu()
-
-
-        # loss
-        total_loss = loss + args.normal_lambda*normal_loss
-        if Ortho_reg_weight > 0:
-            loss_reg = tensorf.rf.vector_comp_diffs()
-            total_loss += Ortho_reg_weight*loss_reg
-            summary_writer.add_scalar('train/reg', loss_reg.detach().item(), global_step=iteration)
-        if L1_reg_weight > 0:
-            loss_reg_L1 = tensorf.rf.density_L1()
-            total_loss += L1_reg_weight*loss_reg_L1
-            summary_writer.add_scalar('train/reg_l1', loss_reg_L1.detach().item(), global_step=iteration)
-
-        if TV_weight_density>0:
-            TV_weight_density *= lr_factor
-            loss_tv = tensorf.rf.TV_loss_density(tvreg) * TV_weight_density
-            total_loss = total_loss + loss_tv
-            summary_writer.add_scalar('train/reg_tv_density', loss_tv.detach().item(), global_step=iteration)
-        if TV_weight_app>0:
-            TV_weight_app *= lr_factor
-            loss_tv = loss_tv + tensorf.rf.TV_loss_app(tvreg)*TV_weight_app
-            total_loss = total_loss + loss_tv
-            summary_writer.add_scalar('train/reg_tv_app', loss_tv.detach().item(), global_step=iteration)
-
-        optimizer.zero_grad()
-        total_loss.backward()
-        optimizer.step()
-
-        loss = loss.detach().item()
-        
-        PSNRs.append(-10.0 * np.log(loss) / np.log(10.0))
-        summary_writer.add_scalar('train/PSNR', PSNRs[-1], global_step=iteration)
-        summary_writer.add_scalar('train/mse', loss, global_step=iteration)
+            loss = torch.mean((rgb_map[:, 1, 1] - rgb_train[:, 1, 1]) ** 2)
+            normal_loss = -normal_sim
+            # loss = torch.mean((rgb_map - rgb_train) ** 2)
+            diff = (rgb_map - rgb_train) ** 2
+            bundle_loss = diff.permute(0, 3, 1, 2).reshape(-1, 3, 3).mean(dim=0)
+            bundle_psnr = -10.0 * torch.log(bundle_loss) / np.log(10.0)
+            bundle_psnrs += bundle_psnr.detach().cpu()
 
 
-        for param_group in optimizer.param_groups:
-            param_group['lr'] = param_group['lr'] * lr_factor
+            # loss
+            total_loss = loss + args.normal_lambda*normal_loss
+            if Ortho_reg_weight > 0:
+                loss_reg = tensorf.rf.vector_comp_diffs()
+                total_loss += Ortho_reg_weight*loss_reg
+                summary_writer.add_scalar('train/reg', loss_reg.detach().item(), global_step=iteration)
+            if L1_reg_weight > 0:
+                loss_reg_L1 = tensorf.rf.density_L1()
+                total_loss += L1_reg_weight*loss_reg_L1
+                summary_writer.add_scalar('train/reg_l1', loss_reg_L1.detach().item(), global_step=iteration)
 
-        # Print the current values of the losses.
-        if iteration % args.progress_refresh_rate == 0:
-            bundle_psnrs = bundle_psnrs / args.progress_refresh_rate
-            center_psnr = bundle_psnrs[1, 1].clone().item()
-            bundle_psnrs[1, 1] = 0
-            surround_psnr = bundle_psnrs.sum().item() / 8
-            pbar.set_description(
-                f'Iteration {iteration:05d}:'
-                + f' train_psnr = {float(np.mean(PSNRs)):.2f}'
-                + f' test_psnr = {float(np.mean(PSNRs_test)):.2f}'
-                + f' center_psnr = {center_psnr:.2f}'
-                + f' surround_psnr = {surround_psnr:.2f}'
-                + f' normal_loss = {normal_loss:.6f}'
-                + f' mse = {loss:.6f}'
-            )
-            PSNRs = []
-            bundle_psnrs = 0
+            if TV_weight_density>0:
+                TV_weight_density *= lr_factor
+                loss_tv = tensorf.rf.TV_loss_density(tvreg) * TV_weight_density
+                total_loss = total_loss + loss_tv
+                summary_writer.add_scalar('train/reg_tv_density', loss_tv.detach().item(), global_step=iteration)
+            if TV_weight_app>0:
+                TV_weight_app *= lr_factor
+                loss_tv = loss_tv + tensorf.rf.TV_loss_app(tvreg)*TV_weight_app
+                total_loss = total_loss + loss_tv
+                summary_writer.add_scalar('train/reg_tv_app', loss_tv.detach().item(), global_step=iteration)
 
+            optimizer.zero_grad()
+            total_loss.backward()
+            optimizer.step()
 
-        if iteration % args.vis_every == args.vis_every - 1 and args.N_vis!=0:
-            PSNRs_test = evaluation(test_dataset,tensorf, args, renderer, f'{logfolder}/imgs_vis/', N_vis=args.N_vis,
-                                    prtx=f'{iteration:06d}_', N_samples=nSamples, white_bg = white_bg, ndc_ray=ndc_ray,
-                                    compute_extra_metrics=False, bundle_size=args.bundle_size, render_mode=args.render_mode)
-            summary_writer.add_scalar('test/psnr', np.mean(PSNRs_test), global_step=iteration)
-            tensorf.save(f'{logfolder}/{args.expname}_{iteration}.th')
-
-
-
-        if iteration in update_AlphaMask_list:
-
-            if reso_cur[0] * reso_cur[1] * reso_cur[2]<256**3:# update volume resolution
-                reso_mask = reso_cur
-            new_aabb = tensorf.updateAlphaMask(tuple(reso_mask))
-            if iteration == update_AlphaMask_list[0]:
-                apply_correction = not torch.all(tensorf.alphaMask.gridSize == tensorf.rf.gridSize)
-                tensorf.rf.shrink(new_aabb, apply_correction)
-                # tensorVM.alphaMask = None
-                L1_reg_weight = args.L1_weight_rest
-                print("continuing L1_reg_weight", L1_reg_weight)
+            loss = loss.detach().item()
+            
+            PSNRs.append(-10.0 * np.log(loss) / np.log(10.0))
+            summary_writer.add_scalar('train/PSNR', PSNRs[-1], global_step=iteration)
+            summary_writer.add_scalar('train/mse', loss, global_step=iteration)
 
 
-            if not args.ndc_ray and iteration == update_AlphaMask_list[1] and args.filter_rays:
-                # filter rays outside the bbox
-                allrays,allrgbs,mask = tensorf.filtering_rays(allrays, allrgbs, focal)
-                if args.bundle_size == 1:
-                    trainingSampler = SimpleSampler(allrays.shape[0], args.batch_size)
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = param_group['lr'] * lr_factor
+
+            # Print the current values of the losses.
+            if iteration % args.progress_refresh_rate == 0:
+                bundle_psnrs = bundle_psnrs / args.progress_refresh_rate
+                center_psnr = bundle_psnrs[1, 1].clone().item()
+                bundle_psnrs[1, 1] = 0
+                surround_psnr = bundle_psnrs.sum().item() / 8
+                pbar.set_description(
+                    f'Iteration {iteration:05d}:'
+                    + f' train_psnr = {float(np.mean(PSNRs)):.2f}'
+                    + f' test_psnr = {float(np.mean(PSNRs_test)):.2f}'
+                    + f' center_psnr = {center_psnr:.2f}'
+                    + f' surround_psnr = {surround_psnr:.2f}'
+                    + f' normal_loss = {normal_loss:.6f}'
+                    + f' mse = {loss:.6f}'
+                )
+                PSNRs = []
+                bundle_psnrs = 0
+
+
+            if iteration % args.vis_every == args.vis_every - 1 and args.N_vis!=0:
+                PSNRs_test = evaluation(test_dataset,tensorf, args, renderer, f'{logfolder}/imgs_vis/', N_vis=args.N_vis,
+                                        prtx=f'{iteration:06d}_', N_samples=nSamples, white_bg = white_bg, ndc_ray=ndc_ray,
+                                        compute_extra_metrics=False, bundle_size=args.bundle_size, render_mode=args.render_mode)
+                summary_writer.add_scalar('test/psnr', np.mean(PSNRs_test), global_step=iteration)
+                tensorf.save(f'{logfolder}/{args.expname}_{iteration}.th')
+
+
+
+            if iteration in update_AlphaMask_list:
+
+                if reso_cur[0] * reso_cur[1] * reso_cur[2]<256**3:# update volume resolution
+                    reso_mask = reso_cur
+                new_aabb = tensorf.updateAlphaMask(tuple(reso_mask))
+                if iteration == update_AlphaMask_list[0]:
+                    apply_correction = not torch.all(tensorf.alphaMask.gridSize == tensorf.rf.gridSize)
+                    tensorf.rf.shrink(new_aabb, apply_correction)
+                    # tensorVM.alphaMask = None
+                    L1_reg_weight = args.L1_weight_rest
+                    print("continuing L1_reg_weight", L1_reg_weight)
+
+
+                if not args.ndc_ray and iteration == update_AlphaMask_list[1] and args.filter_rays:
+                    # filter rays outside the bbox
+                    allrays,allrgbs,mask = tensorf.filtering_rays(allrays, allrgbs, focal)
+                    if args.bundle_size == 1:
+                        trainingSampler = SimpleSampler(allrays.shape[0], args.batch_size)
+                    else:
+                        trainingSampler = BlockSampler(allrays.shape[0], args.batch_size, args.bundle_size, args.bundle_size, *train_dataset.img_wh, mask)
+
+
+            if iteration in upsamp_list:
+                n_voxels = N_voxel_list.pop(0)
+                reso_cur = N_to_reso(n_voxels, tensorf.rf.aabb)
+                nSamples = min(args.nSamples, cal_n_samples(reso_cur,args.step_ratio))
+                tensorf.rf.upsample_volume_grid(reso_cur)
+
+                if args.lr_upsample_reset:
+                    print("reset lr to initial")
+                    lr_scale = 1 #0.1 ** (iteration / args.n_iters)
                 else:
-                    trainingSampler = BlockSampler(allrays.shape[0], args.batch_size, args.bundle_size, args.bundle_size, *train_dataset.img_wh, mask)
-
-
-        if iteration in upsamp_list:
-            n_voxels = N_voxel_list.pop(0)
-            reso_cur = N_to_reso(n_voxels, tensorf.rf.aabb)
-            nSamples = min(args.nSamples, cal_n_samples(reso_cur,args.step_ratio))
-            tensorf.rf.upsample_volume_grid(reso_cur)
-
-            if args.lr_upsample_reset:
-                print("reset lr to initial")
-                lr_scale = 1 #0.1 ** (iteration / args.n_iters)
-            else:
-                lr_scale = args.lr_decay_target_ratio ** (iteration / args.n_iters)
-            grad_vars = tensorf.get_optparam_groups(args.lr_init*lr_scale, args.lr_basis*lr_scale)
-            optimizer = torch.optim.Adam(grad_vars, betas=(0.9, 0.99))
+                    lr_scale = args.lr_decay_target_ratio ** (iteration / args.n_iters)
+                grad_vars = tensorf.get_optparam_groups(args.lr_init*lr_scale, args.lr_basis*lr_scale)
+                optimizer = torch.optim.Adam(grad_vars, betas=(0.9, 0.99))
     # prof.export_chrome_trace('trace.json')
         
 

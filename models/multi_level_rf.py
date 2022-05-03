@@ -29,6 +29,7 @@ class MultiLevelRF(TensorBase):
             level.init_svd_volume(res, device)
 
     def update_stepSize(self, gridSize):
+        print("MultiLevelRF: update_stepSize")
         super().update_stepSize(gridSize)
         for level, res_div in zip(self.levels, self.res_divs):
             level.update_stepSize([g/res_div for g in gridSize])
@@ -53,7 +54,7 @@ class MultiLevelRF(TensorBase):
         # first calculate the size of voxels in meters
         voxel_sizes = torch.tensor([level.units.max() for level in self.levels], dtype=torch.float32, device=xyz_sampled.device)
 
-        # the size should be in meters
+        # then, the weight should be summed from the smallest supported size to the largest
         pad = [1] * (len(size.shape)-1)
         size_diff = abs(voxel_sizes.reshape(1, len(self.levels)) - size.reshape(-1, 1))/voxel_sizes.max()
         weights = F.softmax(-size_diff.reshape(*size.shape, len(self.levels)), dim=-1)
@@ -83,9 +84,9 @@ class MultiLevelRF(TensorBase):
             normal_feature += nf * weights[..., i, None]
         return sigma_feature, normal_feature
 
-    def shrink(self, new_aabb):
+    def shrink(self, new_aabb, apply_correction):
         for level in self.levels:
-            level.shrink(new_aabb)
+            level.shrink(new_aabb, apply_correction)
 
     def vector_comp_diffs(self):
         v = self.levels[0].vector_comp_diffs()
@@ -95,4 +96,4 @@ class MultiLevelRF(TensorBase):
 
     def upsample_volume_grid(self, res_target):
         for level, res_div in zip(self.levels, self.res_divs):
-            level.upsample_volume_grid(res_target / res_div)
+            level.upsample_volume_grid([g // res_div for g in res_target])
