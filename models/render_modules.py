@@ -44,7 +44,7 @@ class MLPRender_Fea(torch.nn.Module):
             inplace=True), layer2, torch.nn.ReLU(inplace=True), layer3)
         torch.nn.init.constant_(self.mlp[-1].bias, 0)
 
-    def forward(self, pts, viewdirs, features):
+    def forward(self, pts, viewdirs, features, **kwargs):
         indata = [features, viewdirs]
         if self.feape > 0:
             indata += [positional_encoding(features, self.feape)]

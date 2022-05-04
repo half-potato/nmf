@@ -25,7 +25,7 @@ model_name = TensorVMSplit
 
 
 shadingMode = MLP_Fea
-fea2denseAct = softplus
+fea2denseAct = softplus_shift
 
 view_pe = 2
 fea_pe = 2

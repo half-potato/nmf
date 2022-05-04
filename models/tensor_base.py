@@ -2,8 +2,9 @@ import torch
 
 class TensorBase:
     def __init__(self, aabb, gridSize, device, density_n_comp, appearance_n_comp,
-                 app_dim, step_ratio, *args, **kwargs):
+                 app_dim, step_ratio, density_res_multi, *args, **kwargs):
         self.density_n_comp = density_n_comp
+        self.density_res_multi = density_res_multi
         self.app_n_comp = appearance_n_comp
         self.gridSize = gridSize
         self.app_dim = app_dim
@@ -26,11 +27,13 @@ class TensorBase:
             'appearance_n_comp': self.app_n_comp,
             'app_dim': self.app_dim,
             'step_ratio': self.step_ratio,
+            'density_res_multi': self.density_res_multi,
         }
 
     def update_stepSize(self, gridSize):
         print("aabb", self.aabb.view(-1))
         print("grid size", gridSize)
+        print("density grid size", [int(self.density_res_multi*g) for g in gridSize])
         self.aabbSize = self.aabb[1] - self.aabb[0]
         self.invaabbSize = 2.0/self.aabbSize
         self.gridSize= torch.LongTensor(gridSize).to(self.device)

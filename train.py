@@ -74,12 +74,12 @@ class BlockSampler:
             self.curr = 0
         # start_time = time.time()
         inds = self.block_ids[self.curr:self.curr+self.batch]
-        image_ind = inds // self.bundles_per_im
+        image_ind = torch.div(inds, self.bundles_per_im, rounding_mode='floor')
 
         wh = inds % self.bundles_per_im
 
         num_bundles_w = self.im_w - 2*self.padding
-        h = (wh // num_bundles_w) + self.padding
+        h = (torch.div(wh, num_bundles_w, rounding_mode='floor')) + self.padding
         w = (wh % num_bundles_w) + self.padding
         centers = image_ind*self.im_w*self.im_h + h*self.im_w + w
         # centers = self.ids[image_ind, h, w]
@@ -194,6 +194,7 @@ def reconstruction(args):
         tensorf.load(ckpt)
     else:
         tensorf = TensorNeRF(args.model_name, aabb, reso_cur, device,
+                    density_res_multi=args.density_res_multi,
                     density_n_comp=n_lamb_sigma, appearance_n_comp=n_lamb_sh, app_dim=args.data_dim_color, near_far=near_far,
                     shadingMode=args.shadingMode, alphaMask_thres=args.alpha_mask_thre, density_shift=args.density_shift, distance_scale=args.distance_scale,
                     pos_pe=args.pos_pe, view_pe=args.view_pe, fea_pe=args.fea_pe, featureC=args.featureC, step_ratio=args.step_ratio,
@@ -267,11 +268,11 @@ def reconstruction(args):
                 rays_train, tensorf, focal=focal, chunk=args.batch_size,
                 N_samples=nSamples, white_bg = white_bg, ndc_ray=ndc_ray, device=device, is_train=True)
 
-            loss = torch.mean((rgb_map[:, 1, 1] - rgb_train[:, 1, 1]) ** 2)
+            # loss = torch.mean((rgb_map[:, 1, 1] - rgb_train[:, 1, 1]) ** 2)
             normal_loss = -normal_sim
-            # loss = torch.mean((rgb_map - rgb_train) ** 2)
+            loss = torch.mean((rgb_map - rgb_train) ** 2)
             diff = (rgb_map - rgb_train) ** 2
-            bundle_loss = diff.permute(0, 3, 1, 2).reshape(-1, 3, 3).mean(dim=0)
+            bundle_loss = diff.permute(0, 3, 1, 2).reshape(-1, args.bundle_size, args.bundle_size).mean(dim=0)
             bundle_psnr = -10.0 * torch.log(bundle_loss) / np.log(10.0)
             bundle_psnrs += bundle_psnr.detach().cpu()
 
@@ -315,8 +316,8 @@ def reconstruction(args):
             # Print the current values of the losses.
             if iteration % args.progress_refresh_rate == 0:
                 bundle_psnrs = bundle_psnrs / args.progress_refresh_rate
-                center_psnr = bundle_psnrs[1, 1].clone().item()
-                bundle_psnrs[1, 1] = 0
+                center_psnr = bundle_psnrs[args.bundle_size//2, args.bundle_size//2].clone().item()
+                bundle_psnrs[args.bundle_size//2, args.bundle_size//2] = 0
                 surround_psnr = bundle_psnrs.sum().item() / 8
                 pbar.set_description(
                     f'Iteration {iteration:05d}:'
