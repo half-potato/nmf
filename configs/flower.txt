@@ -1,6 +1,6 @@
 
 dataset_name = llff
-datadir = ./data/nerf_llff_data/flower
+scenedir = ./data/nerf_llff_data/flower
 expname =  tensorf_flower_VM
 basedir = ./log
 

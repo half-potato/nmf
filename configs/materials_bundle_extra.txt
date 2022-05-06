@@ -1,6 +1,6 @@
 
 dataset_name = blender
-datadir = /data/nerf_synthetic/materials
+scenedir = /data/nerf_synthetic/materials
 expname =  ref_tensorf_materials_VM_bundle_multi_scale
 basedir = ./log
 

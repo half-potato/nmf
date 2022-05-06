@@ -1,6 +1,6 @@
 
 dataset_name = own_data
-datadir = ./data/xxx
+scenedir = ./data/xxx
 expname =  tensorf_xxx_VM
 basedir = ./log
 

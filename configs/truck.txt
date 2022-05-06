@@ -1,7 +1,7 @@
 
 
 dataset_name = tankstemple
-datadir = ./data/TanksAndTemple/Truck
+scenedir = ./data/TanksAndTemple/Truck
 expname =  tensorf_truck_VM
 basedir = ./log
 

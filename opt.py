@@ -1,4 +1,5 @@
 import configargparse
+from pathlib import Path
 
 def config_parser(cmd=None):
     parser = configargparse.ArgumentParser()
@@ -21,7 +22,9 @@ def config_parser(cmd=None):
                         help='where to store ckpts and logs')
     parser.add_argument("--add_timestamp", type=int, default=0,
                         help='add timestamp to dir')
-    parser.add_argument("--datadir", type=str, default='./data/llff/fern',
+    parser.add_argument("--rootdir", type=Path, default='/data/',
+                        help='input data directory')
+    parser.add_argument("--scenedir", type=Path, default='llff/fern',
                         help='input data directory')
     parser.add_argument("--progress_refresh_rate", type=int, default=10,
                         help='how many iterations to show psnrs or iters')
@@ -140,6 +143,8 @@ def config_parser(cmd=None):
     parser.add_argument("--vis_every", type=int, default=10000,
                         help='frequency of visualize the image')
     if cmd is not None:
-        return parser.parse_args(cmd)
+        args = parser.parse_args(cmd)
     else:
-        return parser.parse_args()
+        args = parser.parse_args()
+    args.datadir = args.rootdir / args.scenedir
+    return args
