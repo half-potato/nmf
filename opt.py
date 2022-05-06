@@ -11,6 +11,7 @@ def config_parser(cmd=None):
     parser.add_argument('--normal_lambda', type=float, default=1e-5)
     parser.add_argument('--density_n_comp', type=int, default=8)
     parser.add_argument('--density_res_multi', type=float, default=1)
+    parser.add_argument('--appearance_n_comp', type=int, default=24)
 
     parser.add_argument('--config', is_config_file=True,
                         help='config file path')

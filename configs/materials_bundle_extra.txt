@@ -14,17 +14,16 @@ render_mode = center
 #step_ratio = 0.25
 density_grid_dims = 8
 density_n_comp = 16
+appearance_n_comp = 36
 
 featureC = 128
-#N_voxel_init = 2097156 # 128**3
-#N_voxel_final = 27000000 # 300**3
-upsamp_list = [3000,4000,5500,7000]
-#upsamp_list = [8000,12000,16000,22000,28000]
-update_AlphaMask_list = [2000,4000]
+featureC = 256
 
-density_res_multi = 2
-N_voxel_init = 262144 # 64**3
+N_voxel_init = 2097156 # 128**3
 N_voxel_final = 27000000 # 300**3
+upsamp_list = [3000,4000,5500,7000]
+update_AlphaMask_list = [2000,4000]
+density_res_multi = 1
 step_ratio = 0.25
 
 N_vis = 5

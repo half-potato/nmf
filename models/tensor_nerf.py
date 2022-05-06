@@ -90,8 +90,9 @@ class TensorNeRF(torch.nn.Module):
         if shadingMode == 'MLP_PE':
             self.renderModule = render_modules.MLPRender_PE(self.app_dim, view_pe, pos_pe, featureC).to(device)
         elif shadingMode == 'MLP_Fea':
-            self.renderModule = render_modules.MLPRender_Fea(self.app_dim, view_pe, fea_pe, featureC).to(device)
-            self.reflectionModule = render_modules.MLPRender_Fea(self.app_dim, view_pe, fea_pe, featureC).to(device)
+            ref_pe = 6
+            self.renderModule = render_modules.MLPRender_Fea(self.app_dim, view_pe, fea_pe, ref_pe, featureC).to(device)
+            self.reflectionModule = render_modules.MLPRender_Fea(self.app_dim, view_pe, fea_pe, ref_pe, featureC).to(device)
         elif shadingMode == 'BundleMLP_Fea':
             self.renderModule = render_modules.BundleMLPRender_Fea(self.app_dim, view_pe, fea_pe, featureC, self.bundle_size).to(device)
         elif shadingMode == 'MLP':
@@ -231,14 +232,14 @@ class TensorNeRF(torch.nn.Module):
         return rays_pts, interpx, ~mask_outbbox
 
     @torch.no_grad()
-    def getDenseAlpha(self,gridSize=None):
+    def getDenseAlpha(self, gridSize=None):
         gridSize = self.gridSize if gridSize is None else gridSize
 
         dense_xyz = torch.stack([*torch.meshgrid(
             torch.linspace(0, 1, gridSize[0]),
             torch.linspace(0, 1, gridSize[1]),
             torch.linspace(0, 1, gridSize[2])), 
-            torch.ones((gridSize[0], gridSize[1], gridSize[2]))*self.rf.units.max().cpu()
+            torch.ones((gridSize[0], gridSize[1], gridSize[2]))*self.rf.units.min().cpu()*0.5
         ], -1).to(self.device)
 
         dense_xyz[..., :3] = self.rf.aabb[0] * (1-dense_xyz[..., :3]) + self.rf.aabb[1] * dense_xyz[..., :3]
@@ -266,7 +267,7 @@ class TensorNeRF(torch.nn.Module):
 
         self.alphaMask = AlphaGridMask(self.device, self.rf.aabb, alpha)
 
-        valid_xyz = dense_xyz[alpha>0.5]
+        valid_xyz = dense_xyz[alpha>0.0]
 
         xyz_min = valid_xyz.amin(0)[:3]
         xyz_max = valid_xyz.amax(0)[:3]
@@ -391,7 +392,7 @@ class TensorNeRF(torch.nn.Module):
         rays_up = rays_up.view(-1, 1, 3).expand(xyz_sampled_shape)
         n_samples = xyz_sampled_shape[1]
         
-        if self.alphaMask is not None:
+        if self.alphaMask is not None and False:
             alphas = self.alphaMask.sample_alpha(xyz_sampled[ray_valid])
             alpha_mask = alphas > 0
             ray_invalid = ~ray_valid
@@ -444,7 +445,7 @@ class TensorNeRF(torch.nn.Module):
 
                 bundle_weight = self.compute_bundle_weight(all_sigma_feature, rel_density_grid_feature, app_mask, ray_valid, dists)
             else:
-                valid_rgbs = self.renderModule(xyz_sampled[app_mask], viewdirs[app_mask], app_features)
+                valid_rgbs = self.renderModule(xyz_sampled[app_mask], viewdirs[app_mask], app_features, refdirs=d_refdirs[app_mask])
             rgb[rgb_app_mask] = valid_rgbs.reshape(-1, 3)
 
         acc_map = torch.sum(bundle_weight, 1)

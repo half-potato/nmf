@@ -215,6 +215,7 @@ def reconstruction(args):
 
     #linear in logrithmic space
     N_voxel_list = (torch.round(torch.exp(torch.linspace(np.log(args.N_voxel_init), np.log(args.N_voxel_final), len(upsamp_list)+1))).long()).tolist()[1:]
+    smoothing_vals = torch.linspace(1, 0.5, len(upsamp_list)+1).tolist()[1:]
 
 
     torch.cuda.empty_cache()
@@ -365,9 +366,11 @@ def reconstruction(args):
 
             if iteration in upsamp_list:
                 n_voxels = N_voxel_list.pop(0)
+                sval = smoothing_vals.pop(0)
                 reso_cur = N_to_reso(n_voxels, tensorf.rf.aabb)
-                nSamples = min(args.nSamples, cal_n_samples(reso_cur,args.step_ratio))
+                nSamples = min(args.nSamples, cal_n_samples(reso_cur,args.step_ratio/tensorf.rf.density_res_multi))
                 tensorf.rf.upsample_volume_grid(reso_cur)
+                tensorf.rf.set_smoothing(sval)
 
                 if args.lr_upsample_reset:
                     print("reset lr to initial")

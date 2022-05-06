@@ -30,11 +30,13 @@ def RGBRender(xyz_sampled, viewdirs, features):
 
 
 class MLPRender_Fea(torch.nn.Module):
-    def __init__(self, in_channels, viewpe=6, feape=6, featureC=128):
+    def __init__(self, in_channels, viewpe=6, feape=6, refpe=6, featureC=128):
         super(MLPRender_Fea, self).__init__()
 
-        self.in_mlpC = 2*viewpe*3 + 2*feape*in_channels + 3 + in_channels
+        self.in_mlpC = 2*refpe*3 + 2*viewpe*3 + 2*feape*in_channels + 3 + in_channels
+        self.in_mlpC += 3 if refpe > 0 else 0
         self.viewpe = viewpe
+        self.refpe = refpe
         self.feape = feape
         layer1 = torch.nn.Linear(self.in_mlpC, featureC)
         layer2 = torch.nn.Linear(featureC, featureC)
@@ -44,12 +46,14 @@ class MLPRender_Fea(torch.nn.Module):
             inplace=True), layer2, torch.nn.ReLU(inplace=True), layer3)
         torch.nn.init.constant_(self.mlp[-1].bias, 0)
 
-    def forward(self, pts, viewdirs, features, **kwargs):
+    def forward(self, pts, viewdirs, features, refdirs=None, **kwargs):
         indata = [features, viewdirs]
         if self.feape > 0:
             indata += [positional_encoding(features, self.feape)]
         if self.viewpe > 0:
             indata += [positional_encoding(viewdirs, self.viewpe)]
+        if self.refpe > 0:
+            indata += [positional_encoding(refdirs, self.refpe), refdirs]
         mlp_in = torch.cat(indata, dim=-1)
         rgb = self.mlp(mlp_in)
         rgb = torch.sigmoid(rgb)

@@ -1,7 +1,7 @@
 
 dataset_name = blender
 datadir = /data/nerf_synthetic/materials
-expname =  ref_tensorf_materials_multi_scale_mul9
+expname =  ref_tensorf_materials_multi_scale
 basedir = ./log
 
 n_iters = 30000
@@ -10,21 +10,22 @@ batch_size = 4096
 render_mode = center
 #step_ratio = 0.25
 #density_grid_dims = 8
-#density_n_comp = 16
+density_n_comp = 16
+appearance_n_comp = 36
 
-featureC = 128
-#N_voxel_init = 2097156 # 128**3
-N_voxel_init = 262144 # 64**3
+#featureC = 128
+featureC = 256
+N_voxel_init = 2097156 # 128**3
+#N_voxel_init = 262144 # 64**3
 N_voxel_final = 27000000 # 300**3
 
-density_res_multi = 2
+density_res_multi = 1
 
-step_ratio = 0.25
+step_ratio = 0.5
 
 #upsamp_list = [3000,4000,5500,7000]
-upsamp_list = [3000,1000,5000,7000]
-#upsamp_list = [8000,12000,16000,22000,28000]
-update_AlphaMask_list = [500, 2000,4000]
+upsamp_list = [2000,3000,4000,5500,7000]
+update_AlphaMask_list = [2000,4000]
 
 N_vis = 5
 vis_every = 10000

@@ -193,10 +193,16 @@ class TensorVMSplit(TensorBase):
         self.sizes = [1, *self.sizes]
 
         # num_levels x num_outputs
-        self.norm_line_kernels = [[combine_kernels1d(gaussian_fn(2*s+3, std=s).to(device), conv) for s in self.sizes] for conv in [None, self.dz_filter]]
-        self.norm_plane_kernels = [[combine_kernels2d(gkern(2*s+3, std=s).to(device), conv) for s in self.sizes] for conv in [None, self.dx_filter, self.dy_filter]]
+        # self.interp_mode = 'bilinear'
+        self.set_smoothing(1)
+        self.interp_mode = 'bicubic'
+        # self.norm_line_kernels = [[combine_kernels1d(kernel, conv) for kernel in self.line_kernels] for conv in [None, self.dz_filter]]
+        # self.norm_plane_kernels = [[combine_kernels2d(kernel, conv) for kernel in self.plane_kernels] for conv in [None, self.dx_filter, self.dy_filter]]
 
-
+    def set_smoothing(self, sm):
+        print(f"Setting smoothing to {sm}")
+        self.norm_line_kernels = [[combine_kernels1d(gaussian_fn(2*s+3, std=s*sm).to(self.device), conv) for s in self.sizes] for conv in [None, self.dz_filter]]
+        self.norm_plane_kernels = [[combine_kernels2d(gkern(2*s+3, std=s*sm).to(self.device), conv) for s in self.sizes] for conv in [None, self.dx_filter, self.dy_filter]]
 
     def init_svd_volume(self, res, device):
         self.density_plane, self.density_line = self.init_one_svd(self.density_n_comp, [int(self.density_res_multi*g) for g in self.gridSize], 0.1, -0, device)
@@ -280,7 +286,7 @@ class TensorVMSplit(TensorBase):
 
         out = torch.cat(out, dim=1)
         
-        ms_plane_coef = F.grid_sample(out, coordinate_plane, mode='bicubic', align_corners=True)
+        ms_plane_coef = F.grid_sample(out, coordinate_plane, mode=self.interp_mode, align_corners=True)
         # ms_line_coef.shape: len(self.line_kernels), len(convs), n_comp, N
         ms_plane_coef = ms_plane_coef.reshape(num_outputs, num_scales, n_comp, -1).permute(1, 0, 2, 3)
         # line_coef.shape: len(convs), n_comp, N
@@ -313,7 +319,7 @@ class TensorVMSplit(TensorBase):
                 out.append(level)
         out = torch.cat(out, dim=1)
         
-        ms_line_coef = F.grid_sample(out, coordinate_line, mode='bicubic', align_corners=True)
+        ms_line_coef = F.grid_sample(out, coordinate_line, mode=self.interp_mode, align_corners=True)
         # ms_line_coef.shape: len(self.line_kernels), len(convs), n_comp, N
         ms_line_coef = ms_line_coef.reshape(num_outputs, num_scales, n_comp, -1).permute(1, 0, 2, 3)
         # line_coef.shape: len(convs), n_comp, N
@@ -379,6 +385,7 @@ class TensorVMSplit(TensorBase):
         for idx_plane in range(len(self.density_plane)):
             plane_coef_point = self.multi_size_plane(self.density_plane[idx_plane], coordinate_plane[[idx_plane]], size_weights, plane_kerns)
             line_coef_point = self.multi_size_line(self.density_line[idx_plane], coordinate_line[[idx_plane]], size_weights, line_kerns)
+            # ic(plane_coef_point.mean(), line_coef_point.mean())
             sigma_feature = sigma_feature + torch.sum(plane_coef_point * line_coef_point, dim=0)
         return sigma_feature
 
@@ -406,9 +413,9 @@ class TensorVMSplit(TensorBase):
             # world_normals[:, self.matMode[idx_plane][0]] += (activation_fn(line_coef_point)*dx_point).sum(dim=0)
             # world_normals[:, self.matMode[idx_plane][1]] += (activation_fn(line_coef_point)*dy_point).sum(dim=0)
             # world_normals[:, self.vecMode[idx_plane]] += (activation_fn(plane_coef_point)*dz_point).sum(dim=0)
-            world_normals[:, self.matMode[idx_plane][0]] += (line_coef_point*dx_point).sum(dim=0)
-            world_normals[:, self.matMode[idx_plane][1]] += (line_coef_point*dy_point).sum(dim=0)
-            world_normals[:, self.vecMode[idx_plane]] += (plane_coef_point*dz_point).sum(dim=0)
+            world_normals[:, self.matMode[idx_plane][0]] += (line_coef_point*dx_point).sum(dim=0)*self.units[0]
+            world_normals[:, self.matMode[idx_plane][1]] += (line_coef_point*dy_point).sum(dim=0)*self.units[1]
+            world_normals[:, self.vecMode[idx_plane]] += (plane_coef_point*dz_point).sum(dim=0)*self.units[2]
         world_normals = world_normals / (torch.norm(world_normals, dim=1, keepdim=True)+1e-6)
         return sigma_feature, world_normals
 
@@ -527,11 +534,11 @@ class TensorVMSplit(TensorBase):
         t_l, b_r = (xyz_min - self.aabb[0]) / self.units, (xyz_max - self.aabb[0]) / self.units
         # print(new_aabb, self.aabb)
         # print(t_l, b_r,self.alphaMask.alpha_volume.shape)
-        dt_l, db_r = torch.round(torch.round(t_l*self.density_res_multi)).long(), torch.round(b_r*self.density_res_multi).long() + 1
+        dt_l, db_r = torch.round(t_l*self.density_res_multi).long(), torch.round(b_r*self.density_res_multi).long() + 1
         t_l, b_r = torch.round(torch.round(t_l)).long(), torch.round(b_r).long() + 1
         b_r = torch.stack([b_r, self.gridSize]).amin(0)
-        ic(self.gridSize)
-        # b_r = torch.stack([b_r, self.density_res_multi*self.gridSize]).amin(0)
+        db_r = torch.stack([db_r, (self.density_res_multi*self.gridSize).long()]).amin(0)
+        ic(db_r, dt_l, b_r, t_l, xyz_min, xyz_max, self.units, self.aabb)
 
         for i in range(len(self.vecMode)):
             mode0 = self.vecMode[i]
