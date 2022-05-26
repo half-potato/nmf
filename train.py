@@ -1,5 +1,6 @@
 
 import os
+import shutil
 from tracemalloc import start
 from tqdm.auto import tqdm
 from models.tensor_nerf import TensorNeRF
@@ -159,6 +160,7 @@ def reconstruction(args):
 
     # init resolution
     upsamp_list = args.upsamp_list
+    uplambda_list = args.uplambda_list
     update_AlphaMask_list = args.update_AlphaMask_list
     n_lamb_sigma = args.n_lamb_sigma
     n_lamb_sh = args.n_lamb_sh
@@ -175,6 +177,7 @@ def reconstruction(args):
     os.makedirs(f'{logfolder}/imgs_vis', exist_ok=True)
     os.makedirs(f'{logfolder}/imgs_rgba', exist_ok=True)
     os.makedirs(f'{logfolder}/rgba', exist_ok=True)
+    shutil.copy(args.config, f'{logfolder}/config.txt')
     summary_writer = SummaryWriter(logfolder)
 
 
@@ -197,7 +200,7 @@ def reconstruction(args):
                     density_res_multi=args.density_res_multi,
                     density_n_comp=n_lamb_sigma, appearance_n_comp=n_lamb_sh, app_dim=args.data_dim_color, near_far=near_far,
                     shadingMode=args.shadingMode, alphaMask_thres=args.alpha_mask_thre, density_shift=args.density_shift, distance_scale=args.distance_scale,
-                    pos_pe=args.pos_pe, view_pe=args.view_pe, fea_pe=args.fea_pe, featureC=args.featureC, step_ratio=args.step_ratio,
+                    pos_pe=args.pos_pe, view_pe=args.view_pe, ref_pe=args.ref_pe, fea_pe=args.fea_pe, featureC=args.featureC, step_ratio=args.step_ratio,
                     fea2denseAct=args.fea2denseAct, bundle_size=args.bundle_size, density_grid_dims=args.density_grid_dims, enable_reflections=args.enable_reflections)
 
 
@@ -215,7 +218,13 @@ def reconstruction(args):
 
     #linear in logrithmic space
     N_voxel_list = (torch.round(torch.exp(torch.linspace(np.log(args.N_voxel_init), np.log(args.N_voxel_final), len(upsamp_list)+1))).long()).tolist()[1:]
-    smoothing_vals = torch.linspace(1, 0.5, len(upsamp_list)+1).tolist()[1:]
+    l_list = torch.linspace(1.0, 0.0, len(uplambda_list)+1).tolist()
+    tensorf.l = l_list.pop(0)
+
+    # smoothing_vals = [0.6, 0.7, 0.8, 0.7, 0.5]
+    smoothing_vals = torch.linspace(args.smoothing_start, args.smoothing_end, len(upsamp_list)+1).tolist()
+    tensorf.rf.set_smoothing(smoothing_vals.pop(0))
+    # smoothing_vals = torch.linspace(0.5, 0.5, len(upsamp_list)+1).tolist()[1:]
 
 
     torch.cuda.empty_cache()
@@ -270,7 +279,7 @@ def reconstruction(args):
                 N_samples=nSamples, white_bg = white_bg, ndc_ray=ndc_ray, device=device, is_train=True)
 
             # loss = torch.mean((rgb_map[:, 1, 1] - rgb_train[:, 1, 1]) ** 2)
-            normal_loss = -normal_sim
+            normal_loss = normal_sim
             loss = torch.mean((rgb_map - rgb_train) ** 2)
             diff = (rgb_map - rgb_train) ** 2
             bundle_loss = diff.permute(0, 3, 1, 2).reshape(-1, args.bundle_size, args.bundle_size).mean(dim=0)
@@ -331,7 +340,7 @@ def reconstruction(args):
                 )
                 PSNRs = []
                 bundle_psnrs = 0
-
+                
 
             if iteration % args.vis_every == args.vis_every - 1 and args.N_vis!=0:
                 PSNRs_test = evaluation(test_dataset,tensorf, args, renderer, f'{logfolder}/imgs_vis/', N_vis=args.N_vis,
@@ -364,12 +373,16 @@ def reconstruction(args):
                         trainingSampler = BlockSampler(allrays.shape[0], args.batch_size, args.bundle_size, args.bundle_size, *train_dataset.img_wh, mask)
 
 
+            if iteration in uplambda_list:
+                tensorf.l = l_list.pop(0)
+
             if iteration in upsamp_list:
                 n_voxels = N_voxel_list.pop(0)
-                sval = smoothing_vals.pop(0)
                 reso_cur = N_to_reso(n_voxels, tensorf.rf.aabb)
                 nSamples = min(args.nSamples, cal_n_samples(reso_cur,args.step_ratio/tensorf.rf.density_res_multi))
                 tensorf.rf.upsample_volume_grid(reso_cur)
+
+                sval = smoothing_vals.pop(0)
                 tensorf.rf.set_smoothing(sval)
 
                 if args.lr_upsample_reset:

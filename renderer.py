@@ -139,8 +139,7 @@ def depth_to_normals(depth, focal):
     normals = torch.stack([dx * inv_denom, -dy * inv_denom, inv_denom], -1)
     return normals
 
-@torch.no_grad()
-def evaluation(test_dataset,tensorf, args, renderer, savePath=None, N_vis=5, prtx='', N_samples=-1,
+def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N_samples=-1,
                white_bg=False, ndc_ray=False, compute_extra_metrics=True, device='cuda', bundle_size=1, render_mode='decimate'):
     PSNRs, rgb_maps, depth_maps = [], [], []
     ssims,l_alex,l_vgg=[],[],[]
@@ -153,16 +152,11 @@ def evaluation(test_dataset,tensorf, args, renderer, savePath=None, N_vis=5, prt
         pass
 
     near_far = test_dataset.near_far
-    img_eval_interval = 1 if N_vis < 0 else max(test_dataset.all_rays.shape[0] // N_vis,1)
-    idxs = list(range(0, test_dataset.all_rays.shape[0], img_eval_interval))
     W, H = test_dataset.img_wh
     focal = (test_dataset.focal[0] if ndc_ray else test_dataset.focal)
     brender = BundleRender(renderer, render_mode, bundle_size, H, W, focal)
     print(f"Using {render_mode} render mode")
-
-    for idx, samples in tqdm(enumerate(test_dataset.all_rays[0::img_eval_interval]), file=sys.stdout):
-
-        rays = samples.view(-1,samples.shape[-1]).to(device)
+    for idx, rays, gt_rgb in iterator():
 
         # rgb_map, _, depth_map, _, _ = renderer(rays, tensorf, chunk=4096, N_samples=N_samples,
         #                                 ndc_ray=ndc_ray, white_bg = white_bg, device=device)
@@ -173,8 +167,7 @@ def evaluation(test_dataset,tensorf, args, renderer, savePath=None, N_vis=5, prt
         normal_map = (normal_map * 127 + 128).clamp(0, 255).byte()
 
         depth_map, _ = visualize_depth_numpy(depth_map.numpy(),near_far)
-        if len(test_dataset.all_rgbs):
-            gt_rgb = test_dataset.all_rgbs[idxs[idx]].view(H, W, 3)
+        if gt_rgb is not None:
             loss = torch.mean((rgb_map - gt_rgb) ** 2)
             PSNRs.append(-10.0 * np.log(loss.item()) / np.log(10.0))
 
@@ -206,6 +199,10 @@ def evaluation(test_dataset,tensorf, args, renderer, savePath=None, N_vis=5, prt
 
     imageio.mimwrite(f'{savePath}/{prtx}video.mp4', np.stack(rgb_maps), fps=30, quality=10)
     imageio.mimwrite(f'{savePath}/{prtx}depthvideo.mp4', np.stack(depth_maps), fps=30, quality=10)
+    env_map, col_map = tensorf.recover_envmap(1024)
+    env_map = (env_map.cpu().numpy() * 255).astype('uint8')
+    col_map = (col_map.cpu().numpy() * 255).astype('uint8')
+    imageio.imwrite(f'{savePath}/{prtx}col_map.png', col_map)
 
     if PSNRs:
         psnr = np.mean(np.asarray(PSNRs))
@@ -221,63 +218,33 @@ def evaluation(test_dataset,tensorf, args, renderer, savePath=None, N_vis=5, prt
     return PSNRs
 
 @torch.no_grad()
-def evaluation_path(test_dataset,tensorf, c2ws, renderer, savePath=None, N_vis=5, prtx='', N_samples=-1,
-                    white_bg=False, ndc_ray=False, compute_extra_metrics=True, device='cuda', bundle_size=1, render_mode='block'):
-    PSNRs, rgb_maps, depth_maps = [], [], []
-    ssims,l_alex,l_vgg=[],[],[]
-    os.makedirs(savePath, exist_ok=True)
-    os.makedirs(savePath+"/rgbd", exist_ok=True)
+def evaluation(test_dataset,tensorf, unused, renderer, *args, N_vis=5, device='cuda', **kwargs):
 
-
-    try:
-        tqdm._instances.clear()
-    except Exception:
-        pass
-
-    near_far = test_dataset.near_far
+    img_eval_interval = 1 if N_vis < 0 else max(test_dataset.all_rays.shape[0] // N_vis,1)
+    idxs = list(range(0, test_dataset.all_rays.shape[0], img_eval_interval))
     W, H = test_dataset.img_wh
-    focal = (test_dataset.focal[0] if ndc_ray else test_dataset.focal)
-    brender = BundleRender(renderer, render_mode, bundle_size, H, W, focal=focal)
-    for idx, c2w in tqdm(enumerate(c2ws)):
+    def iterator():
+        for idx, samples in tqdm(enumerate(test_dataset.all_rays[0::img_eval_interval]), file=sys.stdout):
+
+            rays = samples.view(-1,samples.shape[-1]).to(device)
+            if len(test_dataset.all_rgbs):
+                gt_rgb = test_dataset.all_rgbs[idxs[idx]].view(H, W, 3)
+                yield idx, rays, gt_rgb
+            else:
+                yield idx, rays, None
+    return evaluate(iterator, test_dataset, tensorf, renderer, *args, device=device, **kwargs)
+
+@torch.no_grad()
+def evaluation_path(test_dataset,tensorf, c2ws, renderer, *args, device='cuda', ndc_ray=False, **kwargs):
+    W, H = test_dataset.img_wh
+    def iterator():
+        for idx, c2w in tqdm(enumerate(c2ws)):
 
 
-        c2w = torch.FloatTensor(c2w)
-        rays_o, rays_d = get_rays(test_dataset.directions, c2w)  # both (h*w, 3)
-        if ndc_ray:
-            rays_o, rays_d = ndc_rays_blender(H, W, test_dataset.focal[0], 1.0, rays_o, rays_d)
-        rays = torch.cat([rays_o, rays_d], 1)  # (h*w, 6)
-
-        # rgb_map, _, depth_map, _, _ = renderer(rays, tensorf, chunk=8192, N_samples=N_samples,
-        #                                 ndc_ray=ndc_ray, white_bg = white_bg, device=device)
-        # rgb_map = rgb_map.clamp(0.0, 1.0)
-
-        rgb_map, depth_map, normal_map = brender(rays, tensorf, chunk=4096, N_samples=N_samples,
-                                     ndc_ray=ndc_ray, white_bg = white_bg, device=device)
-        depth_map, _ = visualize_depth_numpy(depth_map.numpy(),near_far)
-
-        rgb_map = (rgb_map.numpy() * 255).astype('uint8')
-        # rgb_map = np.concatenate((rgb_map, depth_map), axis=1)
-        rgb_maps.append(rgb_map)
-        depth_maps.append(depth_map)
-        if savePath is not None:
-            imageio.imwrite(f'{savePath}/{prtx}{idx:03d}.png', rgb_map)
-            rgb_map = np.concatenate((rgb_map, depth_map), axis=1)
-            imageio.imwrite(f'{savePath}/rgbd/{prtx}{idx:03d}.png', rgb_map)
-            imageio.imwrite(f'{savePath}/rgbd/{prtx}normal_{idx:03d}.png', normal_map)
-
-    imageio.mimwrite(f'{savePath}/{prtx}video.mp4', np.stack(rgb_maps), fps=30, quality=8)
-    imageio.mimwrite(f'{savePath}/{prtx}depthvideo.mp4', np.stack(depth_maps), fps=30, quality=8)
-
-    if PSNRs:
-        psnr = np.mean(np.asarray(PSNRs))
-        if compute_extra_metrics:
-            ssim = np.mean(np.asarray(ssims))
-            l_a = np.mean(np.asarray(l_alex))
-            l_v = np.mean(np.asarray(l_vgg))
-            np.savetxt(f'{savePath}/{prtx}mean.txt', np.asarray([psnr, ssim, l_a, l_v]))
-        else:
-            np.savetxt(f'{savePath}/{prtx}mean.txt', np.asarray([psnr]))
-
-
-    return PSNRs
-
+            c2w = torch.FloatTensor(c2w)
+            rays_o, rays_d = get_rays(test_dataset.directions, c2w)  # both (h*w, 3)
+            if ndc_ray:
+                rays_o, rays_d = ndc_rays_blender(H, W, test_dataset.focal[0], 1.0, rays_o, rays_d)
+            rays = torch.cat([rays_o, rays_d], 1)  # (h*w, 6)
+            yield idx, rays, None
+    return evaluate(iterator, test_dataset, tensorf, renderer, *args, ndc_ray=ndc_ray, **kwargs)

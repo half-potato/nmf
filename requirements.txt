@@ -12,3 +12,4 @@ scikit-image
 lpips
 matplotlib
 tensorboard
+imageio-ffmpeg

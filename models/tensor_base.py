@@ -1,8 +1,9 @@
 import torch
 
-class TensorBase:
+class TensorBase(torch.nn.Module):
     def __init__(self, aabb, gridSize, device, density_n_comp, appearance_n_comp,
                  app_dim, step_ratio, density_res_multi, *args, **kwargs):
+        super().__init__()
         self.density_n_comp = density_n_comp
         self.density_res_multi = density_res_multi
         self.app_n_comp = appearance_n_comp

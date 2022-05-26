@@ -1,5 +1,5 @@
 import torch
-import torch.nn
+import torch.nn as nn
 import torch.nn.functional as F
 from .sh import eval_sh_bases
 from math import pi
@@ -28,10 +28,126 @@ def RGBRender(xyz_sampled, viewdirs, features):
     rgb = features
     return rgb
 
+class safe_atan2(torch.autograd.Function):
+    def __init__(self) -> None:
+        super().__init__()
 
+    @staticmethod
+    def forward(ctx, x, y):
+        ctx.save_for_backward(x, y)
+        return torch.atan2(x, y)
+    
+    @staticmethod
+    def backward(ctx, grad_output):
+        x, y = ctx.saved_tensors
+        eps = 1e-5
+        dx, dy = None, None
+        if ctx.needs_input_grad[0]:
+            dx = grad_output * y / (x**2 + y**2+eps)
+        if ctx.needs_input_grad[1]:
+            dy = grad_output * -x / (x**2 + y**2+eps)
+        # print(x**2 + y**2+eps)
+        # if max(torch.max(torch.abs(dx)), torch.max(torch.abs(dy))) > 1:
+        #     print(x**2 + y**2+eps)
+        #     print(x, y)
+        return dx, dy
+
+atan2 = safe_atan2.apply
+
+class MLPRender_FP(torch.nn.Module):
+    def __init__(self, in_channels, pospe=16, viewpe=6, feape=6, refpe=6, featureC=128):
+        super().__init__()
+
+        self.in_mlpC = 2*pospe*3 + 2*refpe*2 + 2*viewpe*3 + 2*feape*in_channels + 6 + in_channels
+        # self.in_mlpC += 2 if refpe > 0 else 0
+        self.viewpe = viewpe
+        self.refpe = refpe
+        self.feape = feape
+        self.pospe = pospe
+
+        self.mlp = torch.nn.Sequential(
+            torch.nn.Linear(self.in_mlpC, featureC),
+            torch.nn.ReLU(inplace=True),
+            torch.nn.Linear(featureC, featureC),
+            # torch.nn.ReLU(inplace=True),
+            # torch.nn.Linear(featureC, featureC),
+            # torch.nn.ReLU(inplace=True),
+            # torch.nn.Linear(featureC, featureC),
+            # torch.nn.ReLU(inplace=True),
+            # torch.nn.Linear(featureC, featureC),
+            # torch.nn.ReLU(inplace=True),
+            # torch.nn.Linear(featureC, featureC),
+            # torch.nn.ReLU(inplace=True),
+            # torch.nn.Linear(featureC, featureC),
+            # torch.nn.ReLU(inplace=True),
+            # torch.nn.Linear(featureC, featureC),
+            torch.nn.ReLU(inplace=True),
+            torch.nn.Linear(featureC, 3)
+        )
+        torch.nn.init.constant_(self.mlp[-1].bias, 0)
+
+    def forward(self, pts, viewdirs, features, refdirs, **kwargs):
+        pts = pts[..., :3]
+
+        norm2d = torch.sqrt(refdirs[..., 0]**2+refdirs[..., 1]**2)
+
+        indata = [pts, features, viewdirs]
+        if self.pospe > 0:
+            indata += [positional_encoding(pts, self.pospe)]
+        if self.feape > 0:
+            indata += [positional_encoding(features, self.feape)]
+        if self.viewpe > 0:
+            indata += [positional_encoding(viewdirs, self.viewpe)]
+        if self.refpe > 0:
+            refangs = torch.stack([
+                atan2(refdirs[..., 1], refdirs[..., 0]) * norm2d,
+                atan2(refdirs[..., 2], norm2d),
+            ], dim=-1)
+            # freq_bands = (2**torch.arange(self.refpe).float()).to(refangs.device)  # (F,)
+
+            # heading_enc = (refangs[..., 0:1] * freq_bands[None, :]))
+            # heading_enc = heading_enc.reshape(-1, self.refpe)
+            # heading_enc = torch.cat([torch.sin(heading_enc), torch.cos(heading_enc)], dim=-1)
+            # indata += [heading_enc, positional_encoding(refangs[..., 1:2], self.refpe)]
+            # indata += [positional_encoding(refangs[..., 1:2], self.refpe), positional_encoding(refdirs, self.refpe)]
+            indata += [positional_encoding(refangs, self.refpe)]
+        mlp_in = torch.cat(indata, dim=-1)
+        rgb = self.mlp(mlp_in)
+        rgb = torch.sigmoid(rgb)
+
+        return rgb
+
+class MLPDiffuse(torch.nn.Module):
+    def __init__(self, in_channels, pospe=12, feape=6, featureC=128):
+        super().__init__()
+
+        self.in_mlpC = 2*pospe*3 + 3 + 2*feape*in_channels + in_channels
+        self.feape = feape
+        self.pospe = pospe
+        self.mlp = torch.nn.Sequential(
+            torch.nn.Linear(self.in_mlpC, featureC),
+            # torch.nn.ReLU(inplace=True),
+            # torch.nn.Linear(featureC, featureC),
+            torch.nn.ReLU(inplace=True),
+            torch.nn.Linear(featureC, 4),
+        )
+        torch.nn.init.constant_(self.mlp[-1].bias, 0)
+
+    def forward(self, pts, features, **kwargs):
+        pts = pts[..., :3]
+        indata = [features, pts]
+        if self.pospe > 0:
+            indata += [positional_encoding(pts, self.pospe)]
+        if self.feape > 0:
+            indata += [positional_encoding(features, self.feape)]
+        mlp_in = torch.cat(indata, dim=-1)
+        rgb = self.mlp(mlp_in)
+        rgb = torch.sigmoid(rgb)
+
+        return rgb[..., :3], rgb[..., 3:]
 class MLPRender_Fea(torch.nn.Module):
     def __init__(self, in_channels, viewpe=6, feape=6, refpe=6, featureC=128):
-        super(MLPRender_Fea, self).__init__()
+        super().__init__()
 
         self.in_mlpC = 2*refpe*3 + 2*viewpe*3 + 2*feape*in_channels + 3 + in_channels
         self.in_mlpC += 3 if refpe > 0 else 0
@@ -60,10 +176,97 @@ class MLPRender_Fea(torch.nn.Module):
 
         return rgb
 
+class DeepMLPNormal(torch.nn.Module):
+    def __init__(self, pospe=16, featureC=128):
+        super().__init__()
+
+        self.in_mlpC = 2*pospe*3 + 3
+        self.pospe = pospe
+
+        self.mlp0 = torch.nn.Sequential(
+            torch.nn.Linear(self.in_mlpC, featureC),
+            torch.nn.ReLU(inplace=True),
+            # torch.nn.Linear(featureC, featureC),
+            # torch.nn.ReLU(inplace=True),
+            torch.nn.Linear(featureC, featureC),
+            torch.nn.ReLU(inplace=True),
+            torch.nn.Linear(featureC, 3),
+            # torch.nn.ReLU(inplace=True),
+        )
+        self.mlp1 = torch.nn.Sequential(
+            torch.nn.Linear(self.in_mlpC+featureC, featureC),
+            torch.nn.ReLU(inplace=True),
+            torch.nn.Linear(featureC, featureC),
+            torch.nn.ReLU(inplace=True),
+            torch.nn.Linear(featureC, featureC),
+            torch.nn.ReLU(inplace=True),
+            torch.nn.Linear(featureC, 3)
+        )
+        self.mlp0.apply(self.init_weights)
+        self.mlp1.apply(self.init_weights)
+
+    def init_weights(self, m):
+        if isinstance(m, nn.Linear):
+            torch.nn.init.xavier_uniform(m.weight)
+            # m.bias.data.fill_(0.01)
+
+    def forward(self, pts, features, **kwargs):
+        pts = pts[..., :3]
+        indata = [pts]
+        if self.pospe > 0:
+            indata += [positional_encoding(pts, self.pospe)]
+        x0 = torch.cat(indata, dim=-1)
+        x1 = self.mlp0(x0)
+        # x2 = torch.cat([x0, x1], dim=-1)
+        # x3 = self.mlp1(x2)
+        normals = torch.sin(x1)
+        normals = normals / torch.norm(normals, dim=-1, keepdim=True)
+
+        return normals
+
+class MLPNormal(torch.nn.Module):
+    def __init__(self, in_channels, pospe=6, feape=6, featureC=128):
+        super().__init__()
+
+        self.in_mlpC = 2*pospe*3 + 2*feape*in_channels + 3 + in_channels
+        self.pospe = pospe
+        self.feape = feape
+
+        self.mlp = torch.nn.Sequential(
+            torch.nn.Linear(self.in_mlpC, featureC),
+            torch.nn.ReLU(inplace=True),
+            torch.nn.Linear(featureC, featureC),
+            torch.nn.ReLU(inplace=True),
+            torch.nn.Linear(featureC, featureC),
+            torch.nn.ReLU(inplace=True),
+            torch.nn.Linear(featureC, 3)
+        )
+
+    def forward(self, pts, features, **kwargs):
+        pts = pts[..., :3]
+        indata = [features, pts]
+        if self.pospe > 0:
+            indata += [positional_encoding(pts, self.pospe)]
+        if self.feape > 0:
+            indata += [positional_encoding(features, self.feape)]
+        mlp_in = torch.cat(indata, dim=-1)
+        # angles = self.mlp(mlp_in)
+        # azi = angles[:, 0]
+        # ele = angles[:, 1]
+        # normals = torch.stack([
+        #     torch.cos(ele) * torch.cos(azi),
+        #     torch.cos(ele) * torch.sin(azi),
+        #     -torch.sin(ele),
+        # ], dim=1)
+
+        normals = self.mlp(mlp_in)
+        normals = normals / torch.norm(normals, dim=-1, keepdim=True)
+
+        return normals
 
 class MLPRender_PE(torch.nn.Module):
     def __init__(self, in_channels, viewpe=6, pospe=6, featureC=128):
-        super(MLPRender_PE, self).__init__()
+        super().__init__()
 
         self.in_mlpC = (3+2*viewpe*3) + (3+2*pospe*3) + in_channels
         self.viewpe = viewpe
@@ -91,7 +294,7 @@ class MLPRender_PE(torch.nn.Module):
 
 class MLPRender(torch.nn.Module):
     def __init__(self, in_channels, viewpe=6, featureC=128):
-        super(MLPRender, self).__init__()
+        super().__init__()
 
         self.in_mlpC = (3+2*viewpe*3) + in_channels
         self.viewpe = viewpe
@@ -117,7 +320,7 @@ class MLPRender(torch.nn.Module):
 
 class BundleMLPRender(torch.nn.Module):
     def __init__(self, in_channels, viewpe=6, featureC=128, bundle_size=3):
-        super(BundleMLPRender, self).__init__()
+        super().__init__()
 
         self.in_mlpC = (3+2*viewpe*3) + in_channels
         self.viewpe = viewpe
@@ -144,7 +347,7 @@ class BundleMLPRender(torch.nn.Module):
 
 class BundleSHRender_Fea(torch.nn.Module):
     def __init__(self, in_channels, viewpe=6, feape=6, featureC=128, bundle_size=3, ray_up_pe=2):
-        super(BundleMLPRender_Fea, self).__init__()
+        super().__init__()
 
         self.in_mlpC = 2*viewpe*3 + 2*feape*in_channels + \
             3 + in_channels + 1 + 2*ray_up_pe*3
@@ -181,7 +384,7 @@ class BundleSHRender_Fea(torch.nn.Module):
 
 class BundleMLPRender_Fea(torch.nn.Module):
     def __init__(self, in_channels, viewpe=6, feape=6, featureC=128, bundle_size=3, ray_up_pe=2):
-        super(BundleMLPRender_Fea, self).__init__()
+        super().__init__()
 
         self.in_mlpC = 2*viewpe*3 + 2*feape*in_channels + \
             3 + in_channels + 1 + 2*ray_up_pe*3
@@ -334,7 +537,7 @@ class BundleSphEncoding(torch.nn.Module):
 
 class BundleMLPRender_Fea_Grid(torch.nn.Module):
     def __init__(self, in_channels, viewpe=6, feape=6, featureC=128, bundle_size=3, extra=4, ray_up_pe=4, refpe=6):
-        super(BundleMLPRender_Fea_Grid, self).__init__()
+        super().__init__()
 
         self.in_mlpC = 2*viewpe*3 + 3
         self.in_mlpC += 2*feape*in_channels + in_channels
@@ -424,7 +627,7 @@ class BundleMLPRender_Fea_Grid(torch.nn.Module):
 
 class BundleMLPRender_Fea_Normal(torch.nn.Module):
     def __init__(self, in_channels, viewpe=6, feape=6, featureC=128, bundle_size=3, ray_up_pe=4, refpe=6):
-        super(BundleMLPRender_Fea_Grid, self).__init__()
+        super().__init__()
 
         self.in_mlpC = 2*viewpe*3 + 3
         self.in_mlpC += 2*feape*in_channels + in_channels
