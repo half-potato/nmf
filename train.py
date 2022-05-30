@@ -223,6 +223,7 @@ def reconstruction(args):
 
     # smoothing_vals = [0.6, 0.7, 0.8, 0.7, 0.5]
     smoothing_vals = torch.linspace(args.smoothing_start, args.smoothing_end, len(upsamp_list)+1).tolist()
+    print(smoothing_vals)
     tensorf.rf.set_smoothing(smoothing_vals.pop(0))
     # smoothing_vals = torch.linspace(0.5, 0.5, len(upsamp_list)+1).tolist()[1:]
 
@@ -274,7 +275,7 @@ def reconstruction(args):
             rays_train, rgb_train = allrays[ray_idx], allrgbs[rgb_idx].reshape(-1, args.bundle_size, args.bundle_size, 3)
 
             #rgb_map, alphas_map, depth_map, weights, uncertainty
-            rgb_map, alphas_map, depth_map, weights, normal_sim, normal_map = renderer(
+            rgb_map, alphas_map, depth_map, weights, normal_sim, normal_map, roughness = renderer(
                 rays_train, tensorf, focal=focal, chunk=args.batch_size,
                 N_samples=nSamples, white_bg = white_bg, ndc_ray=ndc_ray, device=device, is_train=True)
 
@@ -334,7 +335,7 @@ def reconstruction(args):
                     + f' train_psnr = {float(np.mean(PSNRs)):.2f}'
                     + f' test_psnr = {float(np.mean(PSNRs_test)):.2f}'
                     + f' center_psnr = {center_psnr:.2f}'
-                    + f' surround_psnr = {surround_psnr:.2f}'
+                    + f' roughness = {float(roughness*180/np.pi):.2f}'
                     + f' normal_loss = {normal_loss:.6f}'
                     + f' mse = {loss:.6f}'
                 )

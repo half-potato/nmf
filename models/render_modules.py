@@ -4,7 +4,8 @@ import torch.nn.functional as F
 from .sh import eval_sh_bases
 from math import pi
 from icecream import ic
-
+from . import math
+import numpy as np
 
 def positional_encoding(positions, freqs):
     freq_bands = (2**torch.arange(freqs).float()).to(positions.device)  # (F,)
@@ -12,6 +13,16 @@ def positional_encoding(positions, freqs):
         positions.shape[:-1] + (freqs * positions.shape[-1], ))  # (..., DF)
     pts = torch.cat([torch.sin(pts), torch.cos(pts)], dim=-1)
     return pts
+
+def spherical_encoding(refdirs, roughness, pe, ind_order=[0, 1, 2]):
+    i, j, k = ind_order
+    norm2d = torch.sqrt(refdirs[..., i]**2+refdirs[..., j]**2)
+    refangs = torch.stack([
+        math.atan2(refdirs[..., j], refdirs[..., i]) * norm2d,
+        math.atan2(refdirs[..., k], norm2d),
+    ], dim=-1)
+    return [math.integrated_pos_enc((refangs[..., 0:1], roughness), 0, pe),
+            math.integrated_pos_enc((refangs[..., 1:2], roughness), 0, pe)]
 
 def normal_dist(x, sigma: float):
     SQ2PI = 2.50662827463
@@ -28,38 +39,13 @@ def RGBRender(xyz_sampled, viewdirs, features):
     rgb = features
     return rgb
 
-class safe_atan2(torch.autograd.Function):
-    def __init__(self) -> None:
-        super().__init__()
-
-    @staticmethod
-    def forward(ctx, x, y):
-        ctx.save_for_backward(x, y)
-        return torch.atan2(x, y)
-    
-    @staticmethod
-    def backward(ctx, grad_output):
-        x, y = ctx.saved_tensors
-        eps = 1e-5
-        dx, dy = None, None
-        if ctx.needs_input_grad[0]:
-            dx = grad_output * y / (x**2 + y**2+eps)
-        if ctx.needs_input_grad[1]:
-            dy = grad_output * -x / (x**2 + y**2+eps)
-        # print(x**2 + y**2+eps)
-        # if max(torch.max(torch.abs(dx)), torch.max(torch.abs(dy))) > 1:
-        #     print(x**2 + y**2+eps)
-        #     print(x, y)
-        return dx, dy
-
-atan2 = safe_atan2.apply
-
 class MLPRender_FP(torch.nn.Module):
     def __init__(self, in_channels, pospe=16, viewpe=6, feape=6, refpe=6, featureC=128):
         super().__init__()
 
-        self.in_mlpC = 2*pospe*3 + 2*refpe*2 + 2*viewpe*3 + 2*feape*in_channels + 6 + in_channels
+        self.in_mlpC = 2*pospe*3 + 2*2*refpe*2 + 2*viewpe*3 + 2*feape*in_channels + 6 + in_channels
         # self.in_mlpC += 2 if refpe > 0 else 0
+        self.in_mlpC += 3 if viewpe > 0 else 0
         self.viewpe = viewpe
         self.refpe = refpe
         self.feape = feape
@@ -69,48 +55,37 @@ class MLPRender_FP(torch.nn.Module):
             torch.nn.Linear(self.in_mlpC, featureC),
             torch.nn.ReLU(inplace=True),
             torch.nn.Linear(featureC, featureC),
-            # torch.nn.ReLU(inplace=True),
-            # torch.nn.Linear(featureC, featureC),
-            # torch.nn.ReLU(inplace=True),
-            # torch.nn.Linear(featureC, featureC),
-            # torch.nn.ReLU(inplace=True),
-            # torch.nn.Linear(featureC, featureC),
-            # torch.nn.ReLU(inplace=True),
-            # torch.nn.Linear(featureC, featureC),
-            # torch.nn.ReLU(inplace=True),
-            # torch.nn.Linear(featureC, featureC),
-            # torch.nn.ReLU(inplace=True),
-            # torch.nn.Linear(featureC, featureC),
+            torch.nn.ReLU(inplace=True),
+            torch.nn.Linear(featureC, featureC),
+            torch.nn.ReLU(inplace=True),
+            torch.nn.Linear(featureC, featureC),
+            torch.nn.ReLU(inplace=True),
+            torch.nn.Linear(featureC, featureC),
+            torch.nn.ReLU(inplace=True),
+            torch.nn.Linear(featureC, featureC),
+            torch.nn.ReLU(inplace=True),
+            torch.nn.Linear(featureC, featureC),
+            torch.nn.ReLU(inplace=True),
+            torch.nn.Linear(featureC, featureC),
             torch.nn.ReLU(inplace=True),
             torch.nn.Linear(featureC, 3)
         )
         torch.nn.init.constant_(self.mlp[-1].bias, 0)
 
-    def forward(self, pts, viewdirs, features, refdirs, **kwargs):
+    def forward(self, pts, viewdirs, features, refdirs, roughness, **kwargs):
         pts = pts[..., :3]
 
-        norm2d = torch.sqrt(refdirs[..., 0]**2+refdirs[..., 1]**2)
 
-        indata = [pts, features, viewdirs]
+        indata = [pts, features, refdirs]
         if self.pospe > 0:
             indata += [positional_encoding(pts, self.pospe)]
         if self.feape > 0:
             indata += [positional_encoding(features, self.feape)]
         if self.viewpe > 0:
-            indata += [positional_encoding(viewdirs, self.viewpe)]
+            indata += [positional_encoding(viewdirs, self.viewpe), viewdirs]
         if self.refpe > 0:
-            refangs = torch.stack([
-                atan2(refdirs[..., 1], refdirs[..., 0]) * norm2d,
-                atan2(refdirs[..., 2], norm2d),
-            ], dim=-1)
-            # freq_bands = (2**torch.arange(self.refpe).float()).to(refangs.device)  # (F,)
+            indata += [*spherical_encoding(refdirs, roughness, self.refpe), *spherical_encoding(refdirs, roughness, self.refpe, ind_order=[0, 2, 1])]
 
-            # heading_enc = (refangs[..., 0:1] * freq_bands[None, :]))
-            # heading_enc = heading_enc.reshape(-1, self.refpe)
-            # heading_enc = torch.cat([torch.sin(heading_enc), torch.cos(heading_enc)], dim=-1)
-            # indata += [heading_enc, positional_encoding(refangs[..., 1:2], self.refpe)]
-            # indata += [positional_encoding(refangs[..., 1:2], self.refpe), positional_encoding(refdirs, self.refpe)]
-            indata += [positional_encoding(refangs, self.refpe)]
         mlp_in = torch.cat(indata, dim=-1)
         rgb = self.mlp(mlp_in)
         rgb = torch.sigmoid(rgb)
@@ -129,9 +104,14 @@ class MLPDiffuse(torch.nn.Module):
             # torch.nn.ReLU(inplace=True),
             # torch.nn.Linear(featureC, featureC),
             torch.nn.ReLU(inplace=True),
-            torch.nn.Linear(featureC, 4),
+            torch.nn.Linear(featureC, 7),
         )
         torch.nn.init.constant_(self.mlp[-1].bias, 0)
+        ang_roughness = 20/180*np.pi
+        self.max_roughness = 30/180*np.pi
+        x = ang_roughness / self.max_roughness
+        sigmoid_out = np.log(x/(1-x))
+        torch.nn.init.constant_(self.mlp[-1].bias[-1], sigmoid_out)
 
     def forward(self, pts, features, **kwargs):
         pts = pts[..., :3]
@@ -143,8 +123,11 @@ class MLPDiffuse(torch.nn.Module):
         mlp_in = torch.cat(indata, dim=-1)
         rgb = self.mlp(mlp_in)
         rgb = torch.sigmoid(rgb)
+        roughness = rgb[..., 6:7]*self.max_roughness
+        tint = rgb[..., 3:6] 
+        diffuse = rgb[..., :3] 
 
-        return rgb[..., :3], rgb[..., 3:]
+        return diffuse, tint, roughness
 class MLPRender_Fea(torch.nn.Module):
     def __init__(self, in_channels, viewpe=6, feape=6, refpe=6, featureC=128):
         super().__init__()
