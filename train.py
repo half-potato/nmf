@@ -35,12 +35,13 @@ class SimpleSampler:
         self.curr = total
         self.ids = None
 
-    def nextids(self):
-        self.curr+=self.batch
-        if self.curr + self.batch > self.total:
+    def nextids(self, batch=None):
+        batch = self.batch if batch is None else batch
+        self.curr+=batch
+        if self.curr + batch > self.total:
             self.ids = torch.LongTensor(np.random.permutation(self.total))
             self.curr = 0
-        ids = self.ids[self.curr:self.curr+self.batch]
+        ids = self.ids[self.curr:self.curr+batch]
         return ids, ids
 
 class BlockSampler:
@@ -240,7 +241,7 @@ def reconstruction(args):
         trainingSampler = SimpleSampler(allrays.shape[0], args.batch_size)
     else:
         trainingSampler = BlockSampler(allrays.shape[0], args.batch_size, args.bundle_size, args.bundle_size, *train_dataset.img_wh, mask)
-    trainingSampler = BlockSampler(allrays.shape[0], args.batch_size, args.bundle_size, args.bundle_size, *train_dataset.img_wh, mask)
+    # trainingSampler = BlockSampler(allrays.shape[0], args.batch_size, args.bundle_size, args.bundle_size, *train_dataset.img_wh, mask)
 
     Ortho_reg_weight = args.Ortho_weight
     print("initial Ortho_reg_weight", Ortho_reg_weight)
@@ -265,7 +266,10 @@ def reconstruction(args):
         for iteration in pbar:
 
 
-            ray_idx, rgb_idx = trainingSampler.nextids()
+            if iteration < 16:
+                ray_idx, rgb_idx = trainingSampler.nextids(args.batch_size // 2)
+            else:
+                ray_idx, rgb_idx = trainingSampler.nextids()
 
             # patches = allrgbs[ray_idx].reshape(-1, args.bundle_size, args.bundle_size, 3)
             # plt.imshow(patches[0])

@@ -4,8 +4,9 @@ import torch.nn.functional as F
 from .sh import eval_sh_bases
 from math import pi
 from icecream import ic
-from . import math
+from . import safemath
 import numpy as np
+from models.ise import ISE
 
 def positional_encoding(positions, freqs):
     freq_bands = (2**torch.arange(freqs).float()).to(positions.device)  # (F,)
@@ -18,11 +19,11 @@ def spherical_encoding(refdirs, roughness, pe, ind_order=[0, 1, 2]):
     i, j, k = ind_order
     norm2d = torch.sqrt(refdirs[..., i]**2+refdirs[..., j]**2)
     refangs = torch.stack([
-        math.atan2(refdirs[..., j], refdirs[..., i]) * norm2d,
-        math.atan2(refdirs[..., k], norm2d),
+        safemath.atan2(refdirs[..., j], refdirs[..., i]) * norm2d,
+        safemath.atan2(refdirs[..., k], norm2d),
     ], dim=-1)
-    return [math.integrated_pos_enc((refangs[..., 0:1], roughness), 0, pe),
-            math.integrated_pos_enc((refangs[..., 1:2], roughness), 0, pe)]
+    return [safemath.integrated_pos_enc((refangs[..., 0:1], roughness), 0, pe),
+            safemath.integrated_pos_enc((refangs[..., 1:2], roughness), 0, pe)]
 
 def normal_dist(x, sigma: float):
     SQ2PI = 2.50662827463
@@ -43,7 +44,7 @@ class MLPRender_FP(torch.nn.Module):
     def __init__(self, in_channels, pospe=16, viewpe=6, feape=6, refpe=6, featureC=128):
         super().__init__()
 
-        self.in_mlpC = 2*pospe*3 + 2*2*refpe*2 + 2*viewpe*3 + 2*feape*in_channels + 6 + in_channels
+        self.in_mlpC = 2*pospe*3 + 4*(refpe+1) + 2*viewpe*3 + 2*feape*in_channels + 6 + in_channels
         # self.in_mlpC += 2 if refpe > 0 else 0
         self.in_mlpC += 3 if viewpe > 0 else 0
         self.viewpe = viewpe
@@ -71,6 +72,7 @@ class MLPRender_FP(torch.nn.Module):
             torch.nn.Linear(featureC, 3)
         )
         torch.nn.init.constant_(self.mlp[-1].bias, 0)
+        self.spherical_encoder = ISE(refpe)
 
     def forward(self, pts, viewdirs, features, refdirs, roughness, **kwargs):
         pts = pts[..., :3]
@@ -84,7 +86,9 @@ class MLPRender_FP(torch.nn.Module):
         if self.viewpe > 0:
             indata += [positional_encoding(viewdirs, self.viewpe), viewdirs]
         if self.refpe > 0:
-            indata += [*spherical_encoding(refdirs, roughness, self.refpe), *spherical_encoding(refdirs, roughness, self.refpe, ind_order=[0, 2, 1])]
+            # indata += [self.spherical_encoder(refdirs, 1/torch.sqrt(roughness+1e-6)).reshape(-1, (self.refpe+1)*4)/100]
+            ise_enc = self.spherical_encoder(refdirs, roughness).reshape(-1, (self.refpe+1)*4)
+            indata += [torch.sigmoid(ise_enc)]
 
         mlp_in = torch.cat(indata, dim=-1)
         rgb = self.mlp(mlp_in)
@@ -108,10 +112,11 @@ class MLPDiffuse(torch.nn.Module):
         )
         torch.nn.init.constant_(self.mlp[-1].bias, 0)
         ang_roughness = 20/180*np.pi
-        self.max_roughness = 30/180*np.pi
-        x = ang_roughness / self.max_roughness
-        sigmoid_out = np.log(x/(1-x))
-        torch.nn.init.constant_(self.mlp[-1].bias[-1], sigmoid_out)
+        # self.max_roughness = 30/180*np.pi
+        self.max_roughness = 40
+        # x = ang_roughness / self.max_roughness
+        # sigmoid_out = np.log(x/(1-x))
+        # torch.nn.init.constant_(self.mlp[-1].bias[-1], sigmoid_out)
 
     def forward(self, pts, features, **kwargs):
         pts = pts[..., :3]

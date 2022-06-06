@@ -3,17 +3,17 @@ import numpy as np
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 from scipy.optimize import curve_fit
-from models import math
+from models import safemath
 from icecream import ic
 
 res = 80
 device = 'cpu'
 degree = 16
-M = 6
+M = 1
 N = 2*res**2
 
 def von_mises_fisher(cos_dist, kappa):
-    return torch.exp(cos_dist * kappa) / (2 * np.pi * np.sinh(kappa))
+    return torch.exp(cos_dist * kappa) / (4 * np.pi * np.sinh(kappa))
 
 ele_grid, azi_grid = torch.meshgrid(
     torch.linspace(-np.pi/2, np.pi/2, res, dtype=torch.float32),
@@ -36,8 +36,8 @@ kappas = torch.linspace(1/np.sqrt(0.1/180*np.pi), 1/np.sqrt(30/180*np.pi), M, dt
 
 def spherical_encoding(refdirs, roughness, pe, ind_order=[0, 1, 2]):
     i, j, k = ind_order
-    return [math.integrated_pos_enc((refangs[..., 0:1], roughness), 0, pe),
-            math.integrated_pos_enc((refangs[..., 1:2], roughness), 0, pe)]
+    return [safemath.integrated_pos_enc((refangs[..., 0:1], roughness), 0, pe),
+            safemath.integrated_pos_enc((refangs[..., 1:2], roughness), 0, pe)]
 
 class Model(torch.nn.Module):
     def __init__(self):
@@ -56,8 +56,8 @@ class Model(torch.nn.Module):
         i, j, k = 0, 1, 2
         norm2d = torch.sqrt(vecs[..., i]**2+vecs[..., j]**2)
         refangs = torch.stack([
-            math.atan2(vecs[..., j], vecs[..., i]),
-            math.atan2(vecs[..., k], norm2d),
+            safemath.atan2(vecs[..., j], vecs[..., i]),
+            safemath.atan2(vecs[..., k], norm2d),
         ], dim=-1)
         x = torch.cat([x, refangs], dim=-1)
 
@@ -65,21 +65,22 @@ class Model(torch.nn.Module):
         k1 = self.kappa_layer1(kappa)#**self.exponent1
         return self.layer2(torch.cos(self.vec_layer(x))) * kappa / (2*np.pi*torch.sinh(kappa))
 
-for i, deg in enumerate(range(8, degree)):
+for i, deg in enumerate(range(1, degree)):
     exp_cos_azis = []
     exp_cos_eles = []
     exp_sin_azis = []
     exp_sin_eles = []
     for kappa in tqdm(kappas):
         probs = von_mises_fisher(cosdists, kappa)
-        probs = probs / probs.sum(dim=1, keepdim=True)
+        # probs = probs / probs.sum(dim=1, keepdim=True)
 
         # (N)
-        exp_cos_azi = (torch.cos(deg * azis).reshape(1, N)*probs).sum(dim=-1)
-        exp_cos_ele = (torch.cos(deg * eles).reshape(1, N)*probs).sum(dim=-1)
-
-        exp_sin_azi = (torch.sin(deg * azis).reshape(1, N)*probs).sum(dim=-1)
-        exp_sin_ele = (torch.sin(deg * eles).reshape(1, N)*probs).sum(dim=-1)
+        expazi = (torch.exp(-1j * 2**deg * azis).reshape(1, N)*probs).sum(dim=-1)
+        expele = (torch.exp(-1j * 2**deg * eles).reshape(1, N)*probs).sum(dim=-1)
+        exp_cos_azi = expazi.real
+        exp_sin_azi = expazi.imag
+        exp_cos_ele = expele.real
+        exp_sin_ele = expele.imag
         
         exp_cos_azis.append(exp_cos_azi)
         exp_cos_eles.append(exp_cos_ele)
@@ -124,12 +125,12 @@ for i, deg in enumerate(range(8, degree)):
     # plt.show()
     pred_outs = m(inputs).detach().cpu().reshape(M, res, 2*res)
     """
-    fig, ax = plt.subplots(2, M)
-    for i in range(M):
-        ax[0, i].imshow(pred_outs[i])
-        # ax[1, i].imshow(exp_cos_azis[i].reshape(res, 2*res))
-        ax[1, i].imshow(exp_cos_eles[i].reshape(res, 2*res))
-    plt.show()
+    # fig, ax = plt.subplots(2, M)
+    # for i in range(M):
+    #     ax[0, i].imshow(pred_outs[i])
+    #     # ax[1, i].imshow(exp_cos_azis[i].reshape(res, 2*res))
+    #     ax[1, i].imshow(exp_cos_eles[i].reshape(res, 2*res))
+    # plt.show()
         
     
     

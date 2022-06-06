@@ -50,7 +50,7 @@ fea2denseAct = softplus_shift
 
 pos_pe = 6
 view_pe = 0
-ref_pe = 12
+ref_pe = 4
 fea_pe = 2
 
 L1_weight_inital = 8e-5

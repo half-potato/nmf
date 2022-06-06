@@ -427,7 +427,8 @@ class TensorNeRF(torch.nn.Module):
             torch.cos(ele_grid) * torch.sin(azi_grid),
             -torch.sin(ele_grid),
         ], dim=-1).to(self.device)
-        roughness = 1/np.pi*torch.ones((app_features.shape[0], 1), dtype=xyz.dtype, device=xyz.device)
+        # roughness = 1/np.pi*torch.ones((app_features.shape[0], 1), dtype=xyz.dtype, device=xyz.device)
+        roughness = 20*torch.ones((app_features.shape[0], 1), dtype=xyz.dtype, device=xyz.device)
         envmap = self.renderModule(xyz_samp, staticdir, app_features, refdirs=ang_vecs.reshape(-1, 3), roughness=roughness).reshape(res, 2*res, 3)
         color = self.renderModule(xyz_samp, ang_vecs.reshape(-1, 3), app_features, refdirs=staticdir, roughness=roughness).reshape(res, 2*res, 3)
         return envmap, color
