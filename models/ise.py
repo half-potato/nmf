@@ -354,10 +354,16 @@ class ThetaISEHack(torch.nn.Module):
 class RandISE(torch.nn.Module):
     def __init__(self, rand_n, std=10):
         super().__init__()
-        scales = torch.normal(0, std, (2, rand_n))
+        r = 10
+        theta_scales = torch.normal(0, std, (1, rand_n))
+        phi_ratio = torch.normal(0, 2, (1, rand_n)).clip(min=-r, max=r)
+        scales = torch.cat([
+            theta_scales, phi_ratio*theta_scales
+        ], dim=0)
+        # scales[1].clip(scales[0])
         self.register_buffer('scales', scales)
         self.rand_n = rand_n
-        
+
     def dim(self):
         return 4*self.rand_n
 
@@ -370,13 +376,13 @@ class RandISE(torch.nn.Module):
         # theta = torch.acos(vec[..., k].clip(-1+1e-6, 1-1e-6)) - np.pi/2
         roughness = 1/(kappa**2+1e-8)
         theta_falloff = c**2
-        phi_falloff = torch.exp(-torch.abs(self.scales[None]) * c[:, :, None]**4)
-        x = [...]
         # enc = safemath.integrated_pos_enc((x, roughness), 0, self.max_degree).reshape(-1, self.max_degree, 2)
         x = torch.stack([
             phi, theta*theta_radius
         ], dim=-1)
+        phi_falloff = torch.exp(-torch.abs(self.scales[None]) * c[:, :, None]**2)
         scaled_x = x @ self.scales
+        # phi_falloff = torch.exp(-scaled_x[:, :]**4)
         sinx = torch.sin(scaled_x)
         cosx = torch.cos(scaled_x)
         scaled_roughness = torch.exp(-0.5 * roughness.reshape(-1, 1, 1) * self.scales[None]**2)
@@ -433,8 +439,6 @@ class ISE(torch.nn.Module):
         return (self.phi_ise.max_degree + self.theta_ise.max_degree)*2
 
 if __name__ == "__main__":
-    from mayavi import mlab
-    from tvtk.api import tvtk
     import matplotlib.pyplot as plt
     res = 100
     ele_grid, azi_grid = torch.meshgrid(
@@ -453,20 +457,26 @@ if __name__ == "__main__":
     # ang_vecs.requires_grad = True
     
     max_deg = 6
-    ise = ISE(max_deg)
+    # ise = ISE(max_deg)
+    ise = RandISE(6)
     coeffs1 = ise(ang_vecs, 1*torch.ones(ang_vecs.shape[0]))
     coeffs = ise(ang_vecs, 15*torch.ones(ang_vecs.shape[0]))
     kcoeffs = torch.cat([coeffs1, coeffs], dim=0)
-    ic(torch.mean(kcoeffs, dim=0))
-    ic(torch.std(kcoeffs, dim=0))
-    ic(coeffs.shape)
-    texture = coeffs.sum(dim=1)
+    # ic(torch.mean(kcoeffs, dim=0))
+    # ic(torch.std(kcoeffs, dim=0))
+    # ic(coeffs.shape)
 
     # for deg in range(max_deg):
     #     fig, ax = plt.subplots(2, 2)
+    #     ic(coeffs.shape)
     #     ax[0, 0].imshow(coeffs[:, 0, deg].reshape(res, 2*res))
     #     ax[0, 1].imshow(coeffs[:, 1, deg].reshape(res, 2*res))
-    #     ax[1, 0].imshow(coeffs[:, 2, deg].reshape(res, 2*res))
-    #     ax[1, 1].imshow(coeffs[:, 3, deg].reshape(res, 2*res))
+        # ax[1, 0].imshow(coeffs[:, 2, deg].reshape(res, 2*res))
+        # ax[1, 1].imshow(coeffs[:, 3, deg].reshape(res, 2*res))
 
-    # plt.show()
+    for deg in range(coeffs.shape[1]):
+        fig, ax = plt.subplots(coeffs.shape[2])
+        for i in range(coeffs.shape[2]):
+            ax[i].imshow(coeffs[:, deg, i].reshape(res, 2*res))
+
+    plt.show()

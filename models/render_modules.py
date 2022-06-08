@@ -7,7 +7,7 @@ from icecream import ic
 from . import safemath
 import numpy as np
 from models.ise import ISE, RandISE
-from models.ish import ISH
+from models.ish import ISH, RandISH
 
 def positional_encoding(positions, freqs):
     freq_bands = (2**torch.arange(freqs).float()).to(positions.device)  # (F,)
@@ -48,7 +48,7 @@ class MLPRender_FP(torch.nn.Module):
         # self.spherical_encoder = ISH(refpe)
         self.vspherical_encoder = ISH(viewpe)
         # self.spherical_encoder = RandISE(512, 32)
-        self.spherical_encoder = RandISE(128, 24)
+        self.spherical_encoder = RandISE(128, 5)
         self.in_mlpC = 2*pospe*3 + 2*feape*in_channels + 6 + in_channels + self.spherical_encoder.dim() + self.vspherical_encoder.dim()
         # self.in_mlpC += 2 if refpe > 0 else 0
         # self.in_mlpC += 3 if viewpe > 0 else 0
@@ -77,6 +77,11 @@ class MLPRender_FP(torch.nn.Module):
             torch.nn.Linear(featureC, 3)
         )
         torch.nn.init.constant_(self.mlp[-1].bias, 0)
+        self.mlp.apply(self.init_weights)
+
+    def init_weights(self, m):
+        if isinstance(m, torch.nn.Linear) and m.weight.shape[1] > 200:
+            torch.nn.init.xavier_uniform_(m.weight, gain=0.2688)
 
     def forward(self, pts, viewdirs, features, refdirs, roughness, **kwargs):
         B = pts.shape[0]
@@ -96,7 +101,9 @@ class MLPRender_FP(torch.nn.Module):
             # indata += [torch.sigmoid(ise_enc)]
         if self.refpe > 0:
             # indata += [self.spherical_encoder(refdirs, 1/torch.sqrt(roughness+1e-6)).reshape(-1, (self.refpe+1)*4)/100]
+            # roughness = torch.tensor(20, device=pts.device)
             ise_enc = self.spherical_encoder(refdirs, roughness).reshape(B, -1)
+            # ise_enc = self.spherical_encoder(refdirs, roughness).reshape(B, -1)
             indata += [ise_enc]
 
         mlp_in = torch.cat(indata, dim=-1)
