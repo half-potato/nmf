@@ -6,7 +6,8 @@ from math import pi
 from icecream import ic
 from . import safemath
 import numpy as np
-from models.ise import ISE
+from models.ise import ISE, RandISE
+from models.ish import ISH
 
 def positional_encoding(positions, freqs):
     freq_bands = (2**torch.arange(freqs).float()).to(positions.device)  # (F,)
@@ -44,9 +45,13 @@ class MLPRender_FP(torch.nn.Module):
     def __init__(self, in_channels, pospe=16, viewpe=6, feape=6, refpe=6, featureC=128):
         super().__init__()
 
-        self.in_mlpC = 2*pospe*3 + 4*(refpe+1) + 2*viewpe*3 + 2*feape*in_channels + 6 + in_channels
+        # self.spherical_encoder = ISH(refpe)
+        self.vspherical_encoder = ISH(viewpe)
+        # self.spherical_encoder = RandISE(512, 32)
+        self.spherical_encoder = RandISE(128, 24)
+        self.in_mlpC = 2*pospe*3 + 2*feape*in_channels + 6 + in_channels + self.spherical_encoder.dim() + self.vspherical_encoder.dim()
         # self.in_mlpC += 2 if refpe > 0 else 0
-        self.in_mlpC += 3 if viewpe > 0 else 0
+        # self.in_mlpC += 3 if viewpe > 0 else 0
         self.viewpe = viewpe
         self.refpe = refpe
         self.feape = feape
@@ -72,9 +77,9 @@ class MLPRender_FP(torch.nn.Module):
             torch.nn.Linear(featureC, 3)
         )
         torch.nn.init.constant_(self.mlp[-1].bias, 0)
-        self.spherical_encoder = ISE(refpe)
 
     def forward(self, pts, viewdirs, features, refdirs, roughness, **kwargs):
+        B = pts.shape[0]
         pts = pts[..., :3]
 
 
@@ -84,11 +89,15 @@ class MLPRender_FP(torch.nn.Module):
         if self.feape > 0:
             indata += [positional_encoding(features, self.feape)]
         if self.viewpe > 0:
-            indata += [positional_encoding(viewdirs, self.viewpe), viewdirs]
+            # indata += [positional_encoding(viewdirs, self.viewpe), viewdirs]
+            ise_enc = self.vspherical_encoder(viewdirs, torch.tensor(20, device=pts.device)).reshape(B, -1)
+            indata += [ise_enc]
+            # ise_enc = self.spherical_encoder(viewdirs, roughness).reshape(-1, (self.refpe+1)*4)
+            # indata += [torch.sigmoid(ise_enc)]
         if self.refpe > 0:
             # indata += [self.spherical_encoder(refdirs, 1/torch.sqrt(roughness+1e-6)).reshape(-1, (self.refpe+1)*4)/100]
-            ise_enc = self.spherical_encoder(refdirs, roughness).reshape(-1, (self.refpe+1)*4)
-            indata += [torch.sigmoid(ise_enc)]
+            ise_enc = self.spherical_encoder(refdirs, roughness).reshape(B, -1)
+            indata += [ise_enc]
 
         mlp_in = torch.cat(indata, dim=-1)
         rgb = self.mlp(mlp_in)

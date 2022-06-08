@@ -4,6 +4,7 @@ import numpy as np
 import torch
 from icecream import ic
 import math
+from models import safemath
 
 def read_coeffs(s):
     s = s.strip()
@@ -47,51 +48,150 @@ PHI_COEFFS = read_coeffs("""
 """)
 
 THETA_COEFFS = read_coeffs("""
-   {{{0. - 0.25 I, 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 
-   0.}, {0.106103, 0.333333, 0., 0., 0., 0., 0., 0., 0., 0., 0., 
-   0.}, {0. - 0.1875 I, 0. - 0.294524 I, 0., 0., 0., 0., 0., 0., 0., 
-   0., 0., 0.}, {0.063662, 0.4, 0.2, 0., 0., 0., 0., 0., 0., 0., 0., 
-   0.}, {0. - 0.15625 I, 0. - 0.490874 I, 0. - 0.184078 I, 0., 0., 0.,
-    0., 0., 0., 0., 0., 0.}}, {{-0.125, 0.19635, 0., 0., 0., 0., 0., 
-   0., 0., 0., 0., 0.}, {0. - 0.127324 I, 0. - 0.4 I, 0., 0., 0., 0., 
-   0., 0., 0., 0., 0., 0.}, {-0.125, 0., 0.147262, 0., 0., 0., 0., 0.,
-    0., 0., 0., 0.}, {0. - 0.0909457 I, 0. - 0.571429 I, 
-   0. - 0.285714 I, 0., 0., 0., 0., 0., 0., 0., 0., 
-   0.}, {-0.117188, -0.184078, 0.138058, 0.115049, 0., 0., 0., 0., 0.,
-    0., 0., 0.}}, {{0.03125, -0.294524, 0.0368155, 0., 0., 0., 0., 0.,
-    0., 0., 0., 0.}, {0. + 0.101051 I, 0. + 0.126984 I, 
-   0. - 0.190476 I, 0., 0., 0., 0., 0., 0., 0., 0., 
-   0.}, {0.046875, -0.368155, -0.276117, 0.0460194, 0., 0., 0., 0., 
-   0., 0., 0., 0.}, {0. + 0.090027 I, 0. + 0.363636 I, 
-   0. - 0.121212 I, 0. - 0.20202 I, 0., 0., 0., 0., 0., 0., 0., 
-   0.}, {0.0546875, -0.343612, -0.644272, -0.214757, 0.0469782, 0., 
-   0., 0., 0., 0., 0., 0.}}, {{0.00195313, -0.0859029, 
-   0.161068, -0.0536893, 0.00167779, 0., 0., 0., 0., 0., 0., 
-   0.}, {0. + 0.0496516 I, 0. - 0.144796 I, 0. - 0.106623 I, 
-   0. + 0.171123 I, 0. - 0.0230358 I, 0., 0., 0., 0., 0., 0., 
-   0.}, {0.00488281, -0.207087, 0.241602, 0.201335, -0.113251, 
-   0.00377503, 0., 0., 0., 0., 0., 0.}, {0. + 0.0511439 I, 
-   0. - 0.12892 I, 0. - 0.415337 I, 0. + 0.158768 I, 0. + 0.244503 I, 
-   0. - 0.0400095 I, 0., 0., 0., 0., 0., 0.}, {0.00805664, -0.329039, 
-   0.142373, 0.664405, 0.103813, -0.161949, 0.00570973, 0., 0., 0., 
-   0., 0.}}, {{7.62939*10^-6, -0.00143811, 0.0163585, -0.059981, 
-   0.0843483, -0.0472351, 0.00984064, -0.000602488, 4.70694*10^-6, 0.,
-    0., 0.}, {0. + 0.0216241 I, 0. - 0.0590613 I, 0. + 0.0833085 I, 
-   0. - 0.0540137 I, 0. - 0.0789162 I, 0. + 0.126959 I, 
-   0. - 0.0517717 I, 0. + 0.00649455 I, 0. - 0.000176482 I, 0., 0., 
-   0.}, {0.0000343323, -0.00641755, 0.0687595, -0.20857, 0.143392, 
-   0.129053, -0.150562, 0.0384086, -0.00252057, 0.0000200045, 0., 
-   0.}, {0. + 0.0219284 I, 0. - 0.0817356 I, 0. + 0.127069 I, 
-   0. + 0.0501927 I, 0. - 0.41098 I, 0. + 0.182185 I, 0. + 0.210434 I,
-    0. - 0.135429 I, 0. + 0.0192567 I, 0. - 0.000542893 I, 0., 
-   0.}, {0.0000905991, -0.0167929, 0.168747, -0.399187, -0.103199, 
-   0.681113, -0.0851391, -0.26758, 0.0883698, -0.00622918, 
-   0.0000501501, 0.}}}
+   {{{0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+   0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 
+   0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+    0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 
+   0.}, {0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 
+   0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+    0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 
+   0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+    0.}, {0. - 0.0981748 I, 0., 0. + 0.0981748 I, 0., 0., 0., 0., 0., 
+   0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+    0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 
+   0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+    0., 0., 0., 0., 0., 0., 0., 0.}}, {{0., 0., 0., 0., 0., 0., 0., 
+   0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+    0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 
+   0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+    0., 0., 0., 0., 0., 0., 0., 0., 0.}, {0. - 0.133333 I, 0., 
+   0. + 0.133333 I, 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 
+   0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+    0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 
+   0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+    0.}, {0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 
+   0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+    0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 
+   0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+    0.}}, {{0., -0.0245437, 0., 0.0245437, 0., 0., 0., 0., 0., 0., 0.,
+    0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 
+   0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+    0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 
+   0., 0., 0., 0., 0., 0.}, {0. - 0.0031746 I, 0., 0. + 0.00846561 I, 
+   0., 0. - 0.00529101 I, 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 
+   0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+    0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 
+   0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 
+   0.}, {0., -0.00076699, 0., 0.000511327, 0., 0.000255663, 0., 0., 
+   0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+    0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 
+   0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+    0., 0., 0., 0., 0., 0., 0., 0.}}, {{0., -2.66316*10^-6, 0., 
+   0.000015979, 0., -0.0000282295, 0., 0.0000149137, 0., 0., 0., 0., 
+   0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+    0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 
+   0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+    0., 0., 0., 0.}, {0. - 1.26961*10^-7 I, 0., 0. + 1.45098*10^-6 I, 
+   0., 0. - 4.17883*10^-6 I, 0., 0. + 3.71451*10^-6 I, 0., 
+   0. - 8.59707*10^-7 I, 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 
+   0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+    0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 
+   0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 
+   0.}, {0., -6.24178*10^-8, 0., 3.60636*10^-7, 0., -5.74244*10^-7, 
+   0., 2.02115*10^-7, 0., 7.39106*10^-8, 0., 0., 0., 0., 0., 0., 0., 
+   0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+    0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 
+   0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 
+   0.}}, {{0., -5.75916*10^-17, 0., 1.3438*10^-15, 
+   0., -1.13686*10^-14, 0., 4.67644*10^-14, 0., -1.03966*10^-13, 0., 
+   1.27612*10^-13, 0., -8.13398*10^-14, 0., 2.1011*10^-14, 0., 0., 0.,
+    0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 
+   0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+    0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 
+   0.}, {0. - 9.92344*10^-19 I, 0., 0. + 4.4457*10^-17 I, 0., 
+   0. - 5.74522*10^-16 I, 0., 0. + 3.28298*10^-15 I, 0., 
+   0. - 9.72735*10^-15 I, 0., 0. + 1.57659*10^-14 I, 0., 
+   0. - 1.35829*10^-14 I, 0., 0. + 5.17444*10^-15 I, 0., 
+   0. - 3.81988*10^-16 I, 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 
+   0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+    0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 
+   0., 0., 0., 0., 0.}, {0., -7.87385*10^-19, 0., 1.82973*10^-17, 
+   0., -1.53068*10^-16, 0., 6.18569*10^-16, 0., -1.33733*10^-15, 0., 
+   1.56351*10^-15, 0., -8.96945*10^-16, 0., 1.54456*10^-16, 0., 
+   3.32988*10^-17, 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+    0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 
+   0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+    0., 0.}}, {{0., -1.99187*10^-43, 0., 1.79268*10^-41, 
+   0., -6.20467*10^-40, 0., 1.12381*10^-38, 0., -1.22876*10^-37, 0., 
+   8.80622*10^-37, 0., -4.35474*10^-36, 0., 1.53505*10^-35, 
+   0., -3.93293*10^-35, 0., 7.38977*10^-35, 0., -1.01729*10^-34, 0., 
+   1.01361*10^-34, 0., -7.11084*10^-35, 0., 3.32968*10^-35, 
+   0., -9.33841*10^-36, 0., 1.18613*10^-36, 0., 0., 0., 0., 0., 0., 
+   0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+    0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 
+   0.}, {0. - 1.22731*10^-45 I, 0., 0. + 2.15373*10^-43 I, 0., 
+   0. - 1.12291*10^-41 I, 0., 0. + 2.73935*10^-40 I, 0., 
+   0. - 3.79856*10^-39 I, 0., 0. + 3.32952*10^-38 I, 0., 
+   0. - 1.96763*10^-37 I, 0., 0. + 8.1664*10^-37 I, 0., 
+   0. - 2.44144*10^-36 I, 0., 0. + 5.33024*10^-36 I, 0., 
+   0. - 8.52839*10^-36 I, 0., 0. + 9.92885*10^-36 I, 0., 
+   0. - 8.23727*10^-36 I, 0., 0. + 4.66678*10^-36 I, 0., 
+   0. - 1.65521*10^-36 I, 0., 0. + 2.9426*10^-37 I, 0., 
+   0. - 7.45605*10^-39 I, 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 
+   0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+    0., 0., 0., 0., 0.}, {0., -1.45889*10^-45, 0., 1.31235*10^-43, 
+   0., -4.53228*10^-42, 0., 8.18612*10^-41, 0., -8.92089*10^-40, 0., 
+   6.36812*10^-39, 0., -3.13409*10^-38, 0., 1.09831*10^-37, 
+   0., -2.79327*10^-37, 0., 5.19843*10^-37, 0., -7.06453*10^-37, 0., 
+   6.91095*10^-37, 0., -4.71362*10^-37, 0., 2.10207*10^-37, 
+   0., -5.30591*10^-38, 0., 4.49291*10^-39, 0., 5.20569*10^-40, 0., 
+   0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0.,
+    0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 0., 
+   0.}}, {{0., -2.73084*10^-106, 0., 9.59437*10^-104, 
+   0., -1.32487*10^-101, 0., 9.74296*10^-100, 0., -4.42549*10^-98, 0.,
+    1.35782*10^-96, 0., -2.98721*10^-95, 0., 4.91644*10^-94, 
+   0., -6.24677*10^-93, 0., 6.27636*10^-92, 0., -5.08087*10^-91, 0., 
+   3.36331*10^-90, 0., -1.84206*10^-89, 0., 8.42572*10^-89, 
+   0., -3.24245*10^-88, 0., 1.05576*10^-87, 0., -2.92074*10^-87, 0., 
+   6.8846*10^-87, 0., -1.38475*10^-86, 0., 2.37716*10^-86, 
+   0., -3.47877*10^-86, 0., 4.32824*10^-86, 0., -4.55825*10^-86, 0., 
+   4.03696*10^-86, 0., -2.97911*10^-86, 0., 1.80858*10^-86, 
+   0., -8.8723*10^-87, 0., 3.42793*10^-87, 0., -1.0037*10^-87, 0., 
+   2.09246*10^-88, 0., -2.76635*10^-89, 0., 1.74269*10^-90, 0., 
+   0.}, {0. - 5.98343*10^-109 I, 0., 0. + 4.14547*10^-106 I, 0., 
+   0. - 8.5954*10^-104 I, 0., 0. + 8.44972*10^-102 I, 0., 
+   0. - 4.81486*10^-100 I, 0., 0. + 1.78091*10^-98 I, 0., 
+   0. - 4.59676*10^-97 I, 0., 0. + 8.70423*10^-96 I, 0., 
+   0. - 1.25391*10^-94 I, 0., 0. + 1.41239*10^-93 I, 0., 
+   0. - 1.27053*10^-92 I, 0., 0. + 9.28036*10^-92 I, 0., 
+   0. - 5.57727*10^-91 I, 0., 0. + 2.7868*10^-90 I, 0., 
+   0. - 1.16741*10^-89 I, 0., 0. + 4.12649*10^-89 I, 0., 
+   0. - 1.23681*10^-88 I, 0., 0. + 3.15422*10^-88 I, 0., 
+   0. - 6.85912*10^-88 I, 0., 0. + 1.27288*10^-87 I, 0., 
+   0. - 2.01475*10^-87 I, 0., 0. + 2.71467*10^-87 I, 0., 
+   0. - 3.10248*10^-87 I, 0., 0. + 2.99085*10^-87 I, 0., 
+   0. - 2.41278*10^-87 I, 0., 0. + 1.61079*10^-87 I, 0., 
+   0. - 8.76163*10^-88 I, 0., 0. + 3.79751*10^-88 I, 0., 
+   0. - 1.26901*10^-88 I, 0., 0. + 3.10233*10^-89 I, 0., 
+   0. - 5.0451*10^-90 I, 0., 0. + 4.33987*10^-91 I, 0., 
+   0. - 3.85217*10^-93 I, 0.}, {0., -1.0334*10^-108, 0., 
+   3.63046*10^-106, 0., -5.0107*10^-104, 0., 3.68268*10^-102, 
+   0., -1.67172*10^-100, 0., 5.12568*10^-99, 0., -1.12683*10^-97, 0., 
+   1.85312*10^-96, 0., -2.35255*10^-95, 0., 2.36151*10^-94, 
+   0., -1.90977*10^-93, 0., 1.26278*10^-92, 0., -6.90773*10^-92, 0., 
+   3.15538*10^-91, 0., -1.21245*10^-90, 0., 3.94118*10^-90, 
+   0., -1.08826*10^-89, 0., 2.55966*10^-89, 0., -5.13577*10^-89, 0., 
+   8.79128*10^-89, 0., -1.28224*10^-88, 0., 1.58904*10^-88, 
+   0., -1.66551*10^-88, 0., 1.46642*10^-88, 0., -1.0742*10^-88, 0., 
+   6.45923*10^-89, 0., -3.12806*10^-89, 0., 1.18659*10^-89, 
+   0., -3.37785*10^-90, 0., 6.70662*10^-91, 0., -7.97985*10^-92, 0., 
+   3.35132*10^-93, 0., 2.01548*10^-94}}}
 """)
 
 class ThetaISE(torch.nn.Module):
-    def __init__(self, max_degree=1):
+    def __init__(self, max_degree=1, maxv=200):
         super().__init__()
+        self.maxv = maxv
         # pad coefficients to cube matrix
         self.max_degree = max_degree
         degrees = torch.arange(0, max_degree+1)
@@ -101,20 +201,16 @@ class ThetaISE(torch.nn.Module):
             raise ValueError("max_degree must be less than {}".format(THETA_COEFFS.shape[0]))
         theta_coeffs = THETA_COEFFS[:self.max_degree+1]
         self.max_kappa_pow = theta_coeffs.shape[1]
-        self.max_ab_pow = theta_coeffs.shape[2]
+        self.max_c_pow = theta_coeffs.shape[2]
 
-        ab_pow = torch.arange(self.max_ab_pow)
+        c_pow = torch.arange(self.max_c_pow)
         kappa_pow = torch.arange(self.max_kappa_pow)
 
-        j, k = torch.meshgrid(kappa_pow, ab_pow, indexing='ij')
-        
-        c_powers = ((j-2*k).int().unsqueeze(0) + freqs.reshape(-1, 1, 1) +1).clip(min=0)
         mul = torch.tensor([math.log(math.factorial(f)) for f in freqs]).reshape(1, -1)
 
         self.register_buffer('theta_coeffs', theta_coeffs.cfloat())
         self.register_buffer('mul', mul)
-        self.register_buffer('c_powers', c_powers)
-        self.register_buffer('ab_pow', ab_pow)
+        self.register_buffer('c_pow', c_pow)
         self.register_buffer('kappa_pow', kappa_pow)
         self.register_buffer('freqs', freqs)
 
@@ -122,26 +218,29 @@ class ThetaISE(torch.nn.Module):
         B = vec.shape[0]
         kappa = kappa.reshape(B, 1)
         a, b, c = vec[:, 0:1], vec[:, 1:2], vec[:, 2:3]
-        powab = (a**2+b**2).reshape(B, 1)**self.ab_pow
         powkappa = kappa**self.kappa_pow
-        powc = c.reshape(B, 1, 1, 1)**self.c_powers
+        powc = c.reshape(B, 1)**self.c_pow
         # ic(self.c_power_offset)
         # ic((self.c_powers-self.c_power_offset).min())
-        pow_matrix = powkappa.reshape(B, 1, -1, 1) * powab.reshape(B, 1, 1, -1) * powc
+        pow_matrix = powkappa.reshape(B, -1, 1) * powc.reshape(B, 1, -1)
 
         sinh_norm = - (torch.sinh(kappa)+1e-8).log()
-        mul = (kappa.log()*(self.freqs+1) - self.mul + sinh_norm).exp()# * c**(self.freqs+1+self.c_power_offset)
-        # ic((self.freqs+1+self.c_power_offset).min())
+        # ic(kappa.log(), sinh_norm, (kappa.log()*(self.freqs+1) + sinh_norm))
+        mul = (kappa.log()*(self.freqs+1) - self.mul + sinh_norm).exp()
 
-        coeffs = (self.theta_coeffs.unsqueeze(0) * pow_matrix).sum(dim=(-1,-2))
-        # ic(coeffs.dtype, mul.dtype, sinh_norm.dtype, powc.dtype, powkappa.dtype, powab.dtype, pow_matrix.dtype)
+        coeffs = (self.theta_coeffs.unsqueeze(0) * pow_matrix.unsqueeze(1)).sum(dim=(-1,-2))
         coeffs = coeffs * mul
-        # ic(pow_matrix.mean(), mul.mean(), sinh_norm.mean(), coeffs.mean(), powab.mean(), powc.mean(), powkappa.mean())
-        return coeffs
+        # ic(coeffs.mean())
+        # ic(pow_matrix.mean(), mul.mean(), sinh_norm.mean(), coeffs.mean(), powc.mean(), powkappa.mean(), self.theta_coeffs.mean())
+        return [
+            coeffs.real,#.clip(min=-self.maxv,max=self.maxv),
+            coeffs.imag,#.clip(min=-self.maxv,max=self.maxv),
+        ]
 
 class PhiISE(torch.nn.Module):
-    def __init__(self, max_degree=1):
+    def __init__(self, max_degree=1, maxv=200):
         super().__init__()
+        self.maxv = maxv
         # pad coefficients to cube matrix
         self.max_degree = max_degree
         degrees = torch.arange(0, max_degree+1)
@@ -163,8 +262,8 @@ class PhiISE(torch.nn.Module):
                     a2b2pow = kap_pow - c_pow
                     re_phi_coeffs[deg, c_pow, a2b2pow] = coeff
 
-        
-        mul = torch.tensor([math.log(math.factorial(f)) for f in freqs]).reshape(1, -1)
+        self.adjust = [0.8, 1.0]
+        mul = torch.tensor([math.log(math.factorial(f))*self.adjust[0] for f in freqs]).reshape(1, -1)
         abc_pow = torch.arange(self.max_sqkappa_pow)
         self.register_buffer('phi_coeffs', re_phi_coeffs)
         self.register_buffer('kappa_powers', kappa_powers)
@@ -175,7 +274,7 @@ class PhiISE(torch.nn.Module):
         #format: k is the degree
         # prefix = (a-ib)^k kappa^k  / sinh(kappa)
         # kappa^(2*j) * self.coeffs[k, j] * (a^2+b^2)^j c^(k-j)
-        
+
     def forward(self, vec, kappa):
         B = vec.shape[0]
         kappa = kappa.reshape(B, 1)
@@ -197,31 +296,145 @@ class PhiISE(torch.nn.Module):
         # the first dimension is the degree, but these things are duplicated across the degree
         pow_matrix = powkappa * powab.reshape(B, 1, -1) * powc.reshape(B, -1, 1)
 
-        mul = (kappa.log()*(self.freqs+1) - self.mul).exp() * (a-torch.tensor(1j, dtype=torch.cfloat, device=vec.device)*b)**(self.freqs)
+        mul = (kappa.log()*(self.freqs*self.adjust[1]+1) - self.mul).exp() * (a-torch.tensor(1j, dtype=torch.cfloat, device=vec.device)*b)**(self.freqs)
 
         coeffs = (self.phi_coeffs.unsqueeze(0) * pow_matrix.unsqueeze(1)).sum(dim=(-1,-2)) * mul
-        return coeffs
+        return [
+            coeffs.real,#.clip(min=-self.maxv,max=self.maxv),
+            coeffs.imag,#.clip(min=-self.maxv,max=self.maxv),
+        ]
+
+class PhiISEHack(torch.nn.Module):
+    def __init__(self, max_degree=1):
+        super().__init__()
+        # pad coefficients to cube matrix
+        self.max_degree = max_degree
+        scales = torch.tensor([2**i for i in range(0, self.max_degree)])
+        self.register_buffer('scales', scales)
+
+    def forward(self, vec, kappa):
+        a, b, c = vec[:, 0:1], vec[:, 1:2], vec[:, 2:3]
+        phi = safemath.atan2(b, a)
+        # theta = torch.acos(vec[..., k].clip(-1+1e-6, 1-1e-6)) - np.pi/2
+        roughness = 1/(kappa**2+1e-8)
+        # falloff = torch.exp(-c**16/(0.479426+0.4841333/(1+torch.exp(self.scales[None, :]-5)))**16)
+        falloff = torch.exp(-self.scales[None, :] * c**4)
+        # enc = safemath.integrated_pos_enc((x, roughness), 0, self.max_degree).reshape(-1, self.max_degree, 2)
+        shape = list(phi.shape[:-1]) + [-1]
+        y = torch.reshape(phi[..., None] * self.scales[None, :], shape)
+        # ic(roughness.shape, scales.shape, y.shape)
+        mul = torch.exp(-0.5 * roughness.reshape(-1, 1) * self.scales[None, :]**2) * falloff
+        return [mul*torch.sin(y), mul*torch.cos(y)]
+
+class ThetaISEHack(torch.nn.Module):
+    def __init__(self, max_degree=1):
+        super().__init__()
+        # pad coefficients to cube matrix
+        self.max_degree = max_degree
+        scales = torch.tensor([2**i for i in range(0, self.max_degree)])
+        self.register_buffer('scales', scales)
+
+    def forward(self, vec, kappa):
+        a, b, c = vec[:, 0:1], vec[:, 1:2], vec[:, 2:3]
+        norm2d = torch.sqrt(a**2+b**2)
+        radius = torch.sqrt(2-c**2)
+        theta = safemath.atan2(c, norm2d)
+        # theta = torch.acos(vec[..., k].clip(-1+1e-6, 1-1e-6)) - np.pi/2
+        roughness = 1/(kappa**2+1e-8)
+        falloff = c**2
+        x = (theta*radius)[...]
+        # enc = safemath.integrated_pos_enc((x, roughness), 0, self.max_degree).reshape(-1, self.max_degree, 2)
+        shape = list(x.shape[:-1]) + [-1]
+        y = torch.reshape(x[..., None] * self.scales[None, :], shape)
+        # ic(roughness.shape, scales.shape, y.shape)
+        mul = torch.exp(-0.5 * roughness.reshape(-1, 1) * self.scales[None, :]**2) * falloff
+        return [mul*torch.sin(y), mul*torch.cos(y)]
+
+
+class RandISE(torch.nn.Module):
+    def __init__(self, rand_n, std=10):
+        super().__init__()
+        scales = torch.normal(0, std, (2, rand_n))
+        self.register_buffer('scales', scales)
+        self.rand_n = rand_n
+        
+    def dim(self):
+        return 4*self.rand_n
+
+    def forward(self, vec, kappa):
+        a, b, c = vec[:, 0:1], vec[:, 1:2], vec[:, 2:3]
+        norm2d = torch.sqrt(a**2+b**2)
+        theta_radius = torch.sqrt(2-c**2)
+        phi = safemath.atan2(b, a)
+        theta = safemath.atan2(c, norm2d)
+        # theta = torch.acos(vec[..., k].clip(-1+1e-6, 1-1e-6)) - np.pi/2
+        roughness = 1/(kappa**2+1e-8)
+        theta_falloff = c**2
+        phi_falloff = torch.exp(-torch.abs(self.scales[None]) * c[:, :, None]**4)
+        x = [...]
+        # enc = safemath.integrated_pos_enc((x, roughness), 0, self.max_degree).reshape(-1, self.max_degree, 2)
+        x = torch.stack([
+            phi, theta*theta_radius
+        ], dim=-1)
+        scaled_x = x @ self.scales
+        sinx = torch.sin(scaled_x)
+        cosx = torch.cos(scaled_x)
+        scaled_roughness = torch.exp(-0.5 * roughness.reshape(-1, 1, 1) * self.scales[None]**2)
+        # ic(scaled_roughness.mean(), phi_falloff.mean())
+        return torch.cat([
+            scaled_roughness * phi_falloff * sinx,
+            scaled_roughness * phi_falloff * cosx,
+        ], dim=-1)
+
 
 class ISE(torch.nn.Module):
     def __init__(self, max_degree=1):
         super().__init__()
-        self.phi_ise = PhiISE(max_degree)
-        self.theta_ise = ThetaISE(max_degree)
+        # self.phi_ise = PhiISE(max_degree)
+        self.phi_ise = PhiISEHack(max_degree)
+        # self.theta_ise = PhiISE(max_degree)
+        # self.theta_ise = ThetaISE(max_degree)
+        self.theta_ise = ThetaISEHack(max_degree)
+        self.register_buffer('hc_mean', hc_mean)
+        self.register_buffer('hc_std', hc_std)
         
     def forward(self, vec, kappa):
         v = 200
-        kappa = kappa.clip(0, 40)
+        kappa = kappa.clip(1, 20)
         horz_coeffs = self.phi_ise(vec, kappa)
         vert_coeffs = self.theta_ise(vec, kappa)
         # ic(horz_coeffs.abs().max(), vert_coeffs.abs().max(), kappa.min(), kappa.max())
+        # ic(horz_coeffs[0][..., 1:].mean(dim=0))
+        # ic(horz_coeffs[1][..., 1:].mean(dim=0))
+        # ic(horz_coeffs[0][..., 1:].std(dim=0))
+        # ic(horz_coeffs[1][..., 1:].std(dim=0))
+        # ic(self.hc_mean1.shape, horz_coeffs[0][..., 1:].shape, vert_coeffs[0].shape)
+        # ic(kappa)
+        # ic(((horz_coeffs[0][..., 1:]-self.hc_mean[2, None, :])/self.hc_std[2, None, :]),
+        #     ((horz_coeffs[1][..., 1:]-self.hc_mean[3, None, :])/self.hc_std[3, None, :]))
         return torch.stack([
-            vert_coeffs.real.clip(min=-v,max=v),
-            vert_coeffs.imag.clip(min=-v,max=v),
-            horz_coeffs.real.clip(min=-v,max=v),
-            horz_coeffs.imag.clip(min=-v,max=v),
+            vert_coeffs[0],
+            vert_coeffs[1],
+            # torch.sigmoid(vert_coeffs[0]/1),
+            # torch.sigmoid(vert_coeffs[1]/1),
+            # torch.sigmoid(horz_coeffs[0][..., 1:]),
+            # torch.sigmoid(horz_coeffs[1][..., 1:]),
+            # ((horz_coeffs[0][..., 1:]-self.hc_mean[2, None, :])/self.hc_std[2, None, :]),
+            # ((horz_coeffs[1][..., 1:]-self.hc_mean[3, None, :])/self.hc_std[3, None, :]),
+            # torch.sigmoid((horz_coeffs[0]-self.hc_mean[2, None, :])/self.hc_std[2, None, :]),
+            # torch.sigmoid((horz_coeffs[1]-self.hc_mean[3, None, :])/self.hc_std[3, None, :]),
+            horz_coeffs[0],
+            horz_coeffs[1],
+            # horz_coeffs[0][..., 1:],
+            # horz_coeffs[1][..., 1:],
         ], dim=1)
+        
+    def dim(self):
+        return (self.phi_ise.max_degree + self.theta_ise.max_degree)*2
 
 if __name__ == "__main__":
+    from mayavi import mlab
+    from tvtk.api import tvtk
     import matplotlib.pyplot as plt
     res = 100
     ele_grid, azi_grid = torch.meshgrid(
@@ -239,17 +452,21 @@ if __name__ == "__main__":
     ], dim=-1).reshape(-1, 3)
     # ang_vecs.requires_grad = True
     
-    max_deg = 4
+    max_deg = 6
     ise = ISE(max_deg)
-    # coeffs = ise(ang_vecs, 1*torch.ones(ang_vecs.shape[0]))
-    coeffs = ise(ang_vecs, 20*torch.ones(ang_vecs.shape[0]))
+    coeffs1 = ise(ang_vecs, 1*torch.ones(ang_vecs.shape[0]))
+    coeffs = ise(ang_vecs, 15*torch.ones(ang_vecs.shape[0]))
+    kcoeffs = torch.cat([coeffs1, coeffs], dim=0)
+    ic(torch.mean(kcoeffs, dim=0))
+    ic(torch.std(kcoeffs, dim=0))
     ic(coeffs.shape)
+    texture = coeffs.sum(dim=1)
 
-    for deg in range(max_deg):
-        fig, ax = plt.subplots(2, 2)
-        ax[0, 0].imshow(coeffs[:, 0, deg].reshape(res, 2*res))
-        ax[0, 1].imshow(coeffs[:, 1, deg].reshape(res, 2*res))
-        ax[1, 0].imshow(coeffs[:, 2, deg].reshape(res, 2*res))
-        ax[1, 1].imshow(coeffs[:, 3, deg].reshape(res, 2*res))
+    # for deg in range(max_deg):
+    #     fig, ax = plt.subplots(2, 2)
+    #     ax[0, 0].imshow(coeffs[:, 0, deg].reshape(res, 2*res))
+    #     ax[0, 1].imshow(coeffs[:, 1, deg].reshape(res, 2*res))
+    #     ax[1, 0].imshow(coeffs[:, 2, deg].reshape(res, 2*res))
+    #     ax[1, 1].imshow(coeffs[:, 3, deg].reshape(res, 2*res))
 
-    plt.show()
+    # plt.show()

@@ -6,10 +6,10 @@ from scipy.optimize import curve_fit
 from models import safemath
 from icecream import ic
 
-res = 80
+res = 40
 device = 'cpu'
 degree = 16
-M = 1
+M = 3
 N = 2*res**2
 
 def von_mises_fisher(cos_dist, kappa):
@@ -32,7 +32,7 @@ ang_vecs = torch.stack([
 # N x N
 cosdists = ang_vecs @ ang_vecs.T
 
-kappas = torch.linspace(1/np.sqrt(0.1/180*np.pi), 1/np.sqrt(30/180*np.pi), M, dtype=torch.float32).to(device)
+kappas = torch.linspace(1/np.sqrt(0.1/180*np.pi), 1/np.sqrt(5/180*np.pi), M, dtype=torch.float32).to(device)
 
 def spherical_encoding(refdirs, roughness, pe, ind_order=[0, 1, 2]):
     i, j, k = ind_order
@@ -93,7 +93,7 @@ for i, deg in enumerate(range(1, degree)):
         ax[0, 1].imshow(exp_cos_ele.reshape(res, 2*res))
         ax[1, 0].imshow(exp_sin_azi.reshape(res, 2*res))
         ax[1, 1].imshow(exp_sin_ele.reshape(res, 2*res))
-        plt.show()
+    plt.show()
         
     exp_cos_azis = torch.stack(exp_cos_azis, dim=0)
     exp_cos_azis_f = exp_cos_azis.reshape(-1, 1).cuda()

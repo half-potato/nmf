@@ -339,7 +339,7 @@ def reconstruction(args):
                     + f' train_psnr = {float(np.mean(PSNRs)):.2f}'
                     + f' test_psnr = {float(np.mean(PSNRs_test)):.2f}'
                     + f' center_psnr = {center_psnr:.2f}'
-                    + f' roughness = {float(roughness*180/np.pi):.2f}'
+                    + f' roughness = {float(roughness):.2f}'
                     + f' normal_loss = {normal_loss:.6f}'
                     + f' mse = {loss:.6f}'
                 )

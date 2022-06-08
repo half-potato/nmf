@@ -17,6 +17,7 @@ def OctreeRender_trilinear_fast(rays, tensorf, focal, chunk=4096, N_samples=-1, 
     points, normal_sims = [], []
     N_rays_all = rays.shape[0]
     mean_roughness = 0
+    N = 0
     for chunk_idx in range(N_rays_all // chunk + int(N_rays_all % chunk > 0)):
         rays_chunk = rays[chunk_idx * chunk:(chunk_idx + 1) * chunk]#.to(device)
     
@@ -29,12 +30,13 @@ def OctreeRender_trilinear_fast(rays, tensorf, focal, chunk=4096, N_samples=-1, 
         points.append(point)
         alphas.append(acc_map)
         normal_sims.append(normal_sim)
+        N += 1
     
     normal_maps = torch.cat(normal_maps) if normal_maps[0] is not None else None
-    return torch.cat(rgbs), torch.cat(alphas), torch.cat(depth_maps), torch.cat(points), sum(normal_sims)/len(normal_sims), normal_maps, mean_roughness / len(normal_sims)
+    return torch.cat(rgbs), torch.cat(alphas), torch.cat(depth_maps), torch.cat(points), sum(normal_sims)/len(normal_sims), normal_maps, mean_roughness / N
 
 class BundleRender:
-    def __init__(self, base_renderer, render_mode, bundle_size, H, W, focal, chunk=2*4096, scale_normal=False):
+    def __init__(self, base_renderer, render_mode, bundle_size, H, W, focal, chunk=2*2048, scale_normal=False):
         self.render_mode = render_mode
         self.base_renderer = base_renderer
         self.bundle_size = bundle_size
@@ -62,6 +64,8 @@ class BundleRender:
 
         rgb_map, acc_map, depth_map, points, _, normal_map, _ = self.base_renderer(rays, tensorf, focal=self.focal, chunk=self.chunk, N_samples=N_samples,
                                         ndc_ray=ndc_ray, white_bg = white_bg, device=device)
+        # ind = [598,532]
+        # ic(points.reshape(height, width, -1)[ind[0], ind[1]])
         if self.render_mode == 'decimate':
             # plt.imshow(normal_map.reshape(height, width, 3).cpu())
             # plt.figure()
@@ -158,6 +162,11 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
     W, H = test_dataset.img_wh
     focal = (test_dataset.focal[0] if ndc_ray else test_dataset.focal)
     brender = BundleRender(renderer, render_mode, bundle_size, H, W, focal)
+    env_map, col_map = tensorf.recover_envmap(812, xyz=torch.tensor([-0.3042,  0.8466,  0.8462,  0.0027], device='cuda:0'))
+    env_map = (env_map.cpu().numpy() * 255).astype('uint8')
+    col_map = (col_map.cpu().numpy() * 255).astype('uint8')
+    imageio.imwrite(f'{savePath}/envmaps/{prtx}view_map.png', col_map)
+    imageio.imwrite(f'{savePath}/envmaps/{prtx}ref_map.png', env_map)
     print(f"Using {render_mode} render mode")
     for idx, rays, gt_rgb in iterator():
 
@@ -202,11 +211,6 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
 
     imageio.mimwrite(f'{savePath}/{prtx}video.mp4', np.stack(rgb_maps), fps=30, quality=10)
     imageio.mimwrite(f'{savePath}/{prtx}depthvideo.mp4', np.stack(depth_maps), fps=30, quality=10)
-    env_map, col_map = tensorf.recover_envmap(1024, xyz=torch.tensor([-0.8489, -2.0951,  0.2197,  0.0045], device='cuda:0'))
-    env_map = (env_map.cpu().numpy() * 255).astype('uint8')
-    col_map = (col_map.cpu().numpy() * 255).astype('uint8')
-    imageio.imwrite(f'{savePath}/envmaps/{prtx}view_map.png', col_map)
-    imageio.imwrite(f'{savePath}/envmaps/{prtx}ref_map.png', env_map)
     # for i in range(100):
     #     env_map, col_map = tensorf.recover_envmap(1024)
     #     # plt.imshow(col_map.cpu())
