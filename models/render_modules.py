@@ -42,37 +42,29 @@ def RGBRender(xyz_sampled, viewdirs, features):
     return rgb
 
 class MLPRender_FP(torch.nn.Module):
-    def __init__(self, in_channels, pospe=16, viewpe=6, feape=6, refpe=6, featureC=128):
+    def __init__(self, in_channels, viewpe=6, feape=6, refpe=6, featureC=128, num_layers=4):
         super().__init__()
 
         # self.spherical_encoder = ISH(refpe)
-        self.vspherical_encoder = ISH(viewpe)
+        if viewpe > 0:
+            self.vspherical_encoder = ISH(viewpe)
         # self.spherical_encoder = RandISE(512, 32)
-        self.spherical_encoder = RandISE(128, 5)
-        self.in_mlpC = 2*pospe*3 + 2*feape*in_channels + 6 + in_channels + self.spherical_encoder.dim() + self.vspherical_encoder.dim()
+        self.spherical_encoder = RandISE(32, 5)
+        self.in_mlpC = 2*feape*in_channels + 6 + in_channels + self.spherical_encoder.dim()
+        if viewpe > 0:
+            self.in_mlpC += self.vspherical_encoder.dim()
         # self.in_mlpC += 2 if refpe > 0 else 0
         # self.in_mlpC += 3 if viewpe > 0 else 0
         self.viewpe = viewpe
         self.refpe = refpe
         self.feape = feape
-        self.pospe = pospe
 
         self.mlp = torch.nn.Sequential(
             torch.nn.Linear(self.in_mlpC, featureC),
-            torch.nn.ReLU(inplace=True),
-            torch.nn.Linear(featureC, featureC),
-            torch.nn.ReLU(inplace=True),
-            torch.nn.Linear(featureC, featureC),
-            torch.nn.ReLU(inplace=True),
-            torch.nn.Linear(featureC, featureC),
-            torch.nn.ReLU(inplace=True),
-            torch.nn.Linear(featureC, featureC),
-            torch.nn.ReLU(inplace=True),
-            torch.nn.Linear(featureC, featureC),
-            torch.nn.ReLU(inplace=True),
-            torch.nn.Linear(featureC, featureC),
-            torch.nn.ReLU(inplace=True),
-            torch.nn.Linear(featureC, featureC),
+            *sum([[
+                    torch.nn.ReLU(inplace=True),
+                    torch.nn.Linear(featureC, featureC),
+                ] for _ in range(num_layers)], []),
             torch.nn.ReLU(inplace=True),
             torch.nn.Linear(featureC, 3)
         )
@@ -89,8 +81,8 @@ class MLPRender_FP(torch.nn.Module):
 
 
         indata = [pts, features, refdirs]
-        if self.pospe > 0:
-            indata += [positional_encoding(pts, self.pospe)]
+        # if self.pospe > 0:
+        #     indata += [positional_encoding(pts, self.pospe)]
         if self.feape > 0:
             indata += [positional_encoding(features, self.feape)]
         if self.viewpe > 0:
@@ -113,10 +105,14 @@ class MLPRender_FP(torch.nn.Module):
         return rgb
 
 class MLPDiffuse(torch.nn.Module):
-    def __init__(self, in_channels, pospe=12, feape=6, featureC=128):
+    def __init__(self, in_channels, pospe=12, viewpe=6, feape=6, featureC=128):
         super().__init__()
 
         self.in_mlpC = 2*pospe*3 + 3 + 2*feape*in_channels + in_channels
+        if viewpe > 0:
+            self.view_encoder = ISH(viewpe)
+            self.in_mlpC += self.view_encoder.dim()
+        self.viewpe = viewpe
         self.feape = feape
         self.pospe = pospe
         self.mlp = torch.nn.Sequential(
@@ -134,13 +130,16 @@ class MLPDiffuse(torch.nn.Module):
         # sigmoid_out = np.log(x/(1-x))
         # torch.nn.init.constant_(self.mlp[-1].bias[-1], sigmoid_out)
 
-    def forward(self, pts, features, **kwargs):
+    def forward(self, pts, viewdirs, features, **kwargs):
+        B = pts.shape[0]
         pts = pts[..., :3]
         indata = [features, pts]
         if self.pospe > 0:
             indata += [positional_encoding(pts, self.pospe)]
         if self.feape > 0:
             indata += [positional_encoding(features, self.feape)]
+        if self.viewpe > 0:
+            indata += [self.view_encoder(viewdirs, torch.tensor(20.0, device=pts.device)).reshape(B, -1)]
         mlp_in = torch.cat(indata, dim=-1)
         rgb = self.mlp(mlp_in)
         rgb = torch.sigmoid(rgb)

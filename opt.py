@@ -9,11 +9,15 @@ def config_parser(cmd=None):
     parser.add_argument('--bundle_size', type=int, default=1)
     parser.add_argument('--density_grid_dims', type=int, default=9)
     parser.add_argument('--render_mode', type=str, default='mean')
-    parser.add_argument('--normal_lambda', type=float, default=1e-5)
+    parser.add_argument('--normal_lambda', type=float, default=2)
     parser.add_argument('--density_n_comp', type=int, default=8)
     parser.add_argument('--density_res_multi', type=float, default=1)
     parser.add_argument('--appearance_n_comp', type=int, default=24)
     parser.add_argument("--uplambda_list", type=int, action="append")
+
+    parser.add_argument("--bounce_n_list", type=int, action="append")
+    parser.add_argument("--bounce_iter_list", type=int, action="append")
+
     parser.add_argument("--ref_pe", type=int, default=6)
     parser.add_argument("--smoothing_start", type=float, default=0.1)
     parser.add_argument("--smoothing_end", type=float, default=0.05)
