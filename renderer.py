@@ -11,7 +11,7 @@ from icecream import ic
 import plotly.express as px
 import plotly.graph_objects as go
 
-def OctreeRender_trilinear_fast(rays, tensorf, focal, chunk=4096, N_samples=-1, ndc_ray=False, white_bg=True, is_train=False, device='cuda'):
+def chunk_renderer(rays, tensorf, focal, alpha=None, chunk=4096, N_samples=-1, ndc_ray=False, white_bg=True, is_train=False, device='cuda'):
 
     rgbs, alphas, depth_maps, normal_maps, uncertainties = [], [], [], [], []
     points, normal_sims = [], []
@@ -21,7 +21,7 @@ def OctreeRender_trilinear_fast(rays, tensorf, focal, chunk=4096, N_samples=-1, 
     for chunk_idx in range(N_rays_all // chunk + int(N_rays_all % chunk > 0)):
         rays_chunk = rays[chunk_idx * chunk:(chunk_idx + 1) * chunk]#.to(device)
     
-        rgb_map, depth_map, normal_map, acc_map, point, normal_sim, mroughness = tensorf(rays_chunk, focal, is_train=is_train, white_bg=white_bg, ndc_ray=ndc_ray, N_samples=N_samples)
+        rgb_map, depth_map, normal_map, acc_map, point, normal_sim, mroughness = tensorf(rays_chunk, focal, output_alpha=alpha, is_train=is_train, white_bg=white_bg, ndc_ray=ndc_ray, N_samples=N_samples)
 
         mean_roughness += mroughness
         rgbs.append(rgb_map)

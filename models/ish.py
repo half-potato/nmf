@@ -24,7 +24,7 @@ def Y0(theta, l):
     return math.sqrt((2*l+1)/4/math.pi)*v
 
 def Al(l, kappa):
-    return torch.exp(-l*(l+1)/2/kappa)
+    return torch.exp(-l*(l+1)/2/(kappa+1e-8))
 
 def rising_factorial(z, m):
     if m == 0:

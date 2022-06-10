@@ -25,7 +25,7 @@ from torch.profiler import profile, record_function, ProfilerActivity
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-renderer = OctreeRender_trilinear_fast
+renderer = chunk_renderer
 
 
 class SimpleSampler:
@@ -216,11 +216,12 @@ def reconstruction(args):
     
     optimizer = torch.optim.Adam(grad_vars, betas=(0.9,0.99))
 
-
+    bounce_n_list = args.bounce_n_list
     #linear in logrithmic space
     N_voxel_list = (torch.round(torch.exp(torch.linspace(np.log(args.N_voxel_init), np.log(args.N_voxel_final), len(upsamp_list)+1))).long()).tolist()[1:]
     l_list = torch.linspace(1.0, 0.0, len(uplambda_list)+1).tolist()
     tensorf.l = l_list.pop(0)
+    tensorf.max_bounce_rays = bounce_n_list.pop(0)
 
     # smoothing_vals = [0.6, 0.7, 0.8, 0.7, 0.5]
     smoothing_vals = torch.linspace(args.smoothing_start, args.smoothing_end, len(upsamp_list)+1).tolist()
@@ -241,7 +242,6 @@ def reconstruction(args):
         trainingSampler = SimpleSampler(allrays.shape[0], args.batch_size)
     else:
         trainingSampler = BlockSampler(allrays.shape[0], args.batch_size, args.bundle_size, args.bundle_size, *train_dataset.img_wh, mask)
-    # trainingSampler = BlockSampler(allrays.shape[0], args.batch_size, args.bundle_size, args.bundle_size, *train_dataset.img_wh, mask)
 
     Ortho_reg_weight = args.Ortho_weight
     print("initial Ortho_reg_weight", Ortho_reg_weight)
@@ -276,11 +276,16 @@ def reconstruction(args):
             # plt.show()
 
             # rays_train, rgb_train = allrays[ray_idx], allrgbs[rgb_idx].to(device).reshape(-1, args.bundle_size, args.bundle_size, 3)
-            rays_train, rgb_train = allrays[ray_idx], allrgbs[rgb_idx].reshape(-1, args.bundle_size, args.bundle_size, 3)
+            rays_train, rgba_train = allrays[ray_idx], allrgbs[rgb_idx].reshape(-1, args.bundle_size, args.bundle_size, allrgbs.shape[-1])
+            rgb_train = rgba_train[..., :3]
+            if rgba_train.shape[-1] == 4:
+                alpha_train = rgba_train[..., 3]
+            else:
+                alpha_train = None
 
             #rgb_map, alphas_map, depth_map, weights, uncertainty
             rgb_map, alphas_map, depth_map, weights, normal_sim, normal_map, roughness = renderer(
-                rays_train, tensorf, focal=focal, chunk=args.batch_size,
+                rays_train, tensorf, focal=focal, alpha=alpha_train, chunk=args.batch_size,
                 N_samples=nSamples, white_bg = white_bg, ndc_ray=ndc_ray, device=device, is_train=True)
 
             # loss = torch.mean((rgb_map[:, 1, 1] - rgb_train[:, 1, 1]) ** 2)
@@ -356,6 +361,9 @@ def reconstruction(args):
 
 
 
+            if iteration in args.bounce_iter_list:
+                print(f"Max bounces {tensorf.max_bounce_rays} -> {bounce_n_list[0]}")
+                tensorf.max_bounce_rays = bounce_n_list.pop(0)
             if iteration in update_AlphaMask_list:
 
                 if reso_cur[0] * reso_cur[1] * reso_cur[2]<256**3:# update volume resolution
@@ -363,7 +371,7 @@ def reconstruction(args):
                 new_aabb = tensorf.updateAlphaMask(tuple(reso_mask))
                 if iteration == update_AlphaMask_list[0]:
                     apply_correction = not torch.all(tensorf.alphaMask.gridSize == tensorf.rf.gridSize)
-                    tensorf.rf.shrink(new_aabb, apply_correction)
+                    tensorf.shrink(new_aabb, apply_correction)
                     # tensorVM.alphaMask = None
                     L1_reg_weight = args.L1_weight_rest
                     print("continuing L1_reg_weight", L1_reg_weight)

@@ -28,14 +28,11 @@ smoothing_end = 0.5
 
 density_res_multi = 1
 
-step_ratio = 0.5
-
-upsamp_list = [3000,4000,5500,7000]
-#upsamp_list = [2000,3000,4000,5500,7000]
-#uplambda_list = [7000, 12000, 17000, 21000]
-#uplambda_list = [7000, 12000, 17000]
-uplambda_list = [7000, 10000, 12000]
-update_AlphaMask_list = [4000,10000]
+step_ratio = 0.1
+nSamples = 200
+upsamp_list = [30000]
+uplambda_list = [30000]
+update_AlphaMask_list = [30000]
 
 N_vis = 5
 vis_every = 10000

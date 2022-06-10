@@ -41,6 +41,10 @@ class YourOwnDataset(Dataset):
         with open(os.path.join(self.root_dir, f"transforms_{self.split}.json"), 'r') as f:
             self.meta = json.load(f)
 
+        if 'ext' in self.meta:
+            ext = self.meta['ext']
+        else:
+            ext = '.png'
         w, h = int(self.meta['w']/self.downsample), int(self.meta['h']/self.downsample)
         self.img_wh = [w,h]
         self.focal_x = 0.5 * w / np.tan(0.5 * self.meta['camera_angle_x'])  # original focal length
@@ -70,7 +74,7 @@ class YourOwnDataset(Dataset):
             c2w = torch.FloatTensor(pose)
             self.poses += [c2w]
 
-            image_path = os.path.join(self.root_dir, f"{frame['file_path']}.png")
+            image_path = os.path.join(self.root_dir, f"{frame['file_path']}{ext}")
             self.image_paths += [image_path]
             img = Image.open(image_path)
             
