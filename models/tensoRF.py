@@ -6,8 +6,8 @@ from icecream import ic
 import time
 
 class TensorVM(TensorBase):
-    def __init__(self, aabb, gridSize, device, *args, **kargs):
-        super(TensorVM, self).__init__(aabb, gridSize, device, *args, **kargs)
+    def __init__(self, aabb, grid_size, device, *args, **kargs):
+        super(TensorVM, self).__init__(aabb, grid_size, device, *args, **kargs)
         
 
     def init_svd_volume(self, res, device):
@@ -169,36 +169,25 @@ def d_softplus(x, beta=1.0, shift=-10):
 
 
 class TensorVMSplit(TensorBase):
-    def __init__(self, aabb, gridSize, device, *args, hier_sizes, **kargs):
-        super(TensorVMSplit, self).__init__(aabb, gridSize, device, *args, **kargs)
-        # self.f_blur = torch.tensor([1, 2, 1], device=device) / 4
+    def __init__(self, aabb, grid_size, device, *args, hier_sizes, **kargs):
+        super(TensorVMSplit, self).__init__(aabb, grid_size, device, *args, **kargs)
         f_blur = torch.tensor([0, 1, 0], device=device)
         f_edge = torch.tensor([-1, 0, 1], device=device) / 2
-        # f_blur = torch.tensor([1, 1], device=device) / 2
-        # f_edge = torch.tensor([-1, 1], device=device) / 2
         l = len(f_blur)
 
-        self.dy_filter = (f_blur[None, :] * f_edge[:, None]).reshape(1, 1, l, l)#.expand(1, self.density_n_comp[0], 3, 3)
+        self.dy_filter = (f_blur[None, :] * f_edge[:, None]).reshape(1, 1, l, l)
         self.dx_filter = self.dy_filter.permute(0, 1, 3, 2)
-        self.dz_filter = f_edge.reshape(1, 1, l)#.expand(1, self.density_n_comp[0], 3)
-        # random_offset = torch.rand(1, self.density_n_comp[0], 3)
-        # self.register_buffer('random_offset', random_offset)
+        self.dz_filter = f_edge.reshape(1, 1, l)
 
-        # self.sizes = list(range(1, 3))
         self.sizes = hier_sizes
-        # self.sizes = []
-        # self.plane_kernels = [None, *[torch.ones((n, n), dtype=torch.float32, device=device) for n in self.sizes]]
-        # self.line_kernels = [None, *[torch.ones((n), dtype=torch.float32, device=device) for n in self.sizes]]
         self.plane_kernels = [None, *[gkern(2*n+1, std=n).to(device) for n in self.sizes]]
         self.line_kernels = [None, *[gaussian_fn(2*n+1, std=n).to(device) for n in self.sizes]]
         self.sizes = [1, *self.sizes]
 
         # num_levels x num_outputs
         self.interp_mode = 'bilinear'
-        self.set_smoothing(1.0)
         # self.interp_mode = 'bicubic'
-        # self.norm_line_kernels = [[combine_kernels1d(kernel, conv) for kernel in self.line_kernels] for conv in [None, self.dz_filter]]
-        # self.norm_plane_kernels = [[combine_kernels2d(kernel, conv) for kernel in self.plane_kernels] for conv in [None, self.dx_filter, self.dy_filter]]
+        self.set_smoothing(1.0)
 
     def set_smoothing(self, sm):
         print(f"Setting smoothing to {sm}")
@@ -208,20 +197,20 @@ class TensorVMSplit(TensorBase):
         # self.norm_plane_kernels = [[conv for s in self.sizes] for conv in [None, self.dx_filter, self.dy_filter]]
 
     def init_svd_volume(self, res, device):
-        self.density_plane, self.density_line = self.init_one_svd(self.density_n_comp, [int(self.density_res_multi*g) for g in self.gridSize], 0.1, -0, device)
-        self.app_plane, self.app_line = self.init_one_svd(self.app_n_comp, self.gridSize, 0.1, 0, device)
+        self.density_plane, self.density_line = self.init_one_svd(self.density_n_comp, [int(self.density_res_multi*g) for g in self.grid_size], 0.1, -0, device)
+        self.app_plane, self.app_line = self.init_one_svd(self.app_n_comp, self.grid_size, 0.1, 0, device)
         self.basis_mat = torch.nn.Linear(sum(self.app_n_comp), self.app_dim, bias=False).to(device)
 
 
-    def init_one_svd(self, n_component, gridSize, scale, shift, device):
+    def init_one_svd(self, n_component, grid_size, scale, shift, device):
         plane_coef, line_coef = [], []
         for i in range(len(self.vecMode)):
             vec_id = self.vecMode[i]
             mat_id_0, mat_id_1 = self.matMode[i]
             plane_coef.append(torch.nn.Parameter(
-                scale * torch.randn((1, n_component[i], gridSize[mat_id_1], gridSize[mat_id_0])) + shift/sum(n_component)
+                scale * torch.randn((1, n_component[i], grid_size[mat_id_1], grid_size[mat_id_0])) + shift/sum(n_component)
             ))
-            line_coef.append(torch.nn.Parameter(scale * torch.randn((1, n_component[i], gridSize[vec_id], 1)) + shift/sum(n_component)
+            line_coef.append(torch.nn.Parameter(scale * torch.randn((1, n_component[i], grid_size[vec_id], 1)) + shift/sum(n_component)
             ))
 
         return torch.nn.ParameterList(plane_coef).to(device), torch.nn.ParameterList(line_coef).to(device)
@@ -266,7 +255,7 @@ class TensorVMSplit(TensorBase):
         return total
 
     def multi_size_plane(self, plane, coordinate_plane, size_weights, convs):
-        # plane.shape: 1, n_comp, gridSize, gridSize
+        # plane.shape: 1, n_comp, grid_size, grid_size
         # coordinate_plane.shape: 1, N, 1, 2
         # convs: [nested list of tensors of shape: 1, 1, s, s]. Outer list is for different outputs. Inner list is for different sizes.
         
@@ -301,7 +290,7 @@ class TensorVMSplit(TensorBase):
         return output
 
     def multi_size_line(self, line, coordinate_line, size_weights, convs):
-        # plane.shape: 1, n_comp, gridSize, 1
+        # plane.shape: 1, n_comp, grid_size, 1
         # coordinate_plane.shape: 1, N, 1, 2
         # convs: [nested list of tensors of shape: 1, 1, s]. Outer list is for different outputs. Inner list is for different sizes.
         
@@ -341,6 +330,7 @@ class TensorVMSplit(TensorBase):
         coordinate_line = torch.stack((xyz_sampled[..., self.vecMode[0]], xyz_sampled[..., self.vecMode[1]], xyz_sampled[..., self.vecMode[2]]))
         coordinate_line = torch.stack((torch.zeros_like(coordinate_line), coordinate_line), dim=-1).view(3, -1, 1, 2)
         return coordinate_plane, coordinate_line
+
 
     def compute_size_weights(self, xyz_sampled):
         size = xyz_sampled[..., 3]#*3
@@ -477,8 +467,8 @@ class TensorVMSplit(TensorBase):
         # print(t_l, b_r,self.alphaMask.alpha_volume.shape)
         dt_l, db_r = torch.round(t_l*self.density_res_multi).long(), torch.round(b_r*self.density_res_multi).long() + 1
         t_l, b_r = torch.round(torch.round(t_l)).long(), torch.round(b_r).long() + 1
-        b_r = torch.stack([b_r, self.gridSize]).amin(0)
-        db_r = torch.stack([db_r, (self.density_res_multi*self.gridSize).long()]).amin(0)
+        b_r = torch.stack([b_r, self.grid_size]).amin(0)
+        db_r = torch.stack([db_r, (self.density_res_multi*self.grid_size).long()]).amin(0)
         ic(db_r, dt_l, b_r, t_l, xyz_min, xyz_max, self.units, self.aabb)
 
         for i in range(len(self.vecMode)):
@@ -498,9 +488,9 @@ class TensorVMSplit(TensorBase):
             )
 
 
-        # if not torch.all(self.alphaMask.gridSize == self.gridSize):
+        # if not torch.all(self.alphaMask.grid_size == self.grid_size):
         if apply_correction:
-            t_l_r, b_r_r = t_l / (self.gridSize-1), (b_r-1) / (self.gridSize-1)
+            t_l_r, b_r_r = t_l / (self.grid_size-1), (b_r-1) / (self.grid_size-1)
             correct_aabb = torch.zeros_like(new_aabb)
             correct_aabb[0] = (1-t_l_r)*self.aabb[0] + t_l_r*self.aabb[1]
             correct_aabb[1] = (1-b_r_r)*self.aabb[0] + b_r_r*self.aabb[1]
@@ -513,22 +503,22 @@ class TensorVMSplit(TensorBase):
 
 
 class TensorCP(TensorBase):
-    def __init__(self, aabb, gridSize, device, *args, **kargs):
-        super(TensorCP, self).__init__(aabb, gridSize, device, *args, **kargs)
+    def __init__(self, aabb, grid_size, device, *args, **kargs):
+        super(TensorCP, self).__init__(aabb, grid_size, device, *args, **kargs)
 
 
     def init_svd_volume(self, res, device):
-        self.density_line = self.init_one_svd(self.density_n_comp[0], self.gridSize, 0.2, device)
-        self.app_line = self.init_one_svd(self.app_n_comp[0], self.gridSize, 0.2, device)
+        self.density_line = self.init_one_svd(self.density_n_comp[0], self.grid_size, 0.2, device)
+        self.app_line = self.init_one_svd(self.app_n_comp[0], self.grid_size, 0.2, device)
         self.basis_mat = torch.nn.Linear(self.app_n_comp[0], self.app_dim, bias=False).to(device)
 
 
-    def init_one_svd(self, n_component, gridSize, scale, device):
+    def init_one_svd(self, n_component, grid_size, scale, device):
         line_coef = []
         for i in range(len(self.vecMode)):
             vec_id = self.vecMode[i]
             line_coef.append(
-                torch.nn.Parameter(scale * torch.randn((1, n_component, gridSize[vec_id], 1))))
+                torch.nn.Parameter(scale * torch.randn((1, n_component, grid_size[vec_id], 1))))
         return torch.nn.ParameterList(line_coef).to(device)
 
     
@@ -598,7 +588,7 @@ class TensorCP(TensorBase):
         t_l, b_r = (xyz_min - self.aabb[0]) / self.units, (xyz_max - self.aabb[0]) / self.units
 
         t_l, b_r = torch.round(torch.round(t_l)).long(), torch.round(b_r).long() + 1
-        b_r = torch.stack([b_r, self.gridSize]).amin(0)
+        b_r = torch.stack([b_r, self.grid_size]).amin(0)
 
 
         for i in range(len(self.vecMode)):
@@ -610,8 +600,8 @@ class TensorCP(TensorBase):
                 self.app_line[i].data[...,t_l[mode0]:b_r[mode0],:]
             )
 
-        if not torch.all(self.alphaMask.gridSize == self.gridSize):
-            t_l_r, b_r_r = t_l / (self.gridSize-1), (b_r-1) / (self.gridSize-1)
+        if not torch.all(self.alphaMask.grid_size == self.grid_size):
+            t_l_r, b_r_r = t_l / (self.grid_size-1), (b_r-1) / (self.grid_size-1)
             correct_aabb = torch.zeros_like(new_aabb)
             correct_aabb[0] = (1-t_l_r)*self.aabb[0] + t_l_r*self.aabb[1]
             correct_aabb[1] = (1-b_r_r)*self.aabb[0] + b_r_r*self.aabb[1]

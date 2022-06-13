@@ -8,6 +8,7 @@ from . import safemath
 import numpy as np
 from models.ise import ISE, RandISE
 from models.ish import ISH, RandISH
+from typing import List
 
 def positional_encoding(positions, freqs):
     freq_bands = (2**torch.arange(freqs).float()).to(positions.device)  # (F,)
@@ -41,7 +42,51 @@ def RGBRender(xyz_sampled, viewdirs, features):
     rgb = features
     return rgb
 
+
+class BackgroundRender(torch.nn.Module):
+    bg_rank: int
+    bg_resolution: List[int]
+    def __init__(self, bg_rank, bg_resolution=[512,512], viewpe=6, featureC=128, num_layers=2):
+        super().__init__()
+        self.bg_mat = nn.Parameter(0.1 * torch.randn((1, bg_rank, bg_resolution[0], bg_resolution[1]))) # [1, R, H, W]
+        self.spherical_encoder = ISH(viewpe)
+        self.bg_rank = bg_rank
+
+        self.bg_net = nn.Sequential(
+            nn.Linear(bg_rank+self.spherical_encoder.dim(), featureC, bias=False),
+            *sum([[
+                    torch.nn.ReLU(inplace=True),
+                    torch.nn.Linear(featureC, featureC, bias=False)
+                ] for _ in range(num_layers-2)], []),
+            torch.nn.ReLU(inplace=True),
+            nn.Linear(featureC, 3, bias=False),
+            nn.Sigmoid()
+        )
+        
+    def forward(self, viewdirs):
+        a, b, c = viewdirs[:, 0:1], viewdirs[:, 1:2], viewdirs[:, 2:3]
+        norm2d = torch.sqrt(a**2+b**2)
+        phi = safemath.atan2(b, a)
+        theta = safemath.atan2(c, norm2d)
+        x = torch.cat([
+            (phi % (2*np.pi) - np.pi) / np.pi,
+            theta/np.pi/2,
+        ], dim=1).reshape(1, 1, -1, 2)
+        emb = F.grid_sample(self.bg_mat, x, mode='bicubic', align_corners=True)
+        emb = emb.reshape(self.bg_rank, -1).T
+        # return torch.sigmoid(emb)
+        shemb = self.spherical_encoder(viewdirs, torch.tensor(20.0, device=viewdirs.device)).reshape(-1, self.spherical_encoder.dim())
+        emb = torch.cat([emb, shemb], dim=1)
+        return self.bg_net(emb)
+
+
 class MLPRender_FP(torch.nn.Module):
+    in_channels: int
+    viewpe: int
+    feape: int
+    refpe: int
+    featureC: int
+    num_layers: int
     def __init__(self, in_channels, viewpe=6, feape=6, refpe=6, featureC=128, num_layers=4):
         super().__init__()
 
@@ -105,7 +150,13 @@ class MLPRender_FP(torch.nn.Module):
         return rgb
 
 class MLPDiffuse(torch.nn.Module):
-    def __init__(self, in_channels, pospe=12, viewpe=6, feape=6, featureC=128):
+    in_channels: int
+    viewpe: int
+    feape: int
+    refpe: int
+    featureC: int
+    num_layers: int
+    def __init__(self, in_channels, pospe=12, viewpe=6, feape=6, featureC=128, num_layers=0):
         super().__init__()
 
         self.in_mlpC = 2*pospe*3 + 3 + 2*feape*in_channels + in_channels
@@ -119,6 +170,10 @@ class MLPDiffuse(torch.nn.Module):
             torch.nn.Linear(self.in_mlpC, featureC),
             # torch.nn.ReLU(inplace=True),
             # torch.nn.Linear(featureC, featureC),
+            *sum([[
+                    torch.nn.ReLU(inplace=True),
+                    torch.nn.Linear(featureC, featureC),
+                ] for _ in range(num_layers)], []),
             torch.nn.ReLU(inplace=True),
             torch.nn.Linear(featureC, 7),
         )
@@ -149,6 +204,12 @@ class MLPDiffuse(torch.nn.Module):
 
         return diffuse, tint, roughness
 class MLPRender_Fea(torch.nn.Module):
+    in_channels: int
+    viewpe: int
+    feape: int
+    refpe: int
+    featureC: int
+    num_layers: int
     def __init__(self, in_channels, viewpe=6, feape=6, refpe=6, featureC=128):
         super().__init__()
 
@@ -180,7 +241,13 @@ class MLPRender_Fea(torch.nn.Module):
         return rgb
 
 class DeepMLPNormal(torch.nn.Module):
-    def __init__(self, pospe=16, featureC=128):
+    in_channels: int
+    viewpe: int
+    feape: int
+    refpe: int
+    featureC: int
+    num_layers: int
+    def __init__(self, pospe=16, featureC=128, num_layers=2):
         super().__init__()
 
         self.in_mlpC = 2*pospe*3 + 3
@@ -188,10 +255,10 @@ class DeepMLPNormal(torch.nn.Module):
 
         self.mlp0 = torch.nn.Sequential(
             torch.nn.Linear(self.in_mlpC, featureC),
-            torch.nn.ReLU(inplace=True),
-            # torch.nn.Linear(featureC, featureC),
-            # torch.nn.ReLU(inplace=True),
-            torch.nn.Linear(featureC, featureC),
+            *sum([[
+                    torch.nn.ReLU(inplace=True),
+                    torch.nn.Linear(featureC, featureC),
+                ] for _ in range(num_layers)], []),
             torch.nn.ReLU(inplace=True),
             torch.nn.Linear(featureC, 3),
             # torch.nn.ReLU(inplace=True),
@@ -228,7 +295,11 @@ class DeepMLPNormal(torch.nn.Module):
         return normals
 
 class MLPNormal(torch.nn.Module):
-    def __init__(self, in_channels, pospe=6, feape=6, featureC=128):
+    in_channels: int
+    feape: int
+    featureC: int
+    num_layers: int
+    def __init__(self, in_channels, pospe=6, feape=6, featureC=128, num_layers=2):
         super().__init__()
 
         self.in_mlpC = 2*pospe*3 + 2*feape*in_channels + 3 + in_channels
@@ -237,10 +308,10 @@ class MLPNormal(torch.nn.Module):
 
         self.mlp = torch.nn.Sequential(
             torch.nn.Linear(self.in_mlpC, featureC),
-            torch.nn.ReLU(inplace=True),
-            torch.nn.Linear(featureC, featureC),
-            torch.nn.ReLU(inplace=True),
-            torch.nn.Linear(featureC, featureC),
+            *sum([[
+                    torch.nn.ReLU(inplace=True),
+                    torch.nn.Linear(featureC, featureC),
+                ] for _ in range(num_layers)], []),
             torch.nn.ReLU(inplace=True),
             torch.nn.Linear(featureC, 3)
         )

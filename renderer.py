@@ -36,7 +36,7 @@ def chunk_renderer(rays, tensorf, focal, alpha=None, chunk=4096, N_samples=-1, n
     return torch.cat(rgbs), torch.cat(alphas), torch.cat(depth_maps), torch.cat(points), sum(normal_sims)/len(normal_sims), normal_maps, mean_roughness / N
 
 class BundleRender:
-    def __init__(self, base_renderer, render_mode, bundle_size, H, W, focal, chunk=2*2048, scale_normal=False):
+    def __init__(self, base_renderer, render_mode, bundle_size, H, W, focal, chunk=1*512, scale_normal=False):
         self.render_mode = render_mode
         self.base_renderer = base_renderer
         self.bundle_size = bundle_size
@@ -46,6 +46,7 @@ class BundleRender:
         self.focal = focal
         self.chunk = chunk
 
+    @torch.no_grad()
     def __call__(self, rays, tensorf, chunk=4096, N_samples=-1, ndc_ray=False, white_bg=True, is_train=False, device='cuda'):
         height, width = self.H, self.W
         ray_dim = rays.shape[-1]

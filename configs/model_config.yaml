@@ -1,0 +1,106 @@
+n_iters: 60000
+render_mode: center
+
+N_voxel_init: 2097156 # 128**3
+N_voxel_final: 27000000 # 300**3
+
+tensorf:
+  _target_: models.tensor_nerf.TensorNeRF
+  _partial_: True
+
+  density_shift: -10
+  alphaMask_thres: 0.001
+  distance_scale: 25
+  rayMarch_weight_thres: 0.0001
+
+  fea2denseAct: 'softplus'
+  bundle_size: 1
+  rf:
+    _partial_: True
+    _target_: models.tensoRF.TensorVMSplit
+    density_n_comp: 16
+    appearance_n_comp: 36
+    app_dim: 27
+    step_ratio: 0.5
+    density_res_multi: 1
+    contract_space: False
+    num_levels: 1
+    hier_sizes: [1]
+  diffuse_module:
+    _target_: models.render_modules.MLPDiffuse
+    in_channels: 27
+    viewpe: 0
+    feape: 2
+    featureC: 128
+    num_layers: 0
+  ref_module:
+    _target_: models.render_modules.MLPRender_FP
+    in_channels: 27
+    viewpe: 0
+    feape: 2
+    refpe: 6
+    featureC: 128
+    num_layers: 4
+  normal_module:
+    _target_: models.render_modules.MLPNormal
+    in_channels: 27
+    pospe: 6
+    feape: 2
+    featureC: 128
+    num_layers: 2
+  bg_module:
+    _target_: models.render_modules.BackgroundRender
+    bg_rank: 8
+    bg_resolution: [1024, 512]
+
+#featureC: 256
+#N_voxel_init: 262144 # 64**3
+#N_voxel_final: 47000000 # 300**3
+
+scheduling:
+  smoothing_start: 1.0
+  smoothing_end: 0.5
+
+  bounce_n_list: [100, 1000, 10000, 20000]
+  bounce_iter_list: [9000, 12000, 14000]
+
+
+  upsamp_list: [3000,4000,5500,7000]
+  #upsamp_list: [2000,3000,4000,5500,7000]
+  #uplambda_list: [7000, 12000, 17000, 21000]
+  #uplambda_list: [7000, 12000, 17000]
+  uplambda_list: [7000, 10000, 12000]
+  update_AlphaMask_list: [4000,10000]
+  # update_AlphaMask_list: [30000]
+
+step_ratio: 0.5
+
+N_vis: 5
+vis_every: 5000
+
+n_lamb_sigma: [16,16,16]
+n_lamb_sh: [48,48,48]
+model_name: TensorVMSplit
+
+shadingMode: MLP_FP
+#shadingMode: MLP_Fea
+#shadingMode: BundleMLPSphEncGrid
+fea2denseAct: softplus_shift
+
+pos_pe: 6
+view_pe: 3
+ref_pe: 6
+fea_pe: 2
+
+L1_weight_inital: 8e-5
+L1_weight_rest: 4e-5
+rm_weight_mask_thre: 1e-4
+
+## please uncomment following configuration if hope to training on cp model
+#model_name: TensorCP
+#n_lamb_sigma: [96]
+#n_lamb_sh: [288]
+#N_voxel_final: 125000000 # 500**3
+#L1_weight_inital: 1e-5
+#L1_weight_rest: 1e-5
+

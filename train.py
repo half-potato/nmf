@@ -23,6 +23,9 @@ import matplotlib.pyplot as plt
 
 from torch.profiler import profile, record_function, ProfilerActivity
 
+import hydra
+from omegaconf import OmegaConf
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 renderer = chunk_renderer
@@ -197,12 +200,14 @@ def reconstruction(args):
         tensorf = TensorNeRF(**kwargs)
         tensorf.load(ckpt)
     else:
-        tensorf = TensorNeRF(args.model_name, aabb, reso_cur, device,
-                    density_res_multi=args.density_res_multi,
-                    density_n_comp=n_lamb_sigma, appearance_n_comp=n_lamb_sh, app_dim=args.data_dim_color, near_far=near_far,
-                    shadingMode=args.shadingMode, alphaMask_thres=args.alpha_mask_thre, density_shift=args.density_shift, distance_scale=args.distance_scale,
-                    pos_pe=args.pos_pe, view_pe=args.view_pe, ref_pe=args.ref_pe, fea_pe=args.fea_pe, featureC=args.featureC, step_ratio=args.step_ratio,
-                    fea2denseAct=args.fea2denseAct, bundle_size=args.bundle_size, density_grid_dims=args.density_grid_dims, enable_reflections=args.enable_reflections)
+        # tensorf = TensorNeRF(args.model_name, aabb, reso_cur, device,
+        #             density_res_multi=args.density_res_multi,
+        #             density_n_comp=n_lamb_sigma, appearance_n_comp=n_lamb_sh, app_dim=args.data_dim_color, near_far=near_far,
+        #             shadingMode=args.shadingMode, alphaMask_thres=args.alpha_mask_thre, density_shift=args.density_shift, distance_scale=args.distance_scale,
+        #             pos_pe=args.pos_pe, view_pe=args.view_pe, ref_pe=args.ref_pe, fea_pe=args.fea_pe, featureC=args.featureC, step_ratio=args.step_ratio,
+        #             fea2denseAct=args.fea2denseAct, bundle_size=args.bundle_size, density_grid_dims=args.density_grid_dims, enable_reflections=args.enable_reflections)
+        model_conf = OmegaConf.load(args.model_config)
+        tensorf = hydra.utils.instantiate(model_conf.tensorf)(aabb=aabb, grid_size=reso_cur, device=device).to(device)
 
 
     grad_vars = tensorf.get_optparam_groups(args.lr_init, args.lr_basis)

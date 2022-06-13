@@ -22,6 +22,8 @@ def config_parser(cmd=None):
     parser.add_argument("--smoothing_start", type=float, default=0.1)
     parser.add_argument("--smoothing_end", type=float, default=0.05)
 
+    parser.add_argument('--model_config', 
+                        help='config file path')
     parser.add_argument('--config', is_config_file=True,
                         help='config file path')
     parser.add_argument("--expname", type=str,
