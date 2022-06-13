@@ -19,7 +19,6 @@ class TensorBase(torch.nn.Module):
         self.density_n_comp = [density_n_comp]*3
         self.app_n_comp = [appearance_n_comp]*3
         self.density_res_multi = density_res_multi
-        self.grid_size = grid_size
         self.app_dim = app_dim
         self.aabb = aabb
         self.device = device
@@ -31,7 +30,7 @@ class TensorBase(torch.nn.Module):
         self.comp_w = [1,1,1]
 
         self.update_stepSize(grid_size)
-        self.init_svd_volume(grid_size[0], device)
+        self.init_svd_volume(grid_size[0])
 
     def get_kwargs(self):
         return {
@@ -43,20 +42,25 @@ class TensorBase(torch.nn.Module):
             'step_ratio': self.step_ratio,
             'density_res_multi': self.density_res_multi,
         }
+        
+    def set_register(self, name, val):
+        if hasattr(self, name):
+            setattr(self, name, val.type_as(getattr(self, name)))
+        else:
+            self.register_buffer(name, val)
 
     def update_stepSize(self, grid_size):
         print("grid size", grid_size)
         print("density grid size", [int(self.density_res_multi*g) for g in grid_size])
         print("aabb", self.aabb.view(-1))
-        self.aabbSize = self.aabb[1] - self.aabb[0]
-
-        self.invaabbSize = 2.0/self.aabbSize
-        self.grid_size= torch.LongTensor(grid_size).to(self.device)
-        self.units=self.aabbSize / (self.grid_size-1)
+        aabbSize = self.aabb[1] - self.aabb[0]
+        self.set_register('invaabbSize', 2.0/aabbSize)
+        self.set_register('grid_size', torch.LongTensor(grid_size))
+        self.set_register('units', aabbSize.to(self.grid_size.device) / (self.grid_size-1))
         # min is more accurate than mean
-        self.stepSize=torch.min(self.units)*self.step_ratio
-        self.aabbDiag = torch.sqrt(torch.sum(torch.square(self.aabbSize)))
-        self.nSamples=int((self.aabbDiag / self.stepSize).item()) + 1
+        self.set_register('stepSize', torch.min(self.units)*self.step_ratio)
+        self.set_register('aabbDiag', torch.sqrt(torch.sum(torch.square(aabbSize))))
+        self.nSamples = int((self.aabbDiag / self.stepSize).item()) + 1
         print("sampling step size: ", self.stepSize)
         print("sampling number: ", self.nSamples)
 

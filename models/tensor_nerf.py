@@ -10,6 +10,7 @@ from . import render_modules
 import plotly.express as px
 import plotly.graph_objects as go
 import random
+import hydra
 
 from .tensoRF import TensorCP, TensorVM, TensorVMSplit
 from .multi_level_rf import MultiLevelRF
@@ -30,15 +31,18 @@ def raw2alpha(sigma, dist):
 
 
 class AlphaGridMask(torch.nn.Module):
-    def __init__(self, device, aabb, alpha_volume):
+    def __init__(self, aabb, alpha_volume):
         super(AlphaGridMask, self).__init__()
-        self.device = device
 
-        self.aabb=aabb.to(self.device)
-        self.aabbSize = self.aabb[1] - self.aabb[0]
-        self.invgridSize = 1.0/self.aabbSize * 2
-        self.alpha_volume = alpha_volume.view(1,1,*alpha_volume.shape[-3:])
-        self.gridSize = torch.LongTensor([alpha_volume.shape[-1],alpha_volume.shape[-2],alpha_volume.shape[-3]]).to(self.device)
+        self.aabb=aabb
+        aabbSize = self.aabb[1] - self.aabb[0]
+        invgridSize = 1.0/aabbSize * 2
+        alpha_volume = alpha_volume.view(1,1,*alpha_volume.shape[-3:])
+        gridSize = torch.LongTensor([alpha_volume.shape[-1],alpha_volume.shape[-2],alpha_volume.shape[-3]])
+        self.register_buffer('gridSize', gridSize)
+        self.register_buffer('aabb', aabb)
+        self.register_buffer('invgridSize', invgridSize)
+        self.register_buffer('alpha_volume', alpha_volume)
 
     def sample_alpha(self, xyz_sampled, contract=False):
         if contract:
@@ -64,7 +68,7 @@ class AlphaGridMask(torch.nn.Module):
 class TensorNeRF(torch.nn.Module):
     def __init__(self, rf, grid_size, aabb, device, diffuse_module, normal_module, ref_module, bg_module=None,
                     alphaMask = None, near_far=[2.0,6.0], nEnvSamples = 100, specularity_threshold=0.1, max_recurs=0,
-                    max_normal_similarity=1,
+                    max_normal_similarity=1, infinity_border=False,
                     density_shift = -10, alphaMask_thres=0.001, distance_scale=25, rayMarch_weight_thres=0.0001,
                     fea2denseAct = 'softplus', bundle_size = 3):
         super(TensorNeRF, self).__init__()
@@ -81,6 +85,7 @@ class TensorNeRF(torch.nn.Module):
 
         self.alphaMask = alphaMask
         self.device=device
+        self.infinity_border = infinity_border
 
         self.density_shift = density_shift
         self.alphaMask_thres = alphaMask_thres
@@ -96,8 +101,10 @@ class TensorNeRF(torch.nn.Module):
         self.max_bounce_rays = 100
         self.nEnvSamples = nEnvSamples
 
-        self.f_blur = torch.tensor([1, 2, 1], device=device) / 4
-        self.f_edge = torch.tensor([-1, 0, 1], device=device) / 2
+        f_blur = torch.tensor([1, 2, 1]) / 4
+        f_edge = torch.tensor([-1, 0, 1]) / 2
+        self.register_buffer('f_blur', f_blur)
+        self.register_buffer('f_edge', f_edge)
 
         self.max_normal_similarity = max_normal_similarity
         self.l = 0
@@ -112,13 +119,12 @@ class TensorNeRF(torch.nn.Module):
         if hasattr(self, 'diffuse_module') and isinstance(self.diffuse_module, torch.nn.Module):
             grad_vars += [{'params':self.diffuse_module.parameters(), 'lr':lr_init_network*2}]
         if hasattr(self, 'bg_module') and isinstance(self.bg_module, torch.nn.Module):
-            grad_vars += [{'params':self.bg_module.parameters(), 'lr':lr_init_network*10}]
+            grad_vars += [{'params':self.bg_module.parameters(), 'lr':lr_init_network*2}]
         return grad_vars
 
 
-    def save(self, path):
-        kwargs = self.get_kwargs()
-        ckpt = {'kwargs': kwargs, 'state_dict': self.state_dict()}
+    def save(self, path, config):
+        ckpt = {'config': config, 'state_dict': self.state_dict()}
         if self.alphaMask is not None:
             alpha_volume = self.alphaMask.alpha_volume.bool().cpu().numpy()
             ckpt.update({'alphaMask.shape':alpha_volume.shape})
@@ -126,12 +132,16 @@ class TensorNeRF(torch.nn.Module):
             ckpt.update({'alphaMask.aabb': self.alphaMask.aabb.cpu()})
         torch.save(ckpt, path)
 
-    def load(self, ckpt):
+    @staticmethod
+    def load(ckpt):
+        config = ckpt['config']
+        rf = hydra.utils.instantiate(config)
         if 'alphaMask.aabb' in ckpt.keys():
             length = np.prod(ckpt['alphaMask.shape'])
             alpha_volume = torch.from_numpy(np.unpackbits(ckpt['alphaMask.mask'])[:length].reshape(ckpt['alphaMask.shape']))
-            self.alphaMask = AlphaGridMask(self.device, ckpt['alphaMask.aabb'].to(self.device), alpha_volume.float().to(self.device))
-        self.load_state_dict(ckpt['state_dict'])
+            rf.alphaMask = AlphaGridMask(ckpt['alphaMask.aabb'], alpha_volume.float())
+        rf.load_state_dict(ckpt['state_dict'])
+        return rf
 
 
     def compute_normal(self, depth_map, focal):
@@ -239,7 +249,7 @@ class TensorNeRF(torch.nn.Module):
         alpha[alpha>=self.alphaMask_thres] = 1
         alpha[alpha<self.alphaMask_thres] = 0
 
-        self.alphaMask = AlphaGridMask(self.device, self.rf.aabb, alpha)
+        self.alphaMask = AlphaGridMask(self.rf.aabb, alpha)
 
         valid_xyz = dense_xyz[alpha>0.0]
 
@@ -427,9 +437,9 @@ class TensorNeRF(torch.nn.Module):
             world_normal[ray_valid] = normal_feature
             sigma[ray_valid] = validsigma
 
-        # if self.contract_space:
-        #     at_infinity = self.at_infinity(xyz_normed)
-        #     sigma[at_infinity] = 100
+        if self.rf.contract_space and self.infinity_border:
+            at_infinity = self.at_infinity(xyz_normed)
+            sigma[at_infinity] = 100
 
         # weight: [N_rays, N_samples]
         alpha, weight, bg_weight = raw2alpha(sigma, dists * self.distance_scale)

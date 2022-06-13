@@ -101,10 +101,7 @@ class BlockSampler:
 def export_mesh(args):
 
     ckpt = torch.load(args.ckpt, map_location=device)
-    kwargs = ckpt['kwargs']
-    kwargs.update({'device': device})
-    tensorf = TensorNeRF(**kwargs)
-    tensorf.load(ckpt)
+    tensorf = TensorNeRF.load(ckpt).to(device)
 
     alpha,_ = tensorf.getDenseAlpha()
     convert_sdf_samples_to_ply(alpha.cpu(), f'{args.ckpt[:-3]}.ply',bbox=tensorf.aabb.cpu(), level=0.005)
@@ -206,8 +203,8 @@ def reconstruction(args):
         #             shadingMode=args.shadingMode, alphaMask_thres=args.alpha_mask_thre, density_shift=args.density_shift, distance_scale=args.distance_scale,
         #             pos_pe=args.pos_pe, view_pe=args.view_pe, ref_pe=args.ref_pe, fea_pe=args.fea_pe, featureC=args.featureC, step_ratio=args.step_ratio,
         #             fea2denseAct=args.fea2denseAct, bundle_size=args.bundle_size, density_grid_dims=args.density_grid_dims, enable_reflections=args.enable_reflections)
-        model_conf = OmegaConf.load(args.model_config)
-        tensorf = hydra.utils.instantiate(model_conf.tensorf)(aabb=aabb, grid_size=reso_cur, device=device).to(device)
+        model_conf = OmegaConf.load(args.model_config).tensorf
+        tensorf = hydra.utils.instantiate(model_conf)(aabb=aabb, grid_size=reso_cur, device=device).to(device)
 
 
     grad_vars = tensorf.get_optparam_groups(args.lr_init, args.lr_basis)
@@ -362,7 +359,7 @@ def reconstruction(args):
                                         prtx=f'{iteration:06d}_', N_samples=nSamples, white_bg = white_bg, ndc_ray=ndc_ray,
                                         compute_extra_metrics=False, bundle_size=args.bundle_size, render_mode=args.render_mode)
                 summary_writer.add_scalar('test/psnr', np.mean(PSNRs_test), global_step=iteration)
-                tensorf.save(f'{logfolder}/{args.expname}_{iteration}.th')
+                tensorf.save(f'{logfolder}/{args.expname}_{iteration}.th', model_conf)
 
 
 
@@ -413,7 +410,7 @@ def reconstruction(args):
     # prof.export_chrome_trace('trace.json')
         
 
-    tensorf.save(f'{logfolder}/{args.expname}.th')
+    tensorf.save(f'{logfolder}/{args.expname}.th', model_conf)
 
 
     if args.render_train:
