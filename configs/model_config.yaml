@@ -23,6 +23,7 @@ tensorf:
     app_dim: 27
     step_ratio: 0.5
     density_res_multi: 1
+    nEnvSamples: 0
     contract_space: False
     num_levels: 1
     hier_sizes: [1]
@@ -47,7 +48,7 @@ tensorf:
     pospe: 6
     feape: 2
     featureC: 128
-    num_layers: 2
+    num_layers: 1
   bg_module:
     _target_: models.render_modules.BackgroundRender
     bg_rank: 8

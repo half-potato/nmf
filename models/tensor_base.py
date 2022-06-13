@@ -12,7 +12,6 @@ class TensorBase(torch.nn.Module):
     step_ratio: float
     density_res_multi: float
     contract_space: bool
-    num_levels: int
     hier_sizes: List[int]
     def __init__(self, aabb, grid_size, device, density_n_comp, appearance_n_comp,
                  app_dim, step_ratio, density_res_multi, contract_space, *args, **kwargs):
@@ -30,7 +29,6 @@ class TensorBase(torch.nn.Module):
         self.matMode = [[0,1], [0,2], [1,2]]
         self.vecMode =  [2, 1, 0]
         self.comp_w = [1,1,1]
-        ic(grid_size)
 
         self.update_stepSize(grid_size)
         self.init_svd_volume(grid_size[0], device)

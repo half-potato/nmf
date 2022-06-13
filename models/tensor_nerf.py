@@ -62,8 +62,9 @@ class AlphaGridMask(torch.nn.Module):
 
 
 class TensorNeRF(torch.nn.Module):
-    def __init__(self, rf, grid_size, aabb, device, diffuse_module, normal_module, ref_module, bg_module,
-                    alphaMask = None, near_far=[2.0,6.0],
+    def __init__(self, rf, grid_size, aabb, device, diffuse_module, normal_module, ref_module, bg_module=None,
+                    alphaMask = None, near_far=[2.0,6.0], nEnvSamples = 100, specularity_threshold=0.1, max_recurs=0,
+                    max_normal_similarity=1,
                     density_shift = -10, alphaMask_thres=0.001, distance_scale=25, rayMarch_weight_thres=0.0001,
                     fea2denseAct = 'softplus', bundle_size = 3):
         super(TensorNeRF, self).__init__()
@@ -90,16 +91,15 @@ class TensorNeRF(torch.nn.Module):
         self.near_far = near_far
 
         self.bundle_size = bundle_size
-        self.max_recurs = 0
-        self.specularity_threshold = 0.1
+        self.max_recurs = max_recurs
+        self.specularity_threshold = specularity_threshold
         self.max_bounce_rays = 100
-        self.nEnvSamples = 100
+        self.nEnvSamples = nEnvSamples
 
         self.f_blur = torch.tensor([1, 2, 1], device=device) / 4
         self.f_edge = torch.tensor([-1, 0, 1], device=device) / 2
 
-        # self.max_normal_similarity = np.cos(np.deg2rad(45))
-        self.max_normal_similarity = 1
+        self.max_normal_similarity = max_normal_similarity
         self.l = 0
     
     def get_optparam_groups(self, lr_init_spatial = 0.02, lr_init_network = 0.001):
@@ -115,27 +115,6 @@ class TensorNeRF(torch.nn.Module):
             grad_vars += [{'params':self.bg_module.parameters(), 'lr':lr_init_network*10}]
         return grad_vars
 
-
-    def get_kwargs(self):
-        return {
-            **self.rf.get_kwargs(),
-            'model_name': self.model_name,
-            'density_shift': self.density_shift,
-            'alphaMask_thres': self.alphaMask_thres,
-            'distance_scale': self.distance_scale,
-            'rayMarch_weight_thres': self.rayMarch_weight_thres,
-            'fea2denseAct': self.fea2denseAct,
-
-            'near_far': self.near_far,
-
-            'shadingMode': self.shadingMode,
-            'pos_pe': self.pos_pe,
-            'view_pe': self.view_pe,
-            'ref_pe': self.ref_pe,
-            'fea_pe': self.fea_pe,
-            'featureC': self.featureC,
-            'bundle_size': self.bundle_size,
-        }
 
     def save(self, path):
         kwargs = self.get_kwargs()
@@ -189,7 +168,7 @@ class TensorNeRF(torch.nn.Module):
         N_env_samples = N_env_samples if N_env_samples>0 else self.nEnvSamples
         stepsize = self.rf.stepSize
         near, far = self.near_far
-        vec = rays_d.clip(min=1e-6)
+        vec = torch.where(rays_d==0, torch.full_like(rays_d, 1e-6), rays_d)
         rate_a = (self.rf.aabb[1].to(rays_o) - rays_o) / vec
         rate_b = (self.rf.aabb[0].to(rays_o) - rays_o) / vec
         t_min = torch.minimum(rate_a, rate_b).amax(-1).clamp(min=near, max=far)
@@ -505,7 +484,6 @@ class TensorNeRF(torch.nn.Module):
             roughness = torch.tensor(0.0)
 
         acc_map = torch.sum(bundle_weight, 1)
-        bg = self.bg_module(viewdirs[:, 0, :])
 
         normal_sim =  -(p_world_normal * world_normal).sum(dim=-1).clamp(max=self.max_normal_similarity)
         normal_sim = (weight * normal_sim).mean()
@@ -542,9 +520,12 @@ class TensorNeRF(torch.nn.Module):
 
         rgb_map = torch.sum(bundle_weight[..., None] * rgb, 1)
 
-        # if white_bg or (is_train and torch.rand((1,))<0.5):
-        #     rgb_map = rgb_map + (1. - acc_map[..., None])
-        rgb_map = acc_map[..., None] * rgb_map + (1. - acc_map[..., None]) * bg.reshape(-1, 1, 1, 3)
+        if self.bg_module is not None:
+            bg = self.bg_module(viewdirs[:, 0, :])
+            rgb_map = acc_map[..., None] * rgb_map + (1. - acc_map[..., None]) * bg.reshape(-1, 1, 1, 3)
+        else:
+            if white_bg or (is_train and torch.rand((1,))<0.5):
+                rgb_map = rgb_map + (1. - acc_map[..., None])
         # rgb_map = bg.reshape(-1, 1, 1, 3)
 
         
