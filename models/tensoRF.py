@@ -126,17 +126,16 @@ def d_softplus(x, beta=1.0, shift=-10):
 
 
 class TensorVMSplit(TensorBase):
-    def __init__(self, aabb, grid_size, device, *args, hier_sizes, **kargs):
-        super(TensorVMSplit, self).__init__(aabb, grid_size, device, *args, **kargs)
+    def __init__(self, aabb, grid_size, *args, hier_sizes, **kargs):
+        super(TensorVMSplit, self).__init__(aabb, grid_size, *args, **kargs)
 
 
-        self.convolver = Convolver(hier_sizes, False, device)
+        self.convolver = Convolver(hier_sizes, False)
         self.sizes = self.convolver.sizes
 
         # num_levels x num_outputs
         self.interp_mode = 'bilinear'
         # self.interp_mode = 'bicubic'
-        self.set_smoothing(1.0)
 
     def set_smoothing(self, sm):
         self.convolver.set_smoothing(sm)
@@ -200,51 +199,16 @@ class TensorVMSplit(TensorBase):
         return total
 
     def coordinates(self, xyz_sampled):
-        # coordinate_plane = torch.stack((xyz_sampled[..., self.matMode[0]], xyz_sampled[..., self.matMode[1]], xyz_sampled[..., self.matMode[2]])).detach().view(3, -1, 1, 2)
-        # coordinate_line = torch.stack((xyz_sampled[..., self.vecMode[0]], xyz_sampled[..., self.vecMode[1]], xyz_sampled[..., self.vecMode[2]]))
-        # coordinate_line = torch.stack((torch.zeros_like(coordinate_line), coordinate_line), dim=-1).detach().view(3, -1, 1, 2)
         coordinate_plane = torch.stack((xyz_sampled[..., self.matMode[0]], xyz_sampled[..., self.matMode[1]], xyz_sampled[..., self.matMode[2]])).view(3, -1, 1, 2)
         coordinate_line = torch.stack((xyz_sampled[..., self.vecMode[0]], xyz_sampled[..., self.vecMode[1]], xyz_sampled[..., self.vecMode[2]]))
         coordinate_line = torch.stack((torch.zeros_like(coordinate_line), coordinate_line), dim=-1).view(3, -1, 1, 2)
         return coordinate_plane, coordinate_line
 
-
-    def compute_size_weights(self, xyz_sampled):
-        size = xyz_sampled[..., 3]#*3
-        # the sum across the weights is 1
-        # just want the closest grid point
-        # first calculate the size of voxels in meters
-        # voxel sizes go from smallest to largest
-        voxel_sizes = self.sizes
-        voxel_sizes = torch.tensor(voxel_sizes, dtype=torch.float32, device=xyz_sampled.device)*self.units.min()/self.density_res_multi
-        size_gap = voxel_sizes[:-1] - voxel_sizes[1:]
-
-        # linear interpolation
-        size_diff = size.reshape(1, -1) - voxel_sizes.reshape(-1, 1)
-        inds = (size_diff > 0).int().sum(dim=0) - 1 # index of the largest element that size is greater than
-        do_interp = (inds >= 0) & (inds < len(voxel_sizes)-1)
-        weights = torch.zeros((len(voxel_sizes), *size.shape), dtype=torch.float32, device=size.device)
-        # fill in values where the size is outside the range of sizes
-        weights[0, inds<0] = 1
-        weights[-1, inds==len(voxel_sizes)-1] = 1
-        # inds+1
-        # fill in interpolated values
-        # ic(size_diff[inds[do_interp]+1, do_interp].shape, size_gap[inds[do_interp]].shape)
-        # ic((size_diff[inds[do_interp]+1, do_interp] / size_gap[inds[do_interp]]).shape)
-        weights[inds[do_interp]+1, do_interp] = -size_diff[inds[do_interp], do_interp] / size_gap[inds[do_interp]]
-        weights[inds[do_interp], do_interp] = size_diff[inds[do_interp]+1, do_interp] / size_gap[inds[do_interp]]
-
-        # voxel_sizes = [level.units.max() for level in self.levels]
-
-        # then, the weight should be summed from the smallest supported size to the largest
-        # size_diff = abs(voxel_sizes.reshape(1, -1) - size.reshape(-1, 1))/voxel_sizes.max()
-        # weights = F.softmax(-size_diff.reshape(*size.shape, len(voxel_sizes)), dim=-1)
-        return weights
-
     def compute_densityfeature(self, xyz_sampled):
         coordinate_plane, coordinate_line = self.coordinates(xyz_sampled)
         sigma_feature = torch.zeros((xyz_sampled.shape[0],), device=xyz_sampled.device)
-        size_weights = self.compute_size_weights(xyz_sampled)
+        # size_weights = self.convolver.compute_size_weights(xyz_sampled, self.units/self.density_res_multi)
+        size_weights = 1
         # plane_kerns, line_kerns = self.convolver.get_kernels(size_weights)
         plane_kerns, line_kerns = [[None]], [[None]]
 
@@ -259,7 +223,8 @@ class TensorVMSplit(TensorBase):
         coordinate_plane, coordinate_line = self.coordinates(xyz_sampled)
         sigma_feature = torch.zeros((xyz_sampled.shape[0],), device=xyz_sampled.device)
         world_normals = torch.zeros((xyz_sampled.shape[0], 3), device=xyz_sampled.device)
-        size_weights = self.compute_size_weights(xyz_sampled)
+        # size_weights = self.convolver.compute_size_weights(xyz_sampled, self.units/self.density_res_multi)
+        size_weights = 1
 
         plane_kerns, line_kerns = self.convolver.get_kernels(size_weights, with_normals=True)
 
@@ -281,7 +246,7 @@ class TensorVMSplit(TensorBase):
 
     def compute_appfeature(self, xyz_sampled):
         coordinate_plane, coordinate_line = self.coordinates(xyz_sampled)
-        size_weights = self.compute_size_weights(xyz_sampled)
+        size_weights = self.convolver.compute_size_weights(xyz_sampled, self.units/self.density_res_multi)
         plane_coef_point,line_coef_point = [],[]
         # plane_kerns = [self.norm_plane_kernels[0][0:1]]
         # line_kerns = [self.norm_line_kernels[0][0:1]]

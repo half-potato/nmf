@@ -5,7 +5,6 @@ from typing import List
 class TensorBase(torch.nn.Module):
     aabb: List[int]
     grid_size: List[int]
-    device: torch.DeviceObjType
     density_n_comp: int
     appearance_n_comp: int
     app_dim: int
@@ -13,15 +12,15 @@ class TensorBase(torch.nn.Module):
     density_res_multi: float
     contract_space: bool
     hier_sizes: List[int]
-    def __init__(self, aabb, grid_size, device, density_n_comp, appearance_n_comp,
+    def __init__(self, aabb, grid_size, density_n_comp, appearance_n_comp,
                  app_dim, step_ratio, density_res_multi, contract_space, *args, **kwargs):
         super().__init__()
+        self.dtype = torch.half
         self.density_n_comp = [density_n_comp]*3
         self.app_n_comp = [appearance_n_comp]*3
         self.density_res_multi = density_res_multi
         self.app_dim = app_dim
-        self.aabb = aabb
-        self.device = device
+        self.register_buffer('aabb', torch.tensor(aabb))
         self.step_ratio = step_ratio
         self.contract_space = contract_space
 

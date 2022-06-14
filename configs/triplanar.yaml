@@ -9,29 +9,29 @@ tensorf:
   _partial_: True
 
   density_shift: -10
-  alphaMask_thres: 0.0001
+  alphaMask_thres: 0.000001
   distance_scale: 25
   rayMarch_weight_thres: 0.0001
   nEnvSamples: 100
-  # fea2denseAct: 'softplus_shift'
-  fea2denseAct: 'relu'
+  fea2denseAct: 'softplus_shift'
+  bundle_size: 1
   rf:
     _partial_: True
-    _target_: models.tensoRF.TensorVMSplit
+    # _target_: models.tensoRF.TensorVMSplit
+    _target_: models.triplanar.Triplanar
     density_n_comp: 16
     appearance_n_comp: 48
-    app_dim: 27
+    app_dim: 48
     step_ratio: 0.5
     density_res_multi: 1
-    contract_space: True
-    infinity_border: False
+    contract_space: False
+    infinity_border: True
     num_levels: 1
     hier_sizes: [1]
 
   diffuse_module:
     _partial_: True
     _target_: models.render_modules.MLPDiffuse
-    pospe: 0
     feape: 2
     view_encoder:
       _target_: models.ish.ISH
@@ -48,10 +48,10 @@ tensorf:
     #   max_degree: 6
     ref_encoder:
       _target_: models.ish.RandISH
-      rand_n: 8
+      rand_n: 32
       std: 5
     featureC: 128
-    num_layers: 2
+    num_layers: 4
 
   normal_module:
     _partial_: True
@@ -64,9 +64,9 @@ tensorf:
   bg_module:
     _target_: models.render_modules.BackgroundRender
     bg_rank: 8
-    # view_encoder:
-    #   _target_: models.ish.ISH
-    #   max_degree: 6
+    view_encoder:
+      _target_: models.ish.ISH
+      max_degree: 6
     bg_resolution: [1024, 512]
 
 #featureC: 256
@@ -79,8 +79,6 @@ schedule:
 
   N_voxel_init: 2097156 # 128**3
   N_voxel_final: 27000000 # 300**3
-  # N_voxel_init: 27000000 # 128**3
-  # N_voxel_final: 134217728 # 300**3
 
   # bounce_n_list: [100, 1000, 10000, 20000]
   # bounce_iter_list: [9000, 12000, 14000]

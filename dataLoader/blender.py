@@ -50,6 +50,8 @@ class BlenderDataset(Dataset):
             self.near_far = [2.0,6.0]
         w, h = int(self.meta['w']/self.downsample), int(self.meta['h']/self.downsample)
         self.img_wh = [w,h]
+        print(f"Original Image size: {self.meta['w']} x {self.meta['h']}")
+        print(f"Image size: {w} x {h}")
         if 'aabb_scale' in self.meta:
             aabb_scale = self.meta['aabb_scale']
             self.scene_bbox *= aabb_scale

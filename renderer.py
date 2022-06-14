@@ -28,15 +28,19 @@ def chunk_renderer(rays, tensorf, focal, alpha=None, chunk=4096, N_samples=-1, n
         depth_maps.append(depth_map)
         normal_maps.append(normal_map)
         points.append(point)
-        alphas.append(acc_map)
+        alphas.append(acc_map.detach())
         normal_sims.append(normal_sim)
         N += 1
     
     normal_maps = torch.cat(normal_maps) if normal_maps[0] is not None else None
-    return torch.cat(rgbs), torch.cat(alphas), torch.cat(depth_maps), torch.cat(points), sum(normal_sims)/len(normal_sims), normal_maps, mean_roughness / N
+    # normal_maps = None
+    # return torch.cat(rgbs), torch.cat(alphas), torch.cat(depth_maps), torch.cat(points), sum(normal_sims)/len(normal_sims), normal_maps, mean_roughness / N
+    # return torch.cat(rgbs), torch.cat(alphas), torch.cat(depth_maps), None, sum(normal_sims)/len(normal_sims), normal_maps, mean_roughness / N
+    # return torch.cat(rgbs), None, None, None, sum(normal_sims)/len(normal_sims), normal_maps, mean_roughness / N
+    return torch.cat(rgbs), torch.cat(alphas), torch.cat(depth_maps), None, sum(normal_sims)/len(normal_sims), normal_maps, mean_roughness / N
 
 class BundleRender:
-    def __init__(self, base_renderer, render_mode, bundle_size, H, W, focal, chunk=8*512, scale_normal=False):
+    def __init__(self, base_renderer, render_mode, bundle_size, H, W, focal, chunk=2*512, scale_normal=False):
         self.render_mode = render_mode
         self.base_renderer = base_renderer
         self.bundle_size = bundle_size
@@ -47,7 +51,7 @@ class BundleRender:
         self.chunk = chunk
 
     @torch.no_grad()
-    def __call__(self, rays, tensorf, chunk=4096, N_samples=-1, ndc_ray=False, white_bg=True, is_train=False, device='cuda'):
+    def __call__(self, rays, tensorf, N_samples=-1, ndc_ray=False, white_bg=True, is_train=False, device='cuda'):
         height, width = self.H, self.W
         ray_dim = rays.shape[-1]
         if self.render_mode == 'decimate':
@@ -101,7 +105,7 @@ class BundleRender:
         # plt.figure()
 
         # normal_map = depth_to_normals(depth_map, self.focal)
-        normal_map = acc_map * normal_map + (1-acc_map) * 0
+        # normal_map = acc_map * normal_map + (1-acc_map) * 0
         # plt.imshow(acc_map)
         # plt.figure()
         # plt.imshow(depth_map)
@@ -174,7 +178,7 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
         # rgb_map, _, depth_map, _, _ = renderer(rays, tensorf, chunk=4096, N_samples=N_samples,
         #                                 ndc_ray=ndc_ray, white_bg = white_bg, device=device)
         # rgb_map = rgb_map.clamp(0.0, 1.0)
-        rgb_map, depth_map, normal_map = brender(rays, tensorf, chunk=4096, N_samples=N_samples,
+        rgb_map, depth_map, normal_map = brender(rays, tensorf, N_samples=N_samples,
                                      ndc_ray=ndc_ray, white_bg = white_bg, device=device)
         
         normal_map = (normal_map * 127 + 128).clamp(0, 255).byte()

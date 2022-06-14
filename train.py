@@ -119,11 +119,8 @@ def render_test(args):
         print('the ckpt path does not exists!!')
         return
 
-    ckpt = torch.load(args.ckpt, map_location=device)
-    kwargs = ckpt['kwargs']
-    kwargs.update({'device': device})
-    tensorf = TensorNeRF(**kwargs)
-    tensorf.load(ckpt)
+    ckpt = torch.load(args.ckpt)
+    tensorf = TensorNeRF.load(ckpt).to(device)
 
     logfolder = os.path.dirname(args.ckpt)
     if args.render_train:
@@ -160,9 +157,6 @@ def reconstruction(args):
     ndc_ray = args.ndc_ray
 
     # init resolution
-    upsamp_list = args.upsamp_list
-    uplambda_list = args.uplambda_list
-    update_AlphaMask_list = args.update_AlphaMask_list
     n_lamb_sigma = args.n_lamb_sigma
     n_lamb_sh = args.n_lamb_sh
 
@@ -185,17 +179,19 @@ def reconstruction(args):
 
     # init parameters
     # tensorVM, renderer = init_parameters(args, train_dataset.scene_bbox.to(device), reso_list[0])
+
+
+    conf = OmegaConf.load(args.model_config)
+    model_conf = conf.tensorf
+    schedule = conf.schedule
+
     aabb = train_dataset.scene_bbox.to(device)
-    reso_cur = N_to_reso(args.N_voxel_init, aabb)
+    reso_cur = N_to_reso(schedule.N_voxel_init, aabb)
     nSamples = min(args.nSamples, cal_n_samples(reso_cur,args.step_ratio))
 
-
     if args.ckpt is not None:
-        ckpt = torch.load(args.ckpt, map_location=device)
-        kwargs = ckpt['kwargs']
-        kwargs.update({'device':device})
-        tensorf = TensorNeRF(**kwargs)
-        tensorf.load(ckpt)
+        ckpt = torch.load(args.ckpt)
+        tensorf = TensorNeRF.load(ckpt, aabb).to(device)
     else:
         # tensorf = TensorNeRF(args.model_name, aabb, reso_cur, device,
         #             density_res_multi=args.density_res_multi,
@@ -203,8 +199,7 @@ def reconstruction(args):
         #             shadingMode=args.shadingMode, alphaMask_thres=args.alpha_mask_thre, density_shift=args.density_shift, distance_scale=args.distance_scale,
         #             pos_pe=args.pos_pe, view_pe=args.view_pe, ref_pe=args.ref_pe, fea_pe=args.fea_pe, featureC=args.featureC, step_ratio=args.step_ratio,
         #             fea2denseAct=args.fea2denseAct, bundle_size=args.bundle_size, density_grid_dims=args.density_grid_dims, enable_reflections=args.enable_reflections)
-        model_conf = OmegaConf.load(args.model_config).tensorf
-        tensorf = hydra.utils.instantiate(model_conf)(aabb=aabb, grid_size=reso_cur, device=device).to(device)
+        tensorf = hydra.utils.instantiate(model_conf)(aabb=aabb, grid_size=reso_cur).to(device)
 
 
     grad_vars = tensorf.get_optparam_groups(args.lr_init, args.lr_basis)
@@ -218,16 +213,20 @@ def reconstruction(args):
     
     optimizer = torch.optim.Adam(grad_vars, betas=(0.9,0.99))
 
-    bounce_n_list = args.bounce_n_list
+    # Set up schedule
+    upsamp_list = schedule.upsamp_list
+    uplambda_list = schedule.uplambda_list
+    update_AlphaMask_list = schedule.update_AlphaMask_list
+    bounce_n_list = schedule.bounce_n_list
     #linear in logrithmic space
-    N_voxel_list = (torch.round(torch.exp(torch.linspace(np.log(args.N_voxel_init), np.log(args.N_voxel_final), len(upsamp_list)+1))).long()).tolist()[1:]
+    ic(schedule)
+    N_voxel_list = (torch.round(torch.exp(torch.linspace(np.log(schedule.N_voxel_init), np.log(schedule.N_voxel_final), len(upsamp_list)+1))).long()).tolist()[1:]
     l_list = torch.linspace(1.0, 0.0, len(uplambda_list)+1).tolist()
     tensorf.l = l_list.pop(0)
     tensorf.max_bounce_rays = bounce_n_list.pop(0)
 
     # smoothing_vals = [0.6, 0.7, 0.8, 0.7, 0.5]
-    smoothing_vals = torch.linspace(args.smoothing_start, args.smoothing_end, len(upsamp_list)+1).tolist()
-    print(smoothing_vals)
+    smoothing_vals = torch.linspace(schedule.smoothing_start, schedule.smoothing_end, len(upsamp_list)+1).tolist()
     tensorf.rf.set_smoothing(smoothing_vals.pop(0))
     # smoothing_vals = torch.linspace(0.5, 0.5, len(upsamp_list)+1).tolist()[1:]
 
@@ -237,7 +236,7 @@ def reconstruction(args):
 
     allrays, allrgbs = train_dataset.all_rays, train_dataset.all_rgbs
     if not args.ndc_ray and args.filter_rays:
-        allrays, allrgbs, mask = tensorf.filtering_rays(allrays, allrgbs, focal, bbox_only=True)
+        allrays, allrgbs, mask = tensorf.filtering_rays(allrays, allrgbs, train_dataset.focal, bbox_only=True)
     else:
         mask = None
     if args.bundle_size == 1:
@@ -262,11 +261,9 @@ def reconstruction(args):
     focal = (train_dataset.focal[0] if ndc_ray else train_dataset.focal)
     # / train_dataset.img_wh[0]
     N = 0
-    bundle_psnrs = 0
     # with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], with_stack=True, record_shapes=True) as prof:
     if True:
         for iteration in pbar:
-
 
             if iteration < 16:
                 ray_idx, rgb_idx = trainingSampler.nextids(args.batch_size // 2)
@@ -278,7 +275,7 @@ def reconstruction(args):
             # plt.show()
 
             # rays_train, rgb_train = allrays[ray_idx], allrgbs[rgb_idx].to(device).reshape(-1, args.bundle_size, args.bundle_size, 3)
-            rays_train, rgba_train = allrays[ray_idx], allrgbs[rgb_idx].reshape(-1, args.bundle_size, args.bundle_size, allrgbs.shape[-1])
+            rays_train, rgba_train = allrays[ray_idx], allrgbs[rgb_idx].reshape(-1, allrgbs.shape[-1])
             rgb_train = rgba_train[..., :3]
             if rgba_train.shape[-1] == 4:
                 alpha_train = rgba_train[..., 3]
@@ -286,44 +283,41 @@ def reconstruction(args):
                 alpha_train = None
 
             #rgb_map, alphas_map, depth_map, weights, uncertainty
-            rgb_map, alphas_map, depth_map, weights, normal_sim, normal_map, roughness = renderer(
-                rays_train, tensorf, focal=focal, alpha=alpha_train, chunk=args.batch_size,
-                N_samples=nSamples, white_bg = white_bg, ndc_ray=ndc_ray, device=device, is_train=True)
+            with torch.cuda.amp.autocast(enabled=False):
+                rgb_map, alphas_map, depth_map, weights, normal_sim, normal_map, roughness = renderer(
+                    rays_train, tensorf, focal=focal, alpha=alpha_train, chunk=args.batch_size,
+                    N_samples=nSamples, white_bg = white_bg, ndc_ray=ndc_ray, device=device, is_train=True)
 
-            # loss = torch.mean((rgb_map[:, 1, 1] - rgb_train[:, 1, 1]) ** 2)
-            normal_loss = normal_sim
-            loss = torch.mean((rgb_map - rgb_train) ** 2)
-            diff = (rgb_map - rgb_train) ** 2
-            bundle_loss = diff.permute(0, 3, 1, 2).reshape(-1, args.bundle_size, args.bundle_size).mean(dim=0)
-            bundle_psnr = -10.0 * torch.log(bundle_loss) / np.log(10.0)
-            bundle_psnrs += bundle_psnr.detach().cpu()
+                # loss = torch.mean((rgb_map[:, 1, 1] - rgb_train[:, 1, 1]) ** 2)
+                normal_loss = normal_sim
+                loss = torch.mean((rgb_map - rgb_train) ** 2)
 
 
-            # loss
-            total_loss = loss + args.normal_lambda*normal_loss
-            if Ortho_reg_weight > 0:
-                loss_reg = tensorf.rf.vector_comp_diffs()
-                total_loss += Ortho_reg_weight*loss_reg
-                summary_writer.add_scalar('train/reg', loss_reg.detach().item(), global_step=iteration)
-            if L1_reg_weight > 0:
-                loss_reg_L1 = tensorf.rf.density_L1()
-                total_loss += L1_reg_weight*loss_reg_L1
-                summary_writer.add_scalar('train/reg_l1', loss_reg_L1.detach().item(), global_step=iteration)
+                # loss
+                total_loss = loss + args.normal_lambda*normal_loss
+                if Ortho_reg_weight > 0:
+                    loss_reg = tensorf.rf.vector_comp_diffs()
+                    total_loss += Ortho_reg_weight*loss_reg
+                    summary_writer.add_scalar('train/reg', loss_reg.detach().item(), global_step=iteration)
+                if L1_reg_weight > 0:
+                    loss_reg_L1 = tensorf.rf.density_L1()
+                    total_loss += L1_reg_weight*loss_reg_L1
+                    summary_writer.add_scalar('train/reg_l1', loss_reg_L1.detach().item(), global_step=iteration)
 
-            if TV_weight_density>0:
-                TV_weight_density *= lr_factor
-                loss_tv = tensorf.rf.TV_loss_density(tvreg) * TV_weight_density
-                total_loss = total_loss + loss_tv
-                summary_writer.add_scalar('train/reg_tv_density', loss_tv.detach().item(), global_step=iteration)
-            if TV_weight_app>0:
-                TV_weight_app *= lr_factor
-                loss_tv = loss_tv + tensorf.rf.TV_loss_app(tvreg)*TV_weight_app
-                total_loss = total_loss + loss_tv
-                summary_writer.add_scalar('train/reg_tv_app', loss_tv.detach().item(), global_step=iteration)
+                if TV_weight_density>0:
+                    TV_weight_density *= lr_factor
+                    loss_tv = tensorf.rf.TV_loss_density(tvreg) * TV_weight_density
+                    total_loss = total_loss + loss_tv
+                    summary_writer.add_scalar('train/reg_tv_density', loss_tv.detach().item(), global_step=iteration)
+                if TV_weight_app>0:
+                    TV_weight_app *= lr_factor
+                    loss_tv = loss_tv + tensorf.rf.TV_loss_app(tvreg)*TV_weight_app
+                    total_loss = total_loss + loss_tv
+                    summary_writer.add_scalar('train/reg_tv_app', loss_tv.detach().item(), global_step=iteration)
 
-            optimizer.zero_grad()
-            total_loss.backward()
-            optimizer.step()
+                optimizer.zero_grad()
+                total_loss.backward()
+                optimizer.step()
 
             loss = loss.detach().item()
             
@@ -337,21 +331,15 @@ def reconstruction(args):
 
             # Print the current values of the losses.
             if iteration % args.progress_refresh_rate == 0:
-                bundle_psnrs = bundle_psnrs / args.progress_refresh_rate
-                center_psnr = bundle_psnrs[args.bundle_size//2, args.bundle_size//2].clone().item()
-                bundle_psnrs[args.bundle_size//2, args.bundle_size//2] = 0
-                surround_psnr = bundle_psnrs.sum().item() / 8
                 pbar.set_description(
                     f'Iteration {iteration:05d}:'
                     + f' train_psnr = {float(np.mean(PSNRs)):.2f}'
                     + f' test_psnr = {float(np.mean(PSNRs_test)):.2f}'
-                    + f' center_psnr = {center_psnr:.2f}'
                     + f' roughness = {float(roughness):.2f}'
                     + f' normal_loss = {normal_loss:.6f}'
                     + f' mse = {loss:.6f}'
                 )
                 PSNRs = []
-                bundle_psnrs = 0
                 
 
             if iteration % args.vis_every == args.vis_every - 1 and args.N_vis!=0:
@@ -363,7 +351,7 @@ def reconstruction(args):
 
 
 
-            if iteration in args.bounce_iter_list:
+            if iteration in schedule.bounce_iter_list:
                 print(f"Max bounces {tensorf.max_bounce_rays} -> {bounce_n_list[0]}")
                 tensorf.max_bounce_rays = bounce_n_list.pop(0)
             if iteration in update_AlphaMask_list:
@@ -372,7 +360,7 @@ def reconstruction(args):
                     reso_mask = reso_cur
                 new_aabb = tensorf.updateAlphaMask(tuple(reso_mask))
                 if iteration == update_AlphaMask_list[0]:
-                    apply_correction = not torch.all(tensorf.alphaMask.gridSize == tensorf.rf.gridSize)
+                    apply_correction = not torch.all(tensorf.alphaMask.grid_size == tensorf.rf.grid_size)
                     tensorf.shrink(new_aabb, apply_correction)
                     # tensorVM.alphaMask = None
                     L1_reg_weight = args.L1_weight_rest
@@ -394,7 +382,7 @@ def reconstruction(args):
             if iteration in upsamp_list:
                 n_voxels = N_voxel_list.pop(0)
                 reso_cur = N_to_reso(n_voxels, tensorf.rf.aabb)
-                nSamples = min(args.nSamples, cal_n_samples(reso_cur,args.step_ratio/tensorf.rf.density_res_multi))
+                nSamples = min(conf.nSamples, cal_n_samples(reso_cur,args.step_ratio/tensorf.rf.density_res_multi))
                 tensorf.rf.upsample_volume_grid(reso_cur)
 
                 sval = smoothing_vals.pop(0)

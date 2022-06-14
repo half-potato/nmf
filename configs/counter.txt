@@ -1,6 +1,6 @@
 
 dataset_name = blender
-scenedir = nerf_synthetic/bicycle
+scenedir = nerf_synthetic/counter
 expname =  ref_tensorf_materials_ref_pe12
 basedir = ./log
 

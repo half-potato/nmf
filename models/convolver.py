@@ -48,18 +48,16 @@ def combine_kernels2d(kernel1, kernel2):
     return kernelf
 
 class Convolver(torch.nn.Module):
-    def __init__(self, sizes, multi_scale, device):
+    def __init__(self, sizes, multi_scale, dtype=torch.float32):
         super().__init__()
 
-        self.device = device
         self.sizes = sizes
+        self.dtype = dtype
         self.multi_scale = multi_scale
         f_blur = torch.tensor([0, 1, 0])
         f_edge = torch.tensor([-1, 0, 1]) / 2
         l = len(f_blur)
 
-        self.plane_kernels = [None, *[gkern(2*n+1, std=n) for n in self.sizes]]
-        self.line_kernels = [None, *[gaussian_fn(2*n+1, std=n) for n in self.sizes]]
         self.sizes = [1, *self.sizes]
 
         self.register_buffer('dy_filter', (f_blur[None, :] * f_edge[:, None]).reshape(1, 1, l, l))
@@ -68,7 +66,6 @@ class Convolver(torch.nn.Module):
 
         self.interp_mode = 'bilinear'
         # self.interp_mode = 'bicubic'
-        self.set_smoothing(1.0)
         
     def get_kernels(self, size_weights=None, with_normals=False):
         if self.multi_scale and size_weights is not None and size_weights[1:].sum() > 0:
@@ -82,6 +79,38 @@ class Convolver(torch.nn.Module):
             line_kerns = line_kerns[0:1]
         return plane_kerns, line_kerns
 
+    def compute_size_weights(self, xyz_sampled, units):
+        size = xyz_sampled[..., 3]#*3
+        # the sum across the weights is 1
+        # just want the closest grid point
+        # first calculate the size of voxels in meters
+        # voxel sizes go from smallest to largest
+        voxel_sizes = self.sizes
+        voxel_sizes = torch.tensor(voxel_sizes, dtype=torch.float32, device=xyz_sampled.device)*units.min()
+        size_gap = voxel_sizes[:-1] - voxel_sizes[1:]
+
+        # linear interpolation
+        size_diff = size.reshape(1, -1) - voxel_sizes.reshape(-1, 1)
+        inds = (size_diff > 0).int().sum(dim=0) - 1 # index of the largest element that size is greater than
+        do_interp = (inds >= 0) & (inds < len(voxel_sizes)-1)
+        weights = torch.zeros((len(voxel_sizes), *size.shape), dtype=torch.float32, device=size.device)
+        # fill in values where the size is outside the range of sizes
+        weights[0, inds<0] = 1
+        weights[-1, inds==len(voxel_sizes)-1] = 1
+        # inds+1
+        # fill in interpolated values
+        # ic(size_diff[inds[do_interp]+1, do_interp].shape, size_gap[inds[do_interp]].shape)
+        # ic((size_diff[inds[do_interp]+1, do_interp] / size_gap[inds[do_interp]]).shape)
+        weights[inds[do_interp]+1, do_interp] = -size_diff[inds[do_interp], do_interp] / size_gap[inds[do_interp]]
+        weights[inds[do_interp], do_interp] = size_diff[inds[do_interp]+1, do_interp] / size_gap[inds[do_interp]]
+
+        # voxel_sizes = [level.units.max() for level in self.levels]
+
+        # then, the weight should be summed from the smallest supported size to the largest
+        # size_diff = abs(voxel_sizes.reshape(1, -1) - size.reshape(-1, 1))/voxel_sizes.max()
+        # weights = F.softmax(-size_diff.reshape(*size.shape, len(voxel_sizes)), dim=-1)
+        return weights
+
     def set_smoothing(self, sm):
         print(f"Setting smoothing to {sm}")
         device = self.dx_filter.device
@@ -94,6 +123,7 @@ class Convolver(torch.nn.Module):
         # plane.shape: 1, n_comp, grid_size, grid_size
         # coordinate_plane.shape: 1, N, 1, 2
         # convs: [nested list of tensors of shape: 1, 1, s, s]. Outer list is for different outputs. Inner list is for different sizes.
+        # returns: n_comp, N
         
         n_comp = plane.shape[1]
         num_scales = len(convs[0])
@@ -129,6 +159,7 @@ class Convolver(torch.nn.Module):
         # plane.shape: 1, n_comp, grid_size, 1
         # coordinate_plane.shape: 1, N, 1, 2
         # convs: [nested list of tensors of shape: 1, 1, s]. Outer list is for different outputs. Inner list is for different sizes.
+        # returns: n_comp, N
         
         n_comp = line.shape[1]
         num_scales = len(convs[0])
@@ -148,7 +179,6 @@ class Convolver(torch.nn.Module):
         out = torch.cat(out, dim=1)
         
         ms_line_coef = F.grid_sample(out, coordinate_line, mode=self.interp_mode, align_corners=True)
-        # ms_line_coef.shape: len(self.line_kernels), len(convs), n_comp, N
         ms_line_coef = ms_line_coef.reshape(num_outputs, num_scales, n_comp, -1).permute(1, 0, 2, 3)
         # line_coef.shape: len(convs), n_comp, N
         line_coef = (ms_line_coef * size_weights).sum(dim=0)
