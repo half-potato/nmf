@@ -1,4 +1,3 @@
-from cv2 import norm
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -16,7 +15,6 @@ from .tensoRF import TensorCP, TensorVM, TensorVMSplit
 from .multi_level_rf import MultiLevelRF
 from torch.autograd import grad
 import matplotlib.pyplot as plt
-
 
 def raw2alpha(sigma, dist):
     # sigma, dist  [N_rays, N_samples]
@@ -135,10 +133,10 @@ class TensorNeRF(torch.nn.Module):
         torch.save(ckpt, path)
 
     @staticmethod
-    def load(ckpt, aabb):
+    def load(ckpt):
         config = ckpt['config']
-        # aabb = ckpt['state_dict']['rf.aabb']
-        ic(ckpt['state_dict'].keys())
+        aabb = ckpt['state_dict']['rf.aabb']
+        # ic(ckpt['state_dict'].keys())
         grid_size = ckpt['state_dict']['rf.grid_size'].cpu()
         rf = hydra.utils.instantiate(config)(aabb=aabb, grid_size=grid_size)
         if 'alphaMask.aabb' in ckpt.keys():
@@ -339,6 +337,7 @@ class TensorNeRF(torch.nn.Module):
         return xyz
 
     def shrink(self, new_aabb, voxel_size):
+        return
         if self.rf.contract_space:
             return
         else:
@@ -408,6 +407,8 @@ class TensorNeRF(torch.nn.Module):
 
         xyz_normed = self.rf.normalize_coord(xyz_sampled)
 
+        device = xyz_sampled.device
+
         viewdirs = viewdirs.view(-1, 1, 3).expand(xyz_sampled_shape)
         rays_o = rays_chunk[:, :3]
         rays_up = rays_chunk[:, 6:9]
@@ -424,28 +425,47 @@ class TensorNeRF(torch.nn.Module):
             ray_valid = ~ray_invalid
 
         # sigma.shape: (N, N_samples)
-        sigma = torch.zeros(xyz_sampled_shape[:-1], device=xyz_sampled.device)
+        sigma = torch.zeros(xyz_sampled_shape[:-1], device=device)
         world_normal = torch.zeros(
-            xyz_sampled_shape, device=xyz_sampled.device)
+            xyz_sampled_shape, device=device)
         rgb = torch.zeros(
-            (*xyz_sampled_shape[:2], 3), device=xyz_sampled.device)
+            (*xyz_sampled_shape[:2], 3), device=device)
         p_world_normal = torch.zeros(
-            xyz_sampled_shape, device=xyz_sampled.device)
+            xyz_sampled_shape, device=device)
         # p_world_normal = world_normal.clone()
 
         if ray_valid.any():
-            sigma_feature = self.rf.compute_densityfeature(
-                xyz_normed[ray_valid])
+
+            sigma_feature = self.rf.compute_densityfeature(xyz_normed[ray_valid])
+            #  sigma_feature, world_normal[ray_valid] = self.rf.compute_density_norm(xyz_normed[ray_valid], self.feature2density)
+            #  _, world_normal[ray_valid] = self.rf.compute_density_norm(xyz_normed[ray_valid], self.feature2density)
             validsigma = self.feature2density(sigma_feature)
             sigma[ray_valid] = validsigma
+
+            with torch.enable_grad():
+                xyz_g = xyz_sampled[ray_valid].clone()
+                xyz_g.requires_grad = True
+
+                # compute sigma
+                xyz_g_normed = self.rf.normalize_coord(xyz_g)
+                sigma_feature = self.rf.compute_densityfeature(xyz_g_normed)
+                validsigma = self.feature2density(sigma_feature)
+                sigma[ray_valid] = validsigma
+
+                # compute normal
+                grad_outputs = torch.ones_like(validsigma)
+                surf_grad = grad(validsigma, xyz_g, grad_outputs=grad_outputs, create_graph=True, allow_unused=True)[0][:, :3]
+                surf_grad = surf_grad / (torch.norm(surf_grad, dim=1, keepdim=True)+1e-8)
+
+                world_normal[ray_valid] = surf_grad
+
 
         if self.rf.contract_space and self.infinity_border:
             at_infinity = self.at_infinity(xyz_normed)
             sigma[at_infinity] = 100
 
         # weight: [N_rays, N_samples]
-        alpha, weight, bg_weight = raw2alpha(
-            sigma, dists * self.distance_scale)
+        alpha, weight, bg_weight = raw2alpha(sigma, dists * self.distance_scale)
         # floater_loss = torch.matmul(weight.reshape(
         #     B, -1, 1), weight.reshape(B, 1, -1)).sum(dim=-1).sum(dim=-1).mean()
         floater_loss = 0
@@ -454,10 +474,26 @@ class TensorNeRF(torch.nn.Module):
         app_mask = (weight > self.rayMarch_weight_thres)
 
         if app_mask.any():
-            # Compute normals for app mask
-            _, normal_feature = self.rf.compute_density_norm(
-                xyz_normed[app_mask], self.feature2density)
-            world_normal[app_mask] = normal_feature
+            #  Compute normals for app mask
+            #  _, normal_feature = self.rf.compute_density_norm(xyz_normed[app_mask], self.feature2density)
+            #  _, normal_feature = self.rf.compute_density_norm(xyz_normed[app_mask], self.feature2density)
+            #  world_normal[app_mask] = normal_feature
+            #  a = viewdirs[app_mask][..., :3]
+            #  world_normal[app_mask] = a / torch.linalg.norm(a, dim=-1, keepdim=True)
+
+            #  with torch.enable_grad():
+            #      xyz_g = xyz_sampled[app_mask].clone()
+            #      xyz_g.requires_grad = True
+            #
+            #      # compute sigma
+            #      xyz_g_normed = self.rf.normalize_coord(xyz_g)
+            #      sigma_feature = self.rf.compute_densityfeature(xyz_g_normed)
+            #      validsigma = self.feature2density(sigma_feature)
+            #
+            #      # compute normal
+            #      grad_outputs = torch.ones_like(validsigma)
+            #      g = grad(validsigma, xyz_g, grad_outputs=grad_outputs, create_graph=True, allow_unused=True)
+            #      world_normal[app_mask] = g[0][:, :3]
 
             # get base color of the point
             app_features = self.rf.compute_appfeature(xyz_normed[app_mask])
@@ -466,8 +502,7 @@ class TensorNeRF(torch.nn.Module):
             
             # handle reflections
             if self.ref_module is not None:
-                p_world_normal[app_mask] = self.normal_module(
-                    xyz_normed[app_mask], app_features)
+                p_world_normal[app_mask] = self.normal_module(xyz_normed[app_mask], app_features)
 
                 l = self.l if is_train else 0
                 v_world_normal = (1-l)*p_world_normal + l*world_normal
@@ -482,7 +517,7 @@ class TensorNeRF(torch.nn.Module):
                 # valid_rgbs = valid_rgbs.reshape(-1, 3)
                 M = diffuse.shape[0]
                 ref_rgbs = torch.zeros_like(diffuse)
-                bounce_mask = torch.zeros((M), dtype=bool, device=self.device)
+                bounce_mask = torch.zeros((M), dtype=bool, device=device)
                 if recur < self.max_recurs:
                     # decide how many bounces to calculate
                     prob = torch.linalg.norm(tint, dim=-1)
@@ -504,6 +539,7 @@ class TensorNeRF(torch.nn.Module):
                         xyz_normed[app_mask][~bounce_mask], viewdirs[app_mask][~bounce_mask], app_features[~bounce_mask],
                         refdirs=d_refdirs[app_mask][~bounce_mask], roughness=roughness[~bounce_mask])
                 rgb[app_mask] = (tint * ref_rgbs + diffuse).type(rgb.dtype)
+                # rgb[app_mask] = torch.linalg.norm(diffuse, dim=-1, keepdim=True).type(rgb.dtype)
             else:
                 rgb[app_mask] = diffuse
             # rgb[rgb_app_mask] = valid_rgbs
@@ -531,14 +567,13 @@ class TensorNeRF(torch.nn.Module):
                 viewdirs[:, 0],
                 rays_up[:, 0],
             ], dim=1)
-            # ic(row_basis[0])
             p_world_normal_map = torch.sum(
                 weight[..., None] * p_world_normal, 1)
             p_world_normal_map = p_world_normal_map / \
                 (torch.norm(p_world_normal_map, dim=-1, keepdim=True)+1e-8)
-            # d_world_normal_map = torch.sum(weight[..., None] * world_normal, 1)
+            d_world_normal_map = torch.sum(weight[..., None] * world_normal, 1)
             v_world_normal_map = torch.sum(weight[..., None] * v_world_normal, 1)
-            # d_normal_map = torch.matmul(row_basis, d_world_normal_map.unsqueeze(-1)).squeeze(-1)
+            d_normal_map = torch.matmul(row_basis, d_world_normal_map.unsqueeze(-1)).squeeze(-1)
             # p_normal_map = torch.matmul(
             #     row_basis, p_world_normal_map.unsqueeze(-1)).squeeze(-1)
             v_normal_map = torch.matmul(row_basis, v_world_normal_map.unsqueeze(-1)).squeeze(-1)

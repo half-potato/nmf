@@ -97,7 +97,7 @@ class BlockSampler:
 
         return centers, bundle
 
-@torch.no_grad()
+# @torch.no_grad()
 def export_mesh(args):
 
     ckpt = torch.load(args.ckpt, map_location=device)
@@ -121,6 +121,7 @@ def render_test(args):
 
     ckpt = torch.load(args.ckpt)
     tensorf = TensorNeRF.load(ckpt).to(device)
+    tensorf.rf.set_smoothing(1)
 
     logfolder = os.path.dirname(args.ckpt)
     if args.render_train:
@@ -219,7 +220,6 @@ def reconstruction(args):
     update_AlphaMask_list = schedule.update_AlphaMask_list
     bounce_n_list = schedule.bounce_n_list
     #linear in logrithmic space
-    ic(schedule)
     N_voxel_list = (torch.round(torch.exp(torch.linspace(np.log(schedule.N_voxel_init), np.log(schedule.N_voxel_final), len(upsamp_list)+1))).long()).tolist()[1:]
     l_list = torch.linspace(1.0, 0.0, len(uplambda_list)+1).tolist()
     tensorf.l = l_list.pop(0)
@@ -358,7 +358,7 @@ def reconstruction(args):
 
                 if reso_cur[0] * reso_cur[1] * reso_cur[2]<256**3:# update volume resolution
                     reso_mask = reso_cur
-                new_aabb = tensorf.updateAlphaMask(tuple(reso_mask))
+                    new_aabb = tensorf.updateAlphaMask(tuple(reso_mask))
                 if iteration == update_AlphaMask_list[0]:
                     apply_correction = not torch.all(tensorf.alphaMask.grid_size == tensorf.rf.grid_size)
                     tensorf.shrink(new_aabb, apply_correction)

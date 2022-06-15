@@ -87,12 +87,8 @@ class BundleRender:
             val_map = val_map.reshape((fH, fW, -1))[:self.H, :self.W, :]
             return val_map
 
-        depth_map = reshape(depth_map).squeeze(2)
-        # dirs = rays[:, 3:6]
-        # z = abs(dirs[:, 2])
-        # depth_map = depth_map / z.reshape(*depth_map.shape)
 
-        rgb_map, depth_map, acc_map = reshape(rgb_map).cpu(), depth_map.cpu(), reshape(acc_map).cpu()
+        rgb_map, depth_map, acc_map = reshape(rgb_map.detach()).cpu(), reshape(depth_map.detach()).cpu(), reshape(acc_map.detach()).cpu()
         rgb_map = rgb_map.clamp(0.0, 1.0)
         if normal_map is not None:
             normal_map = normal_map.reshape(height, width, 3).cpu()
@@ -157,6 +153,7 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
     os.makedirs(savePath, exist_ok=True)
     os.makedirs(savePath+"/rgbd", exist_ok=True)
     os.makedirs(savePath+"/envmaps", exist_ok=True)
+    ic(N_samples)
 
     try:
         tqdm._instances.clear()
@@ -168,8 +165,8 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
     focal = (test_dataset.focal[0] if ndc_ray else test_dataset.focal)
     brender = BundleRender(renderer, render_mode, bundle_size, H, W, focal)
     env_map, col_map = tensorf.recover_envmap(812, xyz=torch.tensor([-0.3042,  0.8466,  0.8462,  0.0027], device='cuda:0'))
-    env_map = (env_map.cpu().numpy() * 255).astype('uint8')
-    col_map = (col_map.cpu().numpy() * 255).astype('uint8')
+    env_map = (env_map.detach().cpu().numpy() * 255).astype('uint8')
+    col_map = (col_map.detach().cpu().numpy() * 255).astype('uint8')
     imageio.imwrite(f'{savePath}/envmaps/{prtx}view_map.png', col_map)
     imageio.imwrite(f'{savePath}/envmaps/{prtx}ref_map.png', env_map)
     print(f"Using {render_mode} render mode")
@@ -240,7 +237,7 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
 
     return PSNRs
 
-@torch.no_grad()
+# @torch.no_grad()
 def evaluation(test_dataset,tensorf, unused, renderer, *args, N_vis=5, device='cuda', **kwargs):
 
     img_eval_interval = 1 if N_vis < 0 else max(test_dataset.all_rays.shape[0] // N_vis,1)
@@ -257,7 +254,7 @@ def evaluation(test_dataset,tensorf, unused, renderer, *args, N_vis=5, device='c
                 yield idx, rays, None
     return evaluate(iterator, test_dataset, tensorf, renderer, *args, device=device, **kwargs)
 
-@torch.no_grad()
+# @torch.no_grad()
 def evaluation_path(test_dataset,tensorf, c2ws, renderer, *args, device='cuda', ndc_ray=False, **kwargs):
     W, H = test_dataset.img_wh
     def iterator():

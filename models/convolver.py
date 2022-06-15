@@ -2,6 +2,8 @@
 import torch
 import torch.nn.functional as F
 from icecream import ic
+import numpy as np
+import cv2
 
 def gaussian_fn(M, std):
     n = torch.arange(0, M) - (M - 1.0) / 2.0
@@ -131,6 +133,7 @@ class Convolver(torch.nn.Module):
         p_plane = plane.permute(1, 0, 2, 3)
         size_weights = size_weights.reshape(num_scales, 1, 1, -1) if num_scales > 1 else 1
         out = []
+        #  cv2.imwrite('plane.png', (plane[0, 0, :, :].detach().cpu().numpy()*255).astype(np.uint8))
 
         for sizes in convs:
             for comb_kernel in sizes:
