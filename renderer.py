@@ -1,43 +1,35 @@
+from collections import defaultdict
 import torch,os,imageio,sys
 from tqdm.auto import tqdm
 from dataLoader.ray_utils import get_rays
-# from models.tensoRF import TensorVM, TensorCP, raw2alpha, TensorVMSplit, AlphaGridMask
 from utils import *
 from dataLoader.ray_utils import ndc_rays_blender
 
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
 from icecream import ic
-import plotly.express as px
-import plotly.graph_objects as go
 
-def chunk_renderer(rays, tensorf, focal, alpha=None, chunk=4096, N_samples=-1, ndc_ray=False, white_bg=True, is_train=False, device='cuda'):
+def chunk_renderer(rays, tensorf, focal, keys=['rgb_map'], chunk=4096, **kwargs):
 
-    rgbs, alphas, depth_maps, normal_maps, uncertainties = [], [], [], [], []
-    points, normal_sims = [], []
+    data = defaultdict(list)
     N_rays_all = rays.shape[0]
-    mean_roughness = 0
-    N = 0
     for chunk_idx in range(N_rays_all // chunk + int(N_rays_all % chunk > 0)):
         rays_chunk = rays[chunk_idx * chunk:(chunk_idx + 1) * chunk]#.to(device)
     
-        rgb_map, depth_map, normal_map, acc_map, point, normal_sim, mroughness = tensorf(rays_chunk, focal, output_alpha=alpha, is_train=is_train, white_bg=white_bg, ndc_ray=ndc_ray, N_samples=N_samples)
+        cdata = tensorf(rays_chunk, focal, **kwargs)
+        for key in keys:
+            data[key].append(cdata[key])
 
-        mean_roughness += mroughness
-        rgbs.append(rgb_map)
-        depth_maps.append(depth_map)
-        normal_maps.append(normal_map)
-        points.append(point)
-        alphas.append(acc_map.detach())
-        normal_sims.append(normal_sim)
-        N += 1
-    
-    normal_maps = torch.cat(normal_maps) if normal_maps[0] is not None else None
-    # normal_maps = None
-    # return torch.cat(rgbs), torch.cat(alphas), torch.cat(depth_maps), torch.cat(points), sum(normal_sims)/len(normal_sims), normal_maps, mean_roughness / N
-    # return torch.cat(rgbs), torch.cat(alphas), torch.cat(depth_maps), None, sum(normal_sims)/len(normal_sims), normal_maps, mean_roughness / N
-    # return torch.cat(rgbs), None, None, None, sum(normal_sims)/len(normal_sims), normal_maps, mean_roughness / N
-    return torch.cat(rgbs), torch.cat(alphas), torch.cat(depth_maps), None, sum(normal_sims)/len(normal_sims), normal_maps, mean_roughness / N
+    # stack it boyyy
+    for key in keys:
+        if len(data[key]) == 1:
+            data[key] = data[key][0]
+            continue
+        if torch.is_tensor(data[key][0]):
+            data[key] = torch.cat(data[key], dim=0)
+        else:
+            data[key] = torch.tensor(data[key])
+    return data
 
 class BundleRender:
     def __init__(self, base_renderer, render_mode, bundle_size, H, W, focal, chunk=2*512, scale_normal=False):
@@ -51,7 +43,7 @@ class BundleRender:
         self.chunk = chunk
 
     @torch.no_grad()
-    def __call__(self, rays, tensorf, N_samples=-1, ndc_ray=False, white_bg=True, is_train=False, device='cuda'):
+    def __call__(self, rays, tensorf, **kwargs):
         height, width = self.H, self.W
         ray_dim = rays.shape[-1]
         if self.render_mode == 'decimate':
@@ -67,8 +59,11 @@ class BundleRender:
             fW = width
         num_rays = height * width
 
-        rgb_map, acc_map, depth_map, points, _, normal_map, _ = self.base_renderer(rays, tensorf, focal=self.focal, chunk=self.chunk, N_samples=N_samples,
-                                        ndc_ray=ndc_ray, white_bg = white_bg, device=device)
+        data = self.base_renderer(rays, tensorf, keys=['depth_map', 'rgb_map', 'normal_map', 'acc_map'], focal=self.focal, chunk=self.chunk, **kwargs)
+        rgb_map = data['rgb_map']
+        depth_map = data['depth_map']
+        normal_map = data['normal_map']
+        acc_map = data['acc_map']
         # ind = [598,532]
         # ic(points.reshape(height, width, -1)[ind[0], ind[1]])
         if self.render_mode == 'decimate':
@@ -176,7 +171,7 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
         #                                 ndc_ray=ndc_ray, white_bg = white_bg, device=device)
         # rgb_map = rgb_map.clamp(0.0, 1.0)
         rgb_map, depth_map, normal_map = brender(rays, tensorf, N_samples=N_samples,
-                                     ndc_ray=ndc_ray, white_bg = white_bg, device=device)
+                                     ndc_ray=ndc_ray, white_bg = white_bg)
         
         normal_map = (normal_map * 127 + 128).clamp(0, 255).byte()
 

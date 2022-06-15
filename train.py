@@ -1,6 +1,5 @@
 
 import os
-import shutil
 from tracemalloc import start
 from tqdm.auto import tqdm
 from models.tensor_nerf import TensorNeRF
@@ -13,6 +12,7 @@ from renderer import *
 from utils import *
 from torch.utils.tensorboard import SummaryWriter
 import datetime
+from omegaconf import DictConfig, OmegaConf
 
 from dataLoader import dataset_dict
 import sys
@@ -97,23 +97,13 @@ class BlockSampler:
 
         return centers, bundle
 
-# @torch.no_grad()
-def export_mesh(args):
-
-    ckpt = torch.load(args.ckpt, map_location=device)
-    tensorf = TensorNeRF.load(ckpt).to(device)
-
-    alpha,_ = tensorf.getDenseAlpha()
-    convert_sdf_samples_to_ply(alpha.cpu(), f'{args.ckpt[:-3]}.ply',bbox=tensorf.aabb.cpu(), level=0.005)
-
-
 @torch.no_grad()
 def render_test(args):
     # init dataset
     dataset = dataset_dict[args.dataset_name]
-    test_dataset = dataset(args.datadir, split='test', downsample=args.downsample_train, is_stack=True)
+    test_dataset = dataset(os.path.join(args.datadir, args.dataset.scenedir), split='test', downsample=args.downsample_train, is_stack=True)
     white_bg = test_dataset.white_bg
-    ndc_ray = args.ndc_ray
+    ndc_ray = args.dataset.ndc_ray
 
     if not os.path.exists(args.ckpt):
         print('the ckpt path does not exists!!')
@@ -126,7 +116,7 @@ def render_test(args):
     logfolder = os.path.dirname(args.ckpt)
     if args.render_train:
         os.makedirs(f'{logfolder}/imgs_train_all', exist_ok=True)
-        train_dataset = dataset(args.datadir, split='train', downsample=args.downsample_train, is_stack=True)
+        train_dataset = dataset(os.path.join(args.datadir, args.dataset.scenedir), split='train', downsample=args.downsample_train, is_stack=True)
         PSNRs_test = evaluation(train_dataset,tensorf, args, renderer, f'{logfolder}/imgs_train_all/',
                                 N_vis=-1, N_samples=-1, white_bg = white_bg, ndc_ray=ndc_ray,device=device,
                                 bundle_size=args.bundle_size, render_mode=args.render_mode)
@@ -140,28 +130,24 @@ def render_test(args):
                    N_vis=-1, N_samples=-1, white_bg = white_bg, ndc_ray=ndc_ray,device=device,
                    bundle_size=args.bundle_size, render_mode=args.render_mode)
 
-    if args.render_path:
-        c2ws = test_dataset.render_path
-        os.makedirs(f'{logfolder}/imgs_path_all', exist_ok=True)
-        evaluation_path(test_dataset,tensorf, c2ws, renderer, f'{logfolder}/{args.expname}/imgs_path_all/',
-                        N_vis=-1, N_samples=-1, white_bg = white_bg, ndc_ray=ndc_ray,device=device,
-                        bundle_size=args.bundle_size, render_mode=args.render_mode)
+    #  if args.render_path:
+    #      c2ws = test_dataset.render_path
+    #      os.makedirs(f'{logfolder}/imgs_path_all', exist_ok=True)
+    #      evaluation_path(test_dataset,tensorf, c2ws, renderer, f'{logfolder}/{args.expname}/imgs_path_all/',
+    #                      N_vis=-1, N_samples=-1, white_bg = white_bg, ndc_ray=ndc_ray,device=device,
+    #                      bundle_size=args.bundle_size, render_mode=args.render_mode)
 
 def reconstruction(args):
 
     # init dataset
-    dataset = dataset_dict[args.dataset_name]
-    train_dataset = dataset(args.datadir, split='train', downsample=args.downsample_train, is_stack=False)
-    test_dataset = dataset(args.datadir, split='test', downsample=args.downsample_train, is_stack=True)
+    dataset = dataset_dict[args.dataset.dataset_name]
+    train_dataset = dataset(os.path.join(args.datadir, args.dataset.scenedir), split='train', downsample=args.dataset.downsample_train, is_stack=False)
+    test_dataset = dataset(os.path.join(args.datadir, args.dataset.scenedir), split='test', downsample=args.dataset.downsample_train, is_stack=True)
     white_bg = train_dataset.white_bg
+    train_dataset.near_far = args.dataset.near_far
     near_far = train_dataset.near_far
-    ndc_ray = args.ndc_ray
+    ndc_ray = args.dataset.ndc_ray
 
-    # init resolution
-    n_lamb_sigma = args.n_lamb_sigma
-    n_lamb_sh = args.n_lamb_sh
-
-    
     if args.add_timestamp:
         logfolder = f'{args.basedir}/{args.expname}{datetime.datetime.now().strftime("-%Y%m%d-%H%M%S")}'
     else:
@@ -173,21 +159,11 @@ def reconstruction(args):
     os.makedirs(f'{logfolder}/imgs_vis', exist_ok=True)
     os.makedirs(f'{logfolder}/imgs_rgba', exist_ok=True)
     os.makedirs(f'{logfolder}/rgba', exist_ok=True)
-    shutil.copy(args.config, f'{logfolder}/config.txt')
+    OmegaConf.save(config=args, f=f'{logfolder}/config.yaml')
     summary_writer = SummaryWriter(logfolder)
 
-
-
-    # init parameters
-    # tensorVM, renderer = init_parameters(args, train_dataset.scene_bbox.to(device), reso_list[0])
-
-
-    conf = OmegaConf.load(args.model_config)
-    model_conf = conf.tensorf
-    schedule = conf.schedule
-
     aabb = train_dataset.scene_bbox.to(device)
-    reso_cur = N_to_reso(schedule.N_voxel_init, aabb)
+    reso_cur = N_to_reso(args.params.N_voxel_init, aabb)
     nSamples = min(args.nSamples, cal_n_samples(reso_cur,args.step_ratio))
 
     if args.ckpt is not None:
@@ -200,7 +176,7 @@ def reconstruction(args):
         #             shadingMode=args.shadingMode, alphaMask_thres=args.alpha_mask_thre, density_shift=args.density_shift, distance_scale=args.distance_scale,
         #             pos_pe=args.pos_pe, view_pe=args.view_pe, ref_pe=args.ref_pe, fea_pe=args.fea_pe, featureC=args.featureC, step_ratio=args.step_ratio,
         #             fea2denseAct=args.fea2denseAct, bundle_size=args.bundle_size, density_grid_dims=args.density_grid_dims, enable_reflections=args.enable_reflections)
-        tensorf = hydra.utils.instantiate(model_conf)(aabb=aabb, grid_size=reso_cur).to(device)
+        tensorf = hydra.utils.instantiate(args.model)(aabb=aabb, grid_size=reso_cur).to(device)
 
 
     grad_vars = tensorf.get_optparam_groups(args.lr_init, args.lr_basis)
@@ -215,18 +191,18 @@ def reconstruction(args):
     optimizer = torch.optim.Adam(grad_vars, betas=(0.9,0.99))
 
     # Set up schedule
-    upsamp_list = schedule.upsamp_list
-    uplambda_list = schedule.uplambda_list
-    update_AlphaMask_list = schedule.update_AlphaMask_list
-    bounce_n_list = schedule.bounce_n_list
+    upsamp_list = args.params.upsamp_list
+    uplambda_list = args.params.uplambda_list
+    update_AlphaMask_list = args.params.update_AlphaMask_list
+    bounce_n_list = args.params.bounce_n_list
     #linear in logrithmic space
-    N_voxel_list = (torch.round(torch.exp(torch.linspace(np.log(schedule.N_voxel_init), np.log(schedule.N_voxel_final), len(upsamp_list)+1))).long()).tolist()[1:]
+    N_voxel_list = (torch.round(torch.exp(torch.linspace(np.log(args.params.N_voxel_init), np.log(args.params.N_voxel_final), len(upsamp_list)+1))).long()).tolist()[1:]
     l_list = torch.linspace(1.0, 0.0, len(uplambda_list)+1).tolist()
     tensorf.l = l_list.pop(0)
     tensorf.max_bounce_rays = bounce_n_list.pop(0)
 
     # smoothing_vals = [0.6, 0.7, 0.8, 0.7, 0.5]
-    smoothing_vals = torch.linspace(schedule.smoothing_start, schedule.smoothing_end, len(upsamp_list)+1).tolist()
+    smoothing_vals = torch.linspace(args.params.smoothing_start, args.params.smoothing_end, len(upsamp_list)+1).tolist()
     tensorf.rf.set_smoothing(smoothing_vals.pop(0))
     # smoothing_vals = torch.linspace(0.5, 0.5, len(upsamp_list)+1).tolist()[1:]
 
@@ -235,21 +211,18 @@ def reconstruction(args):
     PSNRs,PSNRs_test = [],[0]
 
     allrays, allrgbs = train_dataset.all_rays, train_dataset.all_rgbs
-    if not args.ndc_ray and args.filter_rays:
+    if not ndc_ray and args.filter_rays:
         allrays, allrgbs, mask = tensorf.filtering_rays(allrays, allrgbs, train_dataset.focal, bbox_only=True)
     else:
         mask = None
-    if args.bundle_size == 1:
-        trainingSampler = SimpleSampler(allrays.shape[0], args.batch_size)
-    else:
-        trainingSampler = BlockSampler(allrays.shape[0], args.batch_size, args.bundle_size, args.bundle_size, *train_dataset.img_wh, mask)
+    trainingSampler = SimpleSampler(allrays.shape[0], args.batch_size)
 
-    Ortho_reg_weight = args.Ortho_weight
+    Ortho_reg_weight = args.params.Ortho_weight
     print("initial Ortho_reg_weight", Ortho_reg_weight)
 
-    L1_reg_weight = args.L1_weight_inital
+    L1_reg_weight = args.params.L1_weight_inital
     print("initial L1_reg_weight", L1_reg_weight)
-    TV_weight_density, TV_weight_app = args.TV_weight_density, args.TV_weight_app
+    TV_weight_density, TV_weight_app = args.params.TV_weight_density, args.params.TV_weight_app
     tvreg = TVLoss()
     print(f"initial TV_weight density: {TV_weight_density} appearance: {TV_weight_app}")
 
@@ -281,20 +254,28 @@ def reconstruction(args):
                 alpha_train = rgba_train[..., 3]
             else:
                 alpha_train = None
+                
+            if iteration <= args.params.num_bw_iters:
+                # convert rgb to bw
+                rgb_train = rgb_train[..., :1].expand(rgb_train.shape)
 
             #rgb_map, alphas_map, depth_map, weights, uncertainty
             with torch.cuda.amp.autocast(enabled=False):
-                rgb_map, alphas_map, depth_map, weights, normal_sim, normal_map, roughness = renderer(
-                    rays_train, tensorf, focal=focal, alpha=alpha_train, chunk=args.batch_size,
-                    N_samples=nSamples, white_bg = white_bg, ndc_ray=ndc_ray, device=device, is_train=True)
+                data = renderer(rays_train, tensorf,
+                        keys = ['rgb_map', 'depth_map', 'floater_loss', 'normal_loss', 'roughness', 'backwards_rays_loss'],
+                        focal=focal, output_alpha=alpha_train, chunk=args.batch_size,
+                        N_samples=nSamples, white_bg = white_bg, ndc_ray=ndc_ray, is_train=True)
 
                 # loss = torch.mean((rgb_map[:, 1, 1] - rgb_train[:, 1, 1]) ** 2)
-                normal_loss = normal_sim
-                loss = torch.mean((rgb_map - rgb_train) ** 2)
+                normal_loss = data['normal_loss'].mean()
+                floater_loss = data['floater_loss'].mean()
+                roughness = data['roughness'].mean()
+                photo_loss = ((data['rgb_map'] - rgb_train) ** 2 + args.params.charbonier_eps).mean()
+                backwards_rays_loss = data['backwards_rays_loss']
 
 
                 # loss
-                total_loss = loss + args.normal_lambda*normal_loss
+                total_loss = photo_loss + args.params.normal_lambda*normal_loss + args.params.floater_lambda*floater_loss + args.params.backwards_rays_lambda*backwards_rays_loss
                 if Ortho_reg_weight > 0:
                     loss_reg = tensorf.rf.vector_comp_diffs()
                     total_loss += Ortho_reg_weight*loss_reg
@@ -319,11 +300,11 @@ def reconstruction(args):
                 total_loss.backward()
                 optimizer.step()
 
-            loss = loss.detach().item()
+            photo_loss = photo_loss.detach().item()
             
-            PSNRs.append(-10.0 * np.log(loss) / np.log(10.0))
+            PSNRs.append(-10.0 * np.log(photo_loss) / np.log(10.0))
             summary_writer.add_scalar('train/PSNR', PSNRs[-1], global_step=iteration)
-            summary_writer.add_scalar('train/mse', loss, global_step=iteration)
+            summary_writer.add_scalar('train/mse', photo_loss, global_step=iteration)
 
 
             for param_group in optimizer.param_groups:
@@ -337,28 +318,29 @@ def reconstruction(args):
                     + f' test_psnr = {float(np.mean(PSNRs_test)):.2f}'
                     + f' roughness = {float(roughness):.2f}'
                     + f' normal_loss = {normal_loss:.6f}'
-                    + f' mse = {loss:.6f}'
+                    + f' floater_loss = {floater_loss:.6f}'
+                    + f' mse = {photo_loss:.6f}'
                 )
                 PSNRs = []
                 
 
             if iteration % args.vis_every == args.vis_every - 1 and args.N_vis!=0:
+                tensorf.save(f'{logfolder}/{args.expname}_{iteration}.th', args.model)
                 PSNRs_test = evaluation(test_dataset,tensorf, args, renderer, f'{logfolder}/imgs_vis/', N_vis=args.N_vis,
                                         prtx=f'{iteration:06d}_', N_samples=nSamples, white_bg = white_bg, ndc_ray=ndc_ray,
                                         compute_extra_metrics=False, bundle_size=args.bundle_size, render_mode=args.render_mode)
                 summary_writer.add_scalar('test/psnr', np.mean(PSNRs_test), global_step=iteration)
-                tensorf.save(f'{logfolder}/{args.expname}_{iteration}.th', model_conf)
 
 
 
-            if iteration in schedule.bounce_iter_list:
+            if iteration in args.params.bounce_iter_list:
                 print(f"Max bounces {tensorf.max_bounce_rays} -> {bounce_n_list[0]}")
                 tensorf.max_bounce_rays = bounce_n_list.pop(0)
             if iteration in update_AlphaMask_list:
 
-                if reso_cur[0] * reso_cur[1] * reso_cur[2]<256**3:# update volume resolution
-                    reso_mask = reso_cur
-                    new_aabb = tensorf.updateAlphaMask(tuple(reso_mask))
+                #  if reso_cur[0] * reso_cur[1] * reso_cur[2]<256**3:# update volume resolution
+                reso_mask = reso_cur
+                new_aabb = tensorf.updateAlphaMask(tuple(reso_mask))
                 if iteration == update_AlphaMask_list[0]:
                     apply_correction = not torch.all(tensorf.alphaMask.grid_size == tensorf.rf.grid_size)
                     tensorf.shrink(new_aabb, apply_correction)
@@ -367,7 +349,7 @@ def reconstruction(args):
                     print("continuing L1_reg_weight", L1_reg_weight)
 
 
-                if not args.ndc_ray and iteration == update_AlphaMask_list[1] and args.filter_rays:
+                if not ndc_ray and iteration == update_AlphaMask_list[1] and args.filter_rays:
                     # filter rays outside the bbox
                     allrays,allrgbs,mask = tensorf.filtering_rays(allrays, allrgbs, focal)
                     if args.bundle_size == 1:
@@ -382,7 +364,7 @@ def reconstruction(args):
             if iteration in upsamp_list:
                 n_voxels = N_voxel_list.pop(0)
                 reso_cur = N_to_reso(n_voxels, tensorf.rf.aabb)
-                nSamples = min(conf.nSamples, cal_n_samples(reso_cur,args.step_ratio/tensorf.rf.density_res_multi))
+                nSamples = min(args.nSamples, cal_n_samples(reso_cur,args.step_ratio/tensorf.rf.density_res_multi))
                 tensorf.rf.upsample_volume_grid(reso_cur)
 
                 sval = smoothing_vals.pop(0)
@@ -398,7 +380,7 @@ def reconstruction(args):
     # prof.export_chrome_trace('trace.json')
         
 
-    tensorf.save(f'{logfolder}/{args.expname}.th', model_conf)
+    tensorf.save(f'{logfolder}/{args.expname}.th', args.model)
 
 
     if args.render_train:
@@ -425,21 +407,20 @@ def reconstruction(args):
                         bundle_size=args.bundle_size, render_mode=args.render_mode)
 
 
-if __name__ == '__main__':
-
+@hydra.main(version_base=None, config_path='configs', config_name='default')
+def train(cfg: DictConfig):
     torch.set_default_dtype(torch.float32)
     torch.manual_seed(20211202)
     np.random.seed(20211202)
+    print(cfg.dataset)
+    print(cfg.model)
+    print(cfg.params)
 
-    args = config_parser()
-    print(args)
-
-    if  args.export_mesh:
-        export_mesh(args)
-
-    if args.render_only and (args.render_test or args.render_path):
-        render_test(args)
+    if cfg.render_only:
+        render_test(cfg)
     else:
-        reconstruction(args)
+        reconstruction(cfg)
         # reconstruction(args)
 
+if __name__ == '__main__':
+    train()

@@ -16,6 +16,7 @@ from .multi_level_rf import MultiLevelRF
 from torch.autograd import grad
 import matplotlib.pyplot as plt
 
+
 def raw2alpha(sigma, dist):
     # sigma, dist  [N_rays, N_samples]
     alpha = 1. - torch.exp(-sigma*dist)
@@ -68,7 +69,7 @@ class TensorNeRF(torch.nn.Module):
                  alphaMask=None, near_far=[2.0, 6.0], nEnvSamples=100, specularity_threshold=0.1, max_recurs=0,
                  max_normal_similarity=1, infinity_border=False,
                  density_shift=-10, alphaMask_thres=0.001, distance_scale=25, rayMarch_weight_thres=0.0001,
-                 fea2denseAct='softplus'):
+                 fea2denseAct='softplus', **kwargs):
         super(TensorNeRF, self).__init__()
         self.rf = rf(aabb=aabb, grid_size=grid_size)
         self.ref_module = ref_module(in_channels=self.rf.app_dim) if ref_module is not None else None
@@ -125,10 +126,12 @@ class TensorNeRF(torch.nn.Module):
     def save(self, path, config):
         ckpt = {'config': config, 'state_dict': self.state_dict()}
         if self.alphaMask is not None:
-            alpha_volume = self.alphaMask.alpha_volume.bool().cpu().numpy()
-            ckpt.update({'alphaMask.shape': alpha_volume.shape})
-            ckpt.update(
-                {'alphaMask.mask': np.packbits(alpha_volume.reshape(-1))})
+            alpha_volume = self.alphaMask.alpha_volume.cpu()
+            ckpt.update({'alphaMask': alpha_volume})
+            #  alpha_volume = self.alphaMask.alpha_volume.cpu().numpy()
+            #  ckpt.update({'alphaMask.shape': alpha_volume.shape})
+            #  ckpt.update(
+            #      {'alphaMask.mask': np.packbits(alpha_volume.reshape(-1))})
             ckpt.update({'alphaMask.aabb': self.alphaMask.aabb.cpu()})
         torch.save(ckpt, path)
 
@@ -140,11 +143,12 @@ class TensorNeRF(torch.nn.Module):
         grid_size = ckpt['state_dict']['rf.grid_size'].cpu()
         rf = hydra.utils.instantiate(config)(aabb=aabb, grid_size=grid_size)
         if 'alphaMask.aabb' in ckpt.keys():
-            length = np.prod(ckpt['alphaMask.shape'])
-            alpha_volume = torch.from_numpy(np.unpackbits(ckpt['alphaMask.mask'])[
-                                            :length].reshape(ckpt['alphaMask.shape']))
+            #  length = np.prod(ckpt['alphaMask.shape'])
+            #  alpha_volume = torch.from_numpy(np.unpackbits(ckpt['alphaMask.mask'])[
+            #                                  :length].reshape(ckpt['alphaMask.shape'])).float()
+            alpha_volume = ckpt['alphaMask']
             rf.alphaMask = AlphaGridMask(
-                ckpt['alphaMask.aabb'], alpha_volume.float())
+                ckpt['alphaMask.aabb'], alpha_volume)
         rf.load_state_dict(ckpt['state_dict'], strict=False)
         return rf
 
@@ -246,8 +250,8 @@ class TensorNeRF(torch.nn.Module):
         ks = 3
         alpha = F.max_pool3d(alpha, kernel_size=ks,
                              padding=ks // 2, stride=1).view(grid_size[::-1])
-        alpha[alpha >= self.alphaMask_thres] = 1
-        alpha[alpha < self.alphaMask_thres] = 0
+        # alpha[alpha >= self.alphaMask_thres] = 1
+        # alpha[alpha < self.alphaMask_thres] = 0
 
         self.alphaMask = AlphaGridMask(self.rf.aabb, alpha).to(self.device)
 
@@ -295,14 +299,13 @@ class TensorNeRF(torch.nn.Module):
                     rays_o, rays_d, focal, N_samples=N_samples, is_train=False)
                 # Issue: calculate size
                 mask_inbbox = (self.alphaMask.sample_alpha(
-                    xyz_sampled).view(xyz_sampled.shape[:-1]) > 0, self.rf.contract_space).any(-1)
+                    xyz_sampled).view(xyz_sampled.shape[:-1]) > self.alphaMask_thres, self.rf.contract_space).any(-1)
 
             mask_filtered.append(mask_inbbox.cpu())
 
         mask_filtered = torch.cat(mask_filtered).view(all_rgbs.shape[:-1])
 
-        print(
-            f'Ray filtering done! takes {time.time()-tt} s. ray mask ratio: {torch.sum(mask_filtered) / N}')
+        print(f'Ray filtering done! takes {time.time()-tt} s. ray mask ratio: {torch.sum(mask_filtered) / N}')
         return all_rays[mask_filtered], all_rgbs[mask_filtered], mask_filtered
 
     def feature2density(self, density_features):
@@ -337,7 +340,6 @@ class TensorNeRF(torch.nn.Module):
         return xyz
 
     def shrink(self, new_aabb, voxel_size):
-        return
         if self.rf.contract_space:
             return
         else:
@@ -415,13 +417,19 @@ class TensorNeRF(torch.nn.Module):
         rays_up = rays_up.view(-1, 1, 3).expand(xyz_sampled_shape)
         B = xyz_sampled.shape[0]
         n_samples = xyz_sampled_shape[1]
-
+        alphas = torch.zeros(xyz_sampled_shape[:-1], device=device)
         if self.alphaMask is not None:
-            alphas = self.alphaMask.sample_alpha(
+            alphas[ray_valid] = self.alphaMask.sample_alpha(
                 xyz_sampled[ray_valid], contract_space=self.rf.contract_space)
-            alpha_mask = alphas > 0
+
+            T = torch.cumprod(torch.cat([
+                torch.ones(alphas.shape[0], 1, device=alphas.device),
+                1. - alphas + 1e-10
+            ], dim=-1), dim=-1)[:, :-1]
+            
+            alpha_mask = (alphas > self.alphaMask_thres) & (T > 0)
             ray_invalid = ~ray_valid
-            ray_invalid[ray_valid] |= (~alpha_mask)
+            ray_invalid |= (~alpha_mask)
             ray_valid = ~ray_invalid
 
         # sigma.shape: (N, N_samples)
@@ -442,22 +450,22 @@ class TensorNeRF(torch.nn.Module):
             validsigma = self.feature2density(sigma_feature)
             sigma[ray_valid] = validsigma
 
-            with torch.enable_grad():
-                xyz_g = xyz_sampled[ray_valid].clone()
-                xyz_g.requires_grad = True
-
-                # compute sigma
-                xyz_g_normed = self.rf.normalize_coord(xyz_g)
-                sigma_feature = self.rf.compute_densityfeature(xyz_g_normed)
-                validsigma = self.feature2density(sigma_feature)
-                sigma[ray_valid] = validsigma
-
-                # compute normal
-                grad_outputs = torch.ones_like(validsigma)
-                surf_grad = grad(validsigma, xyz_g, grad_outputs=grad_outputs, create_graph=True, allow_unused=True)[0][:, :3]
-                surf_grad = surf_grad / (torch.norm(surf_grad, dim=1, keepdim=True)+1e-8)
-
-                world_normal[ray_valid] = surf_grad
+            #  with torch.enable_grad():
+            #      xyz_g = xyz_sampled[ray_valid].clone()
+            #      xyz_g.requires_grad = True
+            #
+            #      # compute sigma
+            #      xyz_g_normed = self.rf.normalize_coord(xyz_g)
+            #      sigma_feature = self.rf.compute_densityfeature(xyz_g_normed)
+            #      validsigma = self.feature2density(sigma_feature)
+            #      sigma[ray_valid] = validsigma
+            #
+            #      # compute normal
+            #      grad_outputs = torch.ones_like(validsigma)
+            #      surf_grad = grad(validsigma, xyz_g, grad_outputs=grad_outputs, create_graph=True, allow_unused=True)[0][:, :3]
+            #      surf_grad = surf_grad / (torch.norm(surf_grad, dim=1, keepdim=True)+1e-8)
+            #
+            #      world_normal[ray_valid] = surf_grad
 
 
         if self.rf.contract_space and self.infinity_border:
@@ -466,9 +474,7 @@ class TensorNeRF(torch.nn.Module):
 
         # weight: [N_rays, N_samples]
         alpha, weight, bg_weight = raw2alpha(sigma, dists * self.distance_scale)
-        # floater_loss = torch.matmul(weight.reshape(
-        #     B, -1, 1), weight.reshape(B, 1, -1)).sum(dim=-1).sum(dim=-1).mean()
-        floater_loss = 0
+        floater_loss = torch.einsum('...j,...k->...', weight.reshape(B, -1), weight.reshape(B, -1)).mean()
 
         # app stands for appearance
         app_mask = (weight > self.rayMarch_weight_thres)
@@ -481,25 +487,27 @@ class TensorNeRF(torch.nn.Module):
             #  a = viewdirs[app_mask][..., :3]
             #  world_normal[app_mask] = a / torch.linalg.norm(a, dim=-1, keepdim=True)
 
-            #  with torch.enable_grad():
-            #      xyz_g = xyz_sampled[app_mask].clone()
-            #      xyz_g.requires_grad = True
-            #
-            #      # compute sigma
-            #      xyz_g_normed = self.rf.normalize_coord(xyz_g)
-            #      sigma_feature = self.rf.compute_densityfeature(xyz_g_normed)
-            #      validsigma = self.feature2density(sigma_feature)
-            #
-            #      # compute normal
-            #      grad_outputs = torch.ones_like(validsigma)
-            #      g = grad(validsigma, xyz_g, grad_outputs=grad_outputs, create_graph=True, allow_unused=True)
-            #      world_normal[app_mask] = g[0][:, :3]
+            with torch.enable_grad():
+                xyz_g = xyz_sampled[app_mask].clone()
+                xyz_g.requires_grad = True
+
+                # compute sigma
+                xyz_g_normed = self.rf.normalize_coord(xyz_g)
+                sigma_feature = self.rf.compute_densityfeature(xyz_g_normed)
+                validsigma = self.feature2density(sigma_feature)
+
+                # compute normal
+                grad_outputs = torch.ones_like(validsigma)
+                g = grad(validsigma, xyz_g, grad_outputs=grad_outputs, create_graph=True, allow_unused=True)
+                world_normal[app_mask] = g[0][:, :3]
 
             # get base color of the point
             app_features = self.rf.compute_appfeature(xyz_normed[app_mask])
             diffuse, tint, roughness = self.diffuse_module(
                 xyz_normed[app_mask], viewdirs[app_mask], app_features)
+
             
+            rgb[app_mask] = diffuse.type(rgb.dtype)
             # handle reflections
             if self.ref_module is not None:
                 p_world_normal[app_mask] = self.normal_module(xyz_normed[app_mask], app_features)
@@ -508,16 +516,14 @@ class TensorNeRF(torch.nn.Module):
                 v_world_normal = (1-l)*p_world_normal + l*world_normal
                 v_world_normal = v_world_normal / \
                     (v_world_normal.norm(dim=-1, keepdim=True) + 1e-8)
-
                 d_refdirs = viewdirs - 2 * \
                     (viewdirs * v_world_normal).sum(-1, keepdim=True) * v_world_normal
 
-                # roughness = 1/np.pi*torch.ones((app_features.shape[0], 1), dtype=xyz_normed.dtype, device=xyz_normed.device)
-
-                # valid_rgbs = valid_rgbs.reshape(-1, 3)
                 M = diffuse.shape[0]
                 ref_rgbs = torch.zeros_like(diffuse)
                 bounce_mask = torch.zeros((M), dtype=bool, device=device)
+
+                # compute reflection color using bounces
                 if recur < self.max_recurs:
                     # decide how many bounces to calculate
                     prob = torch.linalg.norm(tint, dim=-1)
@@ -534,23 +540,27 @@ class TensorNeRF(torch.nn.Module):
                     rec_rgbs, rec_depth_map, _, rec_acc_map, rec_termination_xyz, _, _ = self(
                         bounce_rays, focal, recur=recur+1, white_bg=white_bg, is_train=is_train, ndc_ray=ndc_ray, N_samples=N_samples)
                     ref_rgbs[bounce_mask] = rec_rgbs[:, 0, 0, :]
+
+                # compute reflection color using ref module
                 if (~bounce_mask).any():
                     ref_rgbs[~bounce_mask] = self.ref_module(
                         xyz_normed[app_mask][~bounce_mask], viewdirs[app_mask][~bounce_mask], app_features[~bounce_mask],
                         refdirs=d_refdirs[app_mask][~bounce_mask], roughness=roughness[~bounce_mask])
-                rgb[app_mask] = (tint * ref_rgbs + diffuse).type(rgb.dtype)
-                # rgb[app_mask] = torch.linalg.norm(diffuse, dim=-1, keepdim=True).type(rgb.dtype)
+                rgb[app_mask] += (tint * ref_rgbs).type(rgb.dtype)
             else:
                 rgb[app_mask] = diffuse
+                v_world_normal = world_normal
             # rgb[rgb_app_mask] = valid_rgbs
         else:
             v_world_normal = world_normal
             roughness = torch.tensor(0.0)
 
         acc_map = torch.sum(weight, 1)
-
-        normal_sim = -(p_world_normal * world_normal).sum(dim=-1).clamp(max=self.max_normal_similarity)
-        normal_sim = (weight * normal_sim).mean()
+        backwards_rays_loss = -torch.matmul(viewdirs.reshape(-1, 1, 3), v_world_normal.reshape(-1, 3, 1)).reshape(app_mask.shape).clamp(max=0)
+        align_world_loss = -(p_world_normal * world_normal).sum(dim=-1).clamp(max=self.max_normal_similarity)
+        #  normal_loss = (weight * (align_world_loss + backwards_rays_loss)).mean()
+        normal_loss = (weight * (align_world_loss)).mean()
+        backwards_rays_loss = (weight * (backwards_rays_loss)).mean()
 
         # calculate depth
 
@@ -567,11 +577,11 @@ class TensorNeRF(torch.nn.Module):
                 viewdirs[:, 0],
                 rays_up[:, 0],
             ], dim=1)
-            p_world_normal_map = torch.sum(
-                weight[..., None] * p_world_normal, 1)
+            p_world_normal_map = torch.sum(weight[..., None] * p_world_normal, 1)
             p_world_normal_map = p_world_normal_map / \
                 (torch.norm(p_world_normal_map, dim=-1, keepdim=True)+1e-8)
             d_world_normal_map = torch.sum(weight[..., None] * world_normal, 1)
+            d_world_normal_map = d_world_normal_map / torch.linalg.norm(d_world_normal_map, dim=-1, keepdim=True)
             v_world_normal_map = torch.sum(weight[..., None] * v_world_normal, 1)
             d_normal_map = torch.matmul(row_basis, d_world_normal_map.unsqueeze(-1)).squeeze(-1)
             # p_normal_map = torch.matmul(
@@ -596,7 +606,16 @@ class TensorNeRF(torch.nn.Module):
 
         rgb_map = rgb_map.clamp(0, 1)
 
-        # return rgb_map, depth_map, p_world_normal_map, acc_map, termination_xyz, normal_sim
-        # return rgb_map, depth_map, p_normal_map, acc_map, termination_xyz, normal_sim+floater_loss, roughness.mean().cpu()
-        # return rgb_map, depth_map, None, acc_map, None, normal_sim+floater_loss, roughness.mean().cpu()
-        return rgb_map, depth_map, v_normal_map, acc_map, None, normal_sim+floater_loss, roughness.mean().cpu()
+        # return rgb_map, depth_map, p_world_normal_map, acc_map, termination_xyz, normal_loss
+        # return rgb_map, depth_map, p_normal_map, acc_map, termination_xyz, normal_loss+floater_loss, roughness.mean().cpu()
+        # return rgb_map, depth_map, None, acc_map, None, normal_loss+floater_loss, roughness.mean().cpu()
+        return dict(
+            rgb_map=rgb_map,
+            depth_map=depth_map,
+            normal_map=d_normal_map,
+            acc_map=acc_map,
+            normal_loss=normal_loss,
+            backwards_rays_loss=backwards_rays_loss,
+            floater_loss=floater_loss,
+            roughness=roughness.mean().cpu(),
+        )

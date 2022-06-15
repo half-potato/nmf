@@ -4,8 +4,8 @@ scenedir = nerf_synthetic/counter
 expname =  ref_tensorf_materials_ref_pe12
 basedir = ./log
 
-downsample_train = 5
-downsample_test = 5
+downsample_train = 3
+downsample_test = 3
 
 n_iters = 60000
 batch_size = 4096

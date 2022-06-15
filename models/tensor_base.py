@@ -20,7 +20,7 @@ class TensorBase(torch.nn.Module):
         self.app_n_comp = [appearance_n_comp]*3
         self.density_res_multi = density_res_multi
         self.app_dim = app_dim
-        self.register_buffer('aabb', torch.tensor(aabb))
+        self.register_buffer('aabb', aabb)
         self.step_ratio = step_ratio
         self.contract_space = contract_space
 
@@ -68,10 +68,13 @@ class TensorBase(torch.nn.Module):
         size = xyz_sampled[..., 3:4]
         normed = torch.cat((coords, size), dim=-1)
         if self.contract_space:
-            dist = torch.linalg.norm(normed[..., :3], dim=-1, keepdim=True, ord=torch.inf) + 1e-8
-            direction = normed[..., :3] / dist
-            contracted = torch.where(dist > 1, (2-1/dist), dist)/2 * direction
-            return torch.cat([ contracted, xyz_sampled[..., 3:] ], dim=-1)
+            r = 1
+            d = 3
+            dist = torch.linalg.norm(normed[..., :d], dim=-1, keepdim=True, ord=2) + 1e-8
+            direction = normed[..., :d] / dist
+            #  contracted = torch.where(dist > 1, (r+1)-r/dist, dist)/2
+            contracted = torch.where(dist > 1, (dist-1)/4+1, dist)/2
+            return torch.cat([ contracted * direction, normed[..., d:] ], dim=-1)
         else:
             return normed
 

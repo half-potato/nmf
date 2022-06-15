@@ -4,6 +4,12 @@ render_mode: center
 N_voxel_init: 2097156 # 128**3
 N_voxel_final: 27000000 # 300**3
 
+defaults:
+  - dataset: counter
+  - expname: test
+render_only: false
+
+
 tensorf:
   _target_: models.tensor_nerf.TensorNeRF
   _partial_: True
@@ -12,14 +18,14 @@ tensorf:
   alphaMask_thres: 0.0001
   distance_scale: 25
   rayMarch_weight_thres: 0.0001
-  nEnvSamples: 100
-  fea2denseAct: 'softplus_shift'
-  # fea2denseAct: 'relu'
+  nEnvSamples: 0
+  # fea2denseAct: 'softplus_shift'
+  fea2denseAct: 'relu'
   rf:
     _partial_: True
     _target_: models.tensoRF.TensorVMSplit
     density_n_comp: 16
-    appearance_n_comp: 48
+    appearance_n_comp: 8
     app_dim: 27
     step_ratio: 0.5
     density_res_multi: 1
@@ -27,6 +33,7 @@ tensorf:
     infinity_border: False
     num_levels: 1
     hier_sizes: [1]
+    max_recurs: 1
 
   diffuse_module:
     _partial_: True
@@ -61,13 +68,13 @@ tensorf:
     featureC: 128
     num_layers: 1
 
-  bg_module:
-    _target_: models.render_modules.BackgroundRender
-    bg_rank: 8
-    # view_encoder:
-    #   _target_: models.ish.ISH
-    #   max_degree: 6
-    bg_resolution: [1024, 512]
+  # bg_module:
+  #   _target_: models.render_modules.BackgroundRender
+  #   bg_rank: 8
+  #   # view_encoder:
+  #   #   _target_: models.ish.ISH
+  #   #   max_degree: 6
+  #   bg_resolution: [1024, 512]
 
 #featureC: 256
 #N_voxel_init: 262144 # 64**3
@@ -97,14 +104,14 @@ schedule:
   update_AlphaMask_list: [4000, 70000]
   # update_AlphaMask_list: [30000]
 
+loss:
+  normal_lambda: 2
+  floater_lambda: 0.00
+  charbonier_eps: 0.001
+  num_bw_iters: 1000
 nSamples: 4096
 N_vis: 5
 vis_every: 5000
-
-pos_pe: 6
-view_pe: 3
-ref_pe: 6
-fea_pe: 2
 
 L1_weight_inital: 8e-5
 L1_weight_rest: 4e-5
