@@ -13,7 +13,7 @@ class TensorBase(torch.nn.Module):
     contract_space: bool
     hier_sizes: List[int]
     def __init__(self, aabb, grid_size, density_n_comp, appearance_n_comp,
-                 app_dim, step_ratio, density_res_multi, contract_space, *args, **kwargs):
+                 app_dim, step_ratio, density_res_multi, contract_space):
         super().__init__()
         self.dtype = torch.half
         self.density_n_comp = [density_n_comp]*3

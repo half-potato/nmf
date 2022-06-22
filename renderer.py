@@ -32,7 +32,7 @@ def chunk_renderer(rays, tensorf, focal, keys=['rgb_map'], chunk=4096, **kwargs)
     return data
 
 class BundleRender:
-    def __init__(self, base_renderer, render_mode, bundle_size, H, W, focal, chunk=2*512, scale_normal=False):
+    def __init__(self, base_renderer, render_mode, H, W, focal, bundle_size=1, chunk=2*512, scale_normal=False):
         self.render_mode = render_mode
         self.base_renderer = base_renderer
         self.bundle_size = bundle_size
@@ -58,14 +58,23 @@ class BundleRender:
             fH = height
             fW = width
         num_rays = height * width
+        device = rays.device
 
-        data = self.base_renderer(rays, tensorf, keys=['depth_map', 'rgb_map', 'normal_map', 'acc_map'], focal=self.focal, chunk=self.chunk, **kwargs)
+        data = self.base_renderer(rays, tensorf, keys=['depth_map', 'rgb_map', 'normal_map', 'acc_map', 'termination_xyz'],
+                                  focal=self.focal, chunk=self.chunk, **kwargs)
         rgb_map = data['rgb_map']
         depth_map = data['depth_map']
         normal_map = data['normal_map']
         acc_map = data['acc_map']
-        # ind = [598,532]
-        # ic(points.reshape(height, width, -1)[ind[0], ind[1]])
+        points = data['termination_xyz']
+        #  ind = [598,532]
+        ind = [height // 2, width // 2]
+        point = points.reshape(height, width, -1)[ind[0], ind[1]].to(device)
+
+        env_map, col_map = tensorf.recover_envmap(512, xyz=point)
+        env_map = (env_map.detach().cpu().numpy() * 255).astype('uint8')
+        col_map = (col_map.detach().cpu().numpy() * 255).astype('uint8')
+
         if self.render_mode == 'decimate':
             # plt.imshow(normal_map.reshape(height, width, 3).cpu())
             # plt.figure()
@@ -122,7 +131,7 @@ class BundleRender:
         # fig.show()
         # assert(False)
 
-        return rgb_map, depth_map, normal_map
+        return rgb_map, depth_map, normal_map, env_map, col_map
 
 
 def depth_to_normals(depth, focal):
@@ -158,8 +167,8 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
     near_far = test_dataset.near_far
     W, H = test_dataset.img_wh
     focal = (test_dataset.focal[0] if ndc_ray else test_dataset.focal)
-    brender = BundleRender(renderer, render_mode, bundle_size, H, W, focal)
-    env_map, col_map = tensorf.recover_envmap(812, xyz=torch.tensor([-0.3042,  0.8466,  0.8462,  0.0027], device='cuda:0'))
+    brender = BundleRender(renderer, render_mode, H, W, focal)
+    env_map, col_map = tensorf.recover_envmap(512, xyz=torch.tensor([-0.3042,  0.8466,  0.8462,  0.0027], device='cuda:0'))
     env_map = (env_map.detach().cpu().numpy() * 255).astype('uint8')
     col_map = (col_map.detach().cpu().numpy() * 255).astype('uint8')
     imageio.imwrite(f'{savePath}/envmaps/{prtx}view_map.png', col_map)
@@ -170,7 +179,7 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
         # rgb_map, _, depth_map, _, _ = renderer(rays, tensorf, chunk=4096, N_samples=N_samples,
         #                                 ndc_ray=ndc_ray, white_bg = white_bg, device=device)
         # rgb_map = rgb_map.clamp(0.0, 1.0)
-        rgb_map, depth_map, normal_map = brender(rays, tensorf, N_samples=N_samples,
+        rgb_map, depth_map, normal_map, env_map, col_map = brender(rays, tensorf, N_samples=N_samples,
                                      ndc_ray=ndc_ray, white_bg = white_bg)
         
         normal_map = (normal_map * 127 + 128).clamp(0, 255).byte()
@@ -205,6 +214,8 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
             rgb_map = np.concatenate((rgb_map, depth_map), axis=1)
             imageio.imwrite(f'{savePath}/rgbd/{prtx}{idx:03d}.png', rgb_map)
             imageio.imwrite(f'{savePath}/rgbd/{prtx}normal_{idx:03d}.png', normal_map)
+            imageio.imwrite(f'{savePath}/envmaps/{prtx}ref_map_{idx:03d}.png', env_map)
+            imageio.imwrite(f'{savePath}/envmaps/{prtx}view_map_{idx:03d}.png', col_map)
 
     imageio.mimwrite(f'{savePath}/{prtx}video.mp4', np.stack(rgb_maps), fps=30, quality=10)
     imageio.mimwrite(f'{savePath}/{prtx}depthvideo.mp4', np.stack(depth_maps), fps=30, quality=10)

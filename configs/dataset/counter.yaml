@@ -1,6 +1,6 @@
 scenedir: nerf_synthetic/counter
 dataset_name: blender
-downsample_train: 5
-downsample_test: 5
+downsample_train: 3
+downsample_test: 3
 ndc_ray: false
 near_far: [0.1, 5]

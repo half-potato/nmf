@@ -33,6 +33,30 @@ def rising_factorial(z, m):
         return 0
     return math.gamma(z+m) / math.gamma(z)
 
+class SHBasis(torch.nn.Module):
+    def __init__(self, deg):
+        super(SHBasis, self).__init__()
+        self.deg = deg.item()
+        l = deg
+        coeffs = torch.tensor(legendrecoeffs(l).c[::-1].copy(), dtype=torch.float32)
+        logcoeff = -2*math.log(l) - math.lgamma(l+1) + 0.5 * (math.lgamma(2*l+2) - math.log(4*math.pi))
+        self.coeff = (-1)**self.deg * math.exp(logcoeff)
+        self.register_buffer('coeffs', coeffs)
+
+    def forward(self, theta, phi, kappa):
+        a = Al(self.deg, kappa)
+
+        # calculate legendre of cos of theta
+        x = torch.cos(theta)
+        xpow = x[..., None]**torch.arange(len(self.coeffs), device=x.device)
+        v = (xpow * self.coeffs).sum(dim=-1)
+        y0 = math.sqrt((2*self.deg+1)/4/math.pi)*v
+
+        yl =  self.coeff * torch.sin(theta)**self.deg*torch.exp(1j*self.deg*phi)
+        yl1, yl2 = yl.real, yl.imag
+
+        return a*torch.cat([y0, yl1, yl2], dim=-1)
+
 class LHyperGeom(torch.nn.Module):
     def __init__(self, upper, lower, N=20):
         super().__init__()
@@ -88,24 +112,26 @@ class ISH(torch.nn.Module):
     def __init__(self, max_degree=1):
         super().__init__()
         self.max_degree = max_degree
-        self.degrees = torch.arange(2, self.max_degree+1)
-        # self.degrees = 2**torch.arange(0, self.max_degree)
+        self.degrees = 2**torch.arange(0, self.max_degree)
+        # degrees = torch.arange(2, self.max_degree+1)
+        self.basii = torch.nn.ModuleList([SHBasis(deg) for deg in self.degrees])
 
     def dim(self):
-        return 4*len(self.degrees)
+        return 3*len(self.degrees)
     
-        
     def forward(self, vec, kappa):
         a, b, c = vec[:, 0:1], vec[:, 1:2], vec[:, 2:3]
         norm2d = torch.sqrt(a**2+b**2)
         phi = safemath.atan2(b, a)
         theta = safemath.atan2(c, norm2d) - np.pi/2
+        output = torch.cat([basis(theta, phi, kappa) for basis in self.basii], dim=1)
+        return output
         
-        Als = [Al(l, kappa)[..., None] for l in self.degrees]
-        vert1 = torch.stack([Als[i]*Y0(theta, l) for i, l in enumerate(self.degrees)], dim=2)
-        vert2 = torch.stack([Als[i]*Y0(theta, l-1) for i, l in enumerate(self.degrees)], dim=2)
-        horz = torch.stack(sum([[Als[i]*v for v in Yl(theta, phi, l-1)] for i, l in enumerate(self.degrees)], []), dim=1).reshape(-1, len(self.degrees), 2).permute(0, 2, 1)
-        return torch.cat([vert1, vert2, horz], dim=1)
+        # Als = [Al(l, kappa)[..., None] for l in self.degrees]
+        # vert1 = torch.stack([Als[i]*Y0(theta, l) for i, l in enumerate(self.degrees)], dim=2)
+        # vert2 = torch.stack([Als[i]*Y0(theta, l-1) for i, l in enumerate(self.degrees)], dim=2)
+        # horz = torch.stack(sum([[Als[i]*v for v in Yl(theta, phi, l-1)] for i, l in enumerate(self.degrees)], []), dim=1).reshape(-1, len(self.degrees), 2).permute(0, 2, 1)
+        # return torch.cat([vert1, vert2, horz], dim=1)
 
 class FractionalY0(torch.nn.Module):
     def __init__(self, degree, N=20) -> None:
@@ -122,7 +148,8 @@ class RandISH(torch.nn.Module):
         self.rand_n = rand_n
         # matrices = torch.normal(0, std, (rand_n, 3, 3))
         matrices = torch.normal(0, std, (rand_n, 2))
-        degrees = torch.normal(0, std, (rand_n,2)).clip(min=1)
+        degrees = torch.normal(0, std, (rand_n,1)).clip(min=1).int()
+        self.basii = torch.nn.ModuleList([SHBasis(deg) for deg in degrees])
         # self.y0s = [FractionalY0(degree[0]) for degree in degrees]
         self.register_buffer('matrices', matrices)
         self.register_buffer('degrees', degrees)
@@ -131,6 +158,7 @@ class RandISH(torch.nn.Module):
         return self.rand_n*2
     
     def forward(self, vec, kappa):
+        B = vec.shape[0]
 
         a, b, c = vec[:, 0:1], vec[:, 1:2], vec[:, 2:3]
         norm2d = torch.sqrt(a**2+b**2)
@@ -138,19 +166,36 @@ class RandISH(torch.nn.Module):
         theta = safemath.atan2(c, norm2d) - np.pi/2
 
         outs = []
-        for i, (deg, mat) in enumerate(zip(self.degrees, self.matrices)):
+
+        # t_theta = theta.reshape(-1, 1, 1).expand(B, self.rand_n, 1)
+        # t_phi = (self.matrices[None, :, 0] * theta + self.matrices[None, :, 1] * phi).reshape(B, self.rand_n, 1)
+        #
+        # x = torch.cos(theta)
+        # xpow = x[..., None]**torch.arange(len(self.coeffs), device=x.device)
+        # v = (xpow * self.coeffs).sum(dim=-1)
+        # y0 = math.sqrt((2*self.deg+1)/4/math.pi)*v
+        #
+        # yl =  self.coeff * torch.sin(theta)**self.deg*torch.exp(1j*self.deg*phi)
+        # yl1, yl2 = yl.real, yl.imag
+
+        for i, (basis, deg, mat) in enumerate(zip(self.basii, self.degrees, self.matrices)):
+        #  for i, (deg, mat) in enumerate(zip(self.degrees, self.matrices)):
             # ob = compute_ortho_basis(phi, theta, kappa, deg)
             t_theta = theta
             t_phi = mat[0] * theta + mat[1] * phi
+            #
+            #  Als1 = Al(abs(int(deg[0])), kappa).reshape(-1, 1)
+            #  Als2 = Al(abs(int(deg[1])), kappa).reshape(-1, 1)
+            #  vert1 = Y0(t_theta, abs(int(deg[0])))
+            #  # vert1 = self.y0s[i](t_theta)
+            #  horz1, horz2 = Yl(t_theta, t_phi, abs(int(deg[1])))
+            #  horz = horz1 if deg[1] > 0 else horz2
+            #  outs.append(torch.cat([Als1*vert1, Als2*horz], dim=1))
 
-            Als1 = Al(abs(int(deg[0])), kappa).reshape(-1, 1)
-            Als2 = Al(abs(int(deg[1])), kappa).reshape(-1, 1)
-            vert1 = Y0(t_theta, abs(int(deg[0])))
-            # vert1 = self.y0s[i](t_theta)
-            horz1, horz2 = Yl(t_theta, t_phi, abs(int(deg[1])))
-            horz = horz1 if deg[1] > 0 else horz2
-            out = torch.cat([Als1*vert1, Als2*horz], dim=1)
-            outs.append(out)
+            ind = 1 if deg > 0 else 2
+            degs = basis(t_theta.reshape(-1, 1), t_phi.reshape(-1, 1), kappa.reshape(-1, 1))
+            #  outs.append(out)
+            outs.append(torch.stack([degs[:, 0], degs[:, ind]], dim=1))
         return torch.cat(outs, dim=1)
 
 if __name__ == "__main__":

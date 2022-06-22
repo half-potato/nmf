@@ -4,7 +4,7 @@ render_mode: center
 defaults:
   - _self_
   - dataset: counter
-  - model: vmsplit
+  - model: refmodel
   - params: reflective
 basedir: ./log
 filter_rays: true
@@ -15,6 +15,7 @@ datadir: /data
 render_only: false
 render_train: false
 render_test: true
+render_path: false
 
 add_timestamp: false
 nSamples: 4096
@@ -31,3 +32,4 @@ lr_basis: 1e-3
 lr_decay_iters: -1
 lr_decay_target_ratio: 0.1
 lr_upsample_reset: 1
+fp16: false

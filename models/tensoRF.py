@@ -33,7 +33,6 @@ class TensorVMSplit(TensorBase):
         self.app_plane, self.app_line = self.init_one_svd(self.app_n_comp, self.grid_size, 0.1, 0)
         self.basis_mat = torch.nn.Linear(sum(self.app_n_comp), self.app_dim, bias=False)
 
-
     def init_one_svd(self, n_component, grid_size, scale, shift):
         plane_coef, line_coef = [], []
         for i in range(len(self.vecMode)):

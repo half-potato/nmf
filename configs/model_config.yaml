@@ -30,7 +30,7 @@ tensorf:
     step_ratio: 0.5
     density_res_multi: 1
     contract_space: True
-    infinity_border: False
+    infinity_border: True
     num_levels: 1
     hier_sizes: [1]
     max_recurs: 1

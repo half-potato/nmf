@@ -46,9 +46,9 @@ def RGBRender(xyz_sampled, viewdirs, features):
 class BackgroundRender(torch.nn.Module):
     bg_rank: int
     bg_resolution: List[int]
-    def __init__(self, bg_rank, bg_resolution=[512,512], view_encoder=None, featureC=128, num_layers=2):
+    def __init__(self, bg_rank, bg_resolution=512, view_encoder=None, featureC=128, num_layers=2):
         super().__init__()
-        self.bg_mat = nn.Parameter(0.1 * torch.randn((1, bg_rank, bg_resolution[0], bg_resolution[1]))) # [1, R, H, W]
+        self.bg_mat = nn.Parameter(0.1 * torch.randn((1, bg_rank, bg_resolution*2, bg_resolution))) # [1, R, H, W]
         self.view_encoder = view_encoder
         self.bg_rank = bg_rank
         d = self.view_encoder.dim() if self.view_encoder is not None else 0
@@ -61,6 +61,11 @@ class BackgroundRender(torch.nn.Module):
             torch.nn.ReLU(inplace=True),
             nn.Linear(featureC, 3, bias=False),
             nn.Sigmoid()
+        )
+
+    def upsample(self, bg_resolution):
+        self.bg_mat = torch.nn.Parameter(
+            F.interpolate(self.bg_mat.data, size=(bg_resolution*2, bg_resolution), mode='bilinear', align_corners=True)
         )
         
     def forward(self, viewdirs):
@@ -112,8 +117,8 @@ class MLPRender_FP(torch.nn.Module):
         self.mlp.apply(self.init_weights)
 
     def init_weights(self, m):
-        if isinstance(m, torch.nn.Linear) and m.weight.shape[1] > 200:
-            torch.nn.init.xavier_uniform_(m.weight, gain=0.2688)
+        if isinstance(m, torch.nn.Linear):
+            torch.nn.init.xavier_uniform_(m.weight, gain=np.sqrt(2))
 
     def forward(self, pts, viewdirs, features, refdirs, roughness, **kwargs):
         B = pts.shape[0]
@@ -170,12 +175,14 @@ class MLPDiffuse(torch.nn.Module):
                     torch.nn.Linear(featureC, featureC),
                 ] for _ in range(num_layers)], []),
             torch.nn.ReLU(inplace=True),
-            torch.nn.Linear(featureC, 7),
+            torch.nn.Linear(featureC, 8),
         )
         torch.nn.init.constant_(self.mlp[-1].bias, 0)
         ang_roughness = 20/180*np.pi
         # self.max_roughness = 30/180*np.pi
         self.max_roughness = 40
+        self.max_refraction_index = 2
+        self.min_refraction_index = 1
         # x = ang_roughness / self.max_roughness
         # sigmoid_out = np.log(x/(1-x))
         # torch.nn.init.constant_(self.mlp[-1].bias[-1], sigmoid_out)
@@ -191,13 +198,15 @@ class MLPDiffuse(torch.nn.Module):
         if self.view_encoder is not None:
             indata += [self.view_encoder(viewdirs, torch.tensor(20.0, device=pts.device)).reshape(B, -1)]
         mlp_in = torch.cat(indata, dim=-1)
-        rgb = self.mlp(mlp_in)
-        rgb = torch.sigmoid(rgb)
+        mlp_out = self.mlp(mlp_in)
+        rgb = torch.sigmoid(mlp_out)
         roughness = rgb[..., 6:7]*self.max_roughness
+        refraction_index = F.relu(mlp_out[..., 7:8]) + self.min_refraction_index
         tint = rgb[..., 3:6] 
         diffuse = rgb[..., :3] 
 
-        return diffuse, tint, roughness
+        return diffuse, tint, roughness, refraction_index
+
 class MLPRender_Fea(torch.nn.Module):
     in_channels: int
     viewpe: int
