@@ -1,0 +1,35 @@
+n_iters: 30000
+render_mode: center
+
+defaults:
+  - _self_
+  - dataset: counter
+  - model: refmodel
+  - params: reflective
+basedir: ./log
+filter_rays: true
+batch_size: 4096
+expname: test
+datadir: /data
+
+render_only: false
+render_train: false
+render_test: true
+render_path: false
+
+add_timestamp: false
+nSamples: 4096
+N_vis: 5
+vis_every: 5000
+progress_refresh_rate: 10
+
+rm_weight_mask_thre: 1e-4
+step_ratio: 0.5
+ckpt: NULL
+
+lr_init: 0.02
+lr_basis: 1e-3
+lr_decay_iters: -1
+lr_decay_target_ratio: 0.1
+lr_upsample_reset: 1
+fp16: false

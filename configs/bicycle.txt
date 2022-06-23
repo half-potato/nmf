@@ -4,30 +4,25 @@ scenedir = nerf_synthetic/bicycle
 expname =  ref_tensorf_materials_ref_pe12
 basedir = ./log
 
-downsample_train = 4
-downsample_test = 4
+downsample_train = 5
+downsample_test = 5
 
 n_iters = 60000
 batch_size = 4096
 #render_mode = decimate
 render_mode = center
-#step_ratio = 0.25
-#density_grid_dims = 8
-density_n_comp = 16
-appearance_n_comp = 36
-#appearance_n_comp = 72
 
-#bounce_n_list = [100, 500, 1000, 5000, 20000]
-#bounce_iter_list = [5000, 10000, 15000, 20000]
 bounce_n_list = [0, 0]
-bounce_iter_list = [100]
+bounce_iter_list = [0]
 
 featureC = 128
 #featureC = 256
+
 N_voxel_init = 2097156 # 128**3
-#N_voxel_init = 262144 # 64**3
 N_voxel_final = 27000000 # 300**3
-#N_voxel_final = 47000000 # 300**3
+
+#N_voxel_init = 27000000 # 128**3
+#N_voxel_final = 134217728 # 300**3
 smoothing_start = 1.0
 smoothing_end = 0.5
 
@@ -40,8 +35,7 @@ upsamp_list = [3000,4000,5500,7000]
 #uplambda_list = [7000, 12000, 17000, 21000]
 #uplambda_list = [7000, 12000, 17000]
 uplambda_list = [7000, 10000, 12000]
-update_AlphaMask_list = [30000]
-#update_AlphaMask_list = [4000,10000]
+update_AlphaMask_list = [7000,10000]
 
 N_vis = 5
 vis_every = 10000

@@ -1,42 +1,38 @@
+from collections import defaultdict
 import torch,os,imageio,sys
 from tqdm.auto import tqdm
 from dataLoader.ray_utils import get_rays
-# from models.tensoRF import TensorVM, TensorCP, raw2alpha, TensorVMSplit, AlphaGridMask
 from utils import *
 from dataLoader.ray_utils import ndc_rays_blender
 
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
 from icecream import ic
-import plotly.express as px
-import plotly.graph_objects as go
 
-def chunk_renderer(rays, tensorf, focal, alpha=None, chunk=4096, N_samples=-1, ndc_ray=False, white_bg=True, is_train=False, device='cuda'):
+def chunk_renderer(rays, tensorf, focal, keys=['rgb_map'], chunk=4096, **kwargs):
 
-    rgbs, alphas, depth_maps, normal_maps, uncertainties = [], [], [], [], []
-    points, normal_sims = [], []
+    data = defaultdict(list)
     N_rays_all = rays.shape[0]
-    mean_roughness = 0
-    N = 0
     for chunk_idx in range(N_rays_all // chunk + int(N_rays_all % chunk > 0)):
         rays_chunk = rays[chunk_idx * chunk:(chunk_idx + 1) * chunk]#.to(device)
     
-        rgb_map, depth_map, normal_map, acc_map, point, normal_sim, mroughness = tensorf(rays_chunk, focal, output_alpha=alpha, is_train=is_train, white_bg=white_bg, ndc_ray=ndc_ray, N_samples=N_samples)
+        cdata = tensorf(rays_chunk, focal, **kwargs)
+        for key in keys:
+            data[key].append(cdata[key])
 
-        mean_roughness += mroughness
-        rgbs.append(rgb_map)
-        depth_maps.append(depth_map)
-        normal_maps.append(normal_map)
-        points.append(point)
-        alphas.append(acc_map)
-        normal_sims.append(normal_sim)
-        N += 1
-    
-    normal_maps = torch.cat(normal_maps) if normal_maps[0] is not None else None
-    return torch.cat(rgbs), torch.cat(alphas), torch.cat(depth_maps), torch.cat(points), sum(normal_sims)/len(normal_sims), normal_maps, mean_roughness / N
+    # stack it boyyy
+    for key in keys:
+        if len(data[key]) == 1:
+            data[key] = data[key][0]
+            continue
+        if torch.is_tensor(data[key][0]):
+            data[key] = torch.cat(data[key], dim=0)
+        else:
+            data[key] = torch.tensor(data[key])
+    return data
 
 class BundleRender:
-    def __init__(self, base_renderer, render_mode, bundle_size, H, W, focal, chunk=2*2048, scale_normal=False):
+    def __init__(self, base_renderer, render_mode, H, W, focal, bundle_size=1, chunk=2*512, scale_normal=False):
         self.render_mode = render_mode
         self.base_renderer = base_renderer
         self.bundle_size = bundle_size
@@ -46,7 +42,8 @@ class BundleRender:
         self.focal = focal
         self.chunk = chunk
 
-    def __call__(self, rays, tensorf, chunk=4096, N_samples=-1, ndc_ray=False, white_bg=True, is_train=False, device='cuda'):
+    @torch.no_grad()
+    def __call__(self, rays, tensorf, **kwargs):
         height, width = self.H, self.W
         ray_dim = rays.shape[-1]
         if self.render_mode == 'decimate':
@@ -61,11 +58,24 @@ class BundleRender:
             fH = height
             fW = width
         num_rays = height * width
+        device = rays.device
 
-        rgb_map, acc_map, depth_map, points, _, normal_map, _ = self.base_renderer(rays, tensorf, focal=self.focal, chunk=self.chunk, N_samples=N_samples,
-                                        ndc_ray=ndc_ray, white_bg = white_bg, device=device)
-        # ind = [598,532]
-        # ic(points.reshape(height, width, -1)[ind[0], ind[1]])
+        data = self.base_renderer(rays, tensorf, keys=['depth_map', 'rgb_map', 'normal_map', 'acc_map', 'termination_xyz', 'debug_map'],
+                                  focal=self.focal, chunk=self.chunk, **kwargs)
+        rgb_map = data['rgb_map']
+        depth_map = data['depth_map']
+        normal_map = data['normal_map']
+        debug_map = data['debug_map']
+        acc_map = data['acc_map']
+        points = data['termination_xyz']
+        #  ind = [598,532]
+        ind = [height // 2, width // 2]
+        point = points.reshape(height, width, -1)[ind[0], ind[1]].to(device)
+
+        env_map, col_map = tensorf.recover_envmap(512, xyz=point)
+        env_map = (env_map.detach().cpu().numpy() * 255).astype('uint8')
+        col_map = (col_map.detach().cpu().numpy() * 255).astype('uint8')
+
         if self.render_mode == 'decimate':
             # plt.imshow(normal_map.reshape(height, width, 3).cpu())
             # plt.figure()
@@ -82,12 +92,9 @@ class BundleRender:
             val_map = val_map.reshape((fH, fW, -1))[:self.H, :self.W, :]
             return val_map
 
-        depth_map = reshape(depth_map).squeeze(2)
-        # dirs = rays[:, 3:6]
-        # z = abs(dirs[:, 2])
-        # depth_map = depth_map / z.reshape(*depth_map.shape)
 
-        rgb_map, depth_map, acc_map = reshape(rgb_map).cpu(), depth_map.cpu(), reshape(acc_map).cpu()
+        rgb_map, depth_map, acc_map = reshape(rgb_map.detach()).cpu(), reshape(depth_map.detach()).cpu(), reshape(acc_map.detach()).cpu()
+        debug_map = reshape(debug_map.detach()).cpu()
         rgb_map = rgb_map.clamp(0.0, 1.0)
         if normal_map is not None:
             normal_map = normal_map.reshape(height, width, 3).cpu()
@@ -100,7 +107,7 @@ class BundleRender:
         # plt.figure()
 
         # normal_map = depth_to_normals(depth_map, self.focal)
-        normal_map = acc_map * normal_map + (1-acc_map) * 0
+        # normal_map = acc_map * normal_map + (1-acc_map) * 0
         # plt.imshow(acc_map)
         # plt.figure()
         # plt.imshow(depth_map)
@@ -126,7 +133,7 @@ class BundleRender:
         # fig.show()
         # assert(False)
 
-        return rgb_map, depth_map, normal_map
+        return rgb_map, depth_map, debug_map, normal_map, env_map, col_map
 
 
 def depth_to_normals(depth, focal):
@@ -152,6 +159,7 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
     os.makedirs(savePath, exist_ok=True)
     os.makedirs(savePath+"/rgbd", exist_ok=True)
     os.makedirs(savePath+"/envmaps", exist_ok=True)
+    ic(N_samples)
 
     try:
         tqdm._instances.clear()
@@ -161,10 +169,10 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
     near_far = test_dataset.near_far
     W, H = test_dataset.img_wh
     focal = (test_dataset.focal[0] if ndc_ray else test_dataset.focal)
-    brender = BundleRender(renderer, render_mode, bundle_size, H, W, focal)
-    env_map, col_map = tensorf.recover_envmap(812, xyz=torch.tensor([-0.3042,  0.8466,  0.8462,  0.0027], device='cuda:0'))
-    env_map = (env_map.cpu().numpy() * 255).astype('uint8')
-    col_map = (col_map.cpu().numpy() * 255).astype('uint8')
+    brender = BundleRender(renderer, render_mode, H, W, focal)
+    env_map, col_map = tensorf.recover_envmap(512, xyz=torch.tensor([-0.3042,  0.8466,  0.8462,  0.0027], device='cuda:0'))
+    env_map = (env_map.detach().cpu().numpy() * 255).astype('uint8')
+    col_map = (col_map.detach().cpu().numpy() * 255).astype('uint8')
     imageio.imwrite(f'{savePath}/envmaps/{prtx}view_map.png', col_map)
     imageio.imwrite(f'{savePath}/envmaps/{prtx}ref_map.png', env_map)
     print(f"Using {render_mode} render mode")
@@ -173,8 +181,8 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
         # rgb_map, _, depth_map, _, _ = renderer(rays, tensorf, chunk=4096, N_samples=N_samples,
         #                                 ndc_ray=ndc_ray, white_bg = white_bg, device=device)
         # rgb_map = rgb_map.clamp(0.0, 1.0)
-        rgb_map, depth_map, normal_map = brender(rays, tensorf, chunk=4096, N_samples=N_samples,
-                                     ndc_ray=ndc_ray, white_bg = white_bg, device=device)
+        rgb_map, depth_map, debug_map, normal_map, env_map, col_map = brender(rays, tensorf, N_samples=N_samples,
+                                     ndc_ray=ndc_ray, white_bg = white_bg)
         
         normal_map = (normal_map * 127 + 128).clamp(0, 255).byte()
 
@@ -208,6 +216,9 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
             rgb_map = np.concatenate((rgb_map, depth_map), axis=1)
             imageio.imwrite(f'{savePath}/rgbd/{prtx}{idx:03d}.png', rgb_map)
             imageio.imwrite(f'{savePath}/rgbd/{prtx}normal_{idx:03d}.png', normal_map)
+            imageio.imwrite(f'{savePath}/rgbd/{prtx}debug_{idx:03d}.png', debug_map.numpy().astype(np.uint8))
+            imageio.imwrite(f'{savePath}/envmaps/{prtx}ref_map_{idx:03d}.png', env_map)
+            imageio.imwrite(f'{savePath}/envmaps/{prtx}view_map_{idx:03d}.png', col_map)
 
     imageio.mimwrite(f'{savePath}/{prtx}video.mp4', np.stack(rgb_maps), fps=30, quality=10)
     imageio.mimwrite(f'{savePath}/{prtx}depthvideo.mp4', np.stack(depth_maps), fps=30, quality=10)
@@ -235,7 +246,7 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
 
     return PSNRs
 
-@torch.no_grad()
+# @torch.no_grad()
 def evaluation(test_dataset,tensorf, unused, renderer, *args, N_vis=5, device='cuda', **kwargs):
 
     img_eval_interval = 1 if N_vis < 0 else max(test_dataset.all_rays.shape[0] // N_vis,1)
@@ -252,7 +263,7 @@ def evaluation(test_dataset,tensorf, unused, renderer, *args, N_vis=5, device='c
                 yield idx, rays, None
     return evaluate(iterator, test_dataset, tensorf, renderer, *args, device=device, **kwargs)
 
-@torch.no_grad()
+# @torch.no_grad()
 def evaluation_path(test_dataset,tensorf, c2ws, renderer, *args, device='cuda', ndc_ray=False, **kwargs):
     W, H = test_dataset.img_wh
     def iterator():

@@ -13,3 +13,5 @@ lpips
 matplotlib
 tensorboard
 imageio-ffmpeg
+hydra-core
+icecream

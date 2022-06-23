@@ -1,6 +1,7 @@
 from operator import index
 from models.ish import ISH, RandISH, FullISH
 from models.ise import RandISE
+import cv2
 import torch
 import imageio
 import numpy as np
@@ -8,22 +9,52 @@ import matplotlib.pyplot as plt
 from icecream import ic
 from tqdm import tqdm
 from models.sh import eval_sh_bases
-import tinycudann as tcnn
+#  import tinycudann as tcnn
+from pathlib import Path
 
-pano_path = "/data/sun_pano/streetview/2 1.jpg"
 device = torch.device('cuda')
-pano = imageio.imread(pano_path)
-H, W, C = pano.shape
-pano_t = torch.tensor(pano, dtype=torch.float32, device=device)/255
+#  pano_paths = [
+#      "/data/sun_pano/streetview/2 1.jpg",
+#      "/data/sun_pano/streetview/15 1.jpg",
+#      "/data/sun_pano/streetview/16 1.jpg",
+#      "/data/sun_pano/streetview/17 1.jpg",
+#      "/data/sun_pano/streetview/18 1.jpg",
+#  ]
+pano_paths = list(Path('./envmaps/').glob('*.png'))
+ish = RandISH(128, 10).to(device)
+batch_size = 4096*50
+
+# ish = RandISE(512, 32).to(device)
+# ish = FullISH(4).to(device)
+featureC = 256
+#  featureC = 128
+#  pano_feat_dim = 128
+pano_feat_dim = 27*3
+#  num_layers = 3
+num_layers = 5
+epochs = 500
+
+num_panos = len(pano_paths)
+colors = []
+for pano_path in pano_paths:
+    pano = imageio.imread(pano_path)
+    H, W, C = pano.shape
+    #  pano = cv2.resize(pano, (2000, 1000))
+    pano = cv2.resize(pano, (200, 100))
+    H, W, C = pano.shape
+    pano_t = torch.tensor(pano, dtype=torch.float32, device=device)/255
+    colors.append(pano_t.reshape(-1, 3))
+
+M = colors[0].shape[0]
+colors = torch.cat(colors, dim=0)
+N = colors.shape[0]
+
 rows, cols = torch.meshgrid(
-        torch.arange(pano_t.shape[0]),
-        torch.arange(pano_t.shape[1]),
+        torch.arange(H),
+        torch.arange(W),
         indexing='ij')
 rows = rows.reshape(-1)
 cols = cols.reshape(-1)
-colors = pano_t.reshape(-1, 3)
-N = colors.shape[0]
-
 theta = rows/H * np.pi - np.pi/2
 phi = cols/W * 2*np.pi - np.pi
 
@@ -36,35 +67,35 @@ vecs = torch.stack([
 ], dim=1).to(device)
 
 # ish = ISH(4)
-ish = RandISH(1024, 4).to(device)
-# ish = RandISE(512, 32).to(device)
-# ish = FullISH(4).to(device)
-featureC = 128
+
+pano_features = torch.rand(num_panos, pano_feat_dim, device=device)
+pano_features.requires_grad=True
+
+def get_features(inds):
+    pano_ind = inds // M
+    return pano_features[pano_ind]
 
 def init_weights(m):
-    if isinstance(m, torch.nn.Linear) and m.weight.shape[1] > 200:
-        torch.nn.init.xavier_uniform_(m.weight, gain=0.2688)
+    if isinstance(m, torch.nn.Linear):# and m.weight.shape[1] > 200:
+        torch.nn.init.xavier_uniform_(m.weight, gain=np.sqrt(2))
 
 mlp = torch.nn.Sequential(
-    torch.nn.Linear(ish.dim(), featureC),
-    torch.nn.ReLU(inplace=True),
-    torch.nn.Linear(featureC, featureC),
-    torch.nn.ReLU(inplace=True),
-    # torch.nn.Linear(featureC, featureC),
-    # torch.nn.ReLU(inplace=True),
-    # torch.nn.Linear(featureC, featureC),
-    # torch.nn.ReLU(inplace=True),
-    torch.nn.Linear(featureC, featureC),
+    torch.nn.Linear(ish.dim()+pano_feat_dim, featureC),
+    *sum([[
+            torch.nn.ReLU(inplace=True),
+            torch.nn.Linear(featureC, featureC, bias=False)
+        ] for _ in range(num_layers-2)], []),
     torch.nn.ReLU(inplace=True),
     torch.nn.Linear(featureC, 3),
     torch.nn.Sigmoid()
 ).to(device)
 
-mlp = torch.nn.Sequential(
-    torch.nn.Linear(ish.dim()+25, 3),
-    torch.nn.Sigmoid()
-).to(device)
+#  mlp = torch.nn.Sequential(
+#      torch.nn.Linear(ish.dim()+25, 3),
+#      torch.nn.Sigmoid()
+#  ).to(device)
 
+"""
 encoding = tcnn.Encoding(3, dict(
     otype="HashGrid",
     n_levels=16,
@@ -83,11 +114,11 @@ network = tcnn.Network(encoding.n_output_dims, 3, dict(
 mlp = torch.nn.Sequential(
     encoding, network
 ).to(device)
+"""
 
 mlp.apply(init_weights)
 
-optim = torch.optim.Adam(mlp.parameters(), lr=3e-3)
-batch_size = 4096*100
+optim = torch.optim.Adam(mlp.parameters(), lr=5e-3)
 
 class SimpleSampler:
     def __init__(self, total, batch):
@@ -105,42 +136,54 @@ class SimpleSampler:
         ids = self.ids[self.curr:self.curr+batch]
         return ids
 
-kappa = torch.tensor(10, device=device)
+kappa = torch.tensor(20, device=device)
 sampler = SimpleSampler(N, batch_size)
-for i in tqdm(range(500)):
+for i in tqdm(range(epochs)):
     inds = sampler.nextids()
     samp = colors[inds]
-    samp_vecs = vecs[inds]
-    samp_angs = angs[inds]
+    samp_vecs = vecs[inds % M]
+    samp_angs = angs[inds % M]
 
-    # enc = ish(samp_vecs, kappa).reshape(batch_size, -1)
-    # enc = torch.cat([enc, eval_sh_bases(4, samp_vecs)], dim=-1)
-    # output = mlp(enc)
+    enc = ish(samp_vecs, kappa)
+    enc = enc.reshape(batch_size, -1)
+    feats = get_features(inds)
+    enc = torch.cat([enc, feats], dim=-1)
+    #  enc = torch.cat([enc, eval_sh_bases(4, samp_vecs)], dim=-1)
+    output = mlp(enc)
 
-    output = mlp(samp_vecs)
+    #  output = mlp(samp_vecs)
+    #  loss = ((output - samp.half())**2).mean()
 
-    loss = ((output - samp.half())**2).mean()
+    loss = ((output - samp)**2).mean()
     loss.backward()
     optim.step()
     optim.zero_grad()
+ic(loss)
 
 # kappa = torch.tensor(20, device=device)
-outs = []
 with torch.no_grad():
-    for i in tqdm(range(0, N, batch_size)):
-        torch.cuda.empty_cache()
-        inds = torch.arange(i, min(N, i+batch_size), device=device)
-        samp_vecs = vecs[inds]
-        samp_angs = angs[inds]
+    for pind in range(num_panos):
+        outs = []
+        for i in tqdm(range(0, M, batch_size)):
+            torch.cuda.empty_cache()
+            inds = torch.arange(i, min(M, i+batch_size), device=device) + pind * M
+            samp_vecs = vecs[inds % M]
+            samp_angs = angs[inds % M]
 
-        # enc = ish(samp_vecs, kappa).reshape(-1, ish.dim())
-        # enc = torch.cat([enc, eval_sh_bases(4, samp_vecs)], dim=-1)
-        # output = mlp(enc)
+            enc = ish(samp_vecs, kappa).reshape(-1, ish.dim())
+            #  enc = torch.cat([enc, eval_sh_bases(4, samp_vecs)], dim=-1)
+            feats = get_features(inds)
+            enc = torch.cat([enc, feats], dim=-1)
+            output = mlp(enc)
 
-        output = mlp(samp_vecs)
+            #  output = mlp(samp_vecs)
 
-        outs.append(output.cpu())
-        del output
-output = torch.cat(outs, dim=0).reshape(H, W, 3)
-plt.imshow(output.float())
-plt.show()
+            outs.append(output.cpu())
+            del output
+        output = torch.cat(outs, dim=0)
+        pano = output.reshape(H, W, 3)
+
+
+        pano = (pano*255).numpy().astype(np.uint8)
+        pano = cv2.cvtColor(pano, cv2.COLOR_BGR2RGB)
+        cv2.imwrite(f'fit_panos/pano{pind}.png', pano)

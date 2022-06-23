@@ -1,0 +1,39 @@
+smoothing_start: 1.0
+smoothing_end: 0.5
+smoothing_list: [70000, 10000, 15000]
+N_voxel_init: 2097156 # 128**3
+N_voxel_final: 27000000 # 300**3
+# N_voxel_init: 27000000 # 128**3
+# N_voxel_final: 134217728 # 300**3
+
+# bounce_n_list: [100, 1000, 10000, 20000]
+# bounce_iter_list: [9000, 12000, 14000]
+
+bounce_n_list: [0, 0]
+bounce_iter_list: [0]
+
+num_bw_iters: 0
+
+upsamp_list: [3000,4000,5500,7000]
+#upsamp_list: [2000,3000,4000,5500,7000]
+#uplambda_list: [7000, 12000, 17000, 21000]
+#uplambda_list: [7000, 12000, 17000]
+uplambda_list: [7000, 10000, 12000]
+update_AlphaMask_list: [4000, 70000]
+# update_AlphaMask_list: [30000]
+L1_weight_inital: 8e-5
+L1_weight_rest: 4e-5
+
+TV_weight_density: 0.0
+TV_weight_app: 0.0
+normal_lambda: 2
+backwards_rays_lambda: 0
+floater_lambda: 0.01
+charbonier_eps: 0.001
+Ortho_weight: 0
+
+envmap_train_start: 20
+# num_rays_per_envmap: 512
+num_rays_per_envmap: 64
+num_env_train_iters: 1
+disable_alpha_mask: False

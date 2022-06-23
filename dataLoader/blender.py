@@ -50,13 +50,14 @@ class BlenderDataset(Dataset):
             self.near_far = [2.0,6.0]
         w, h = int(self.meta['w']/self.downsample), int(self.meta['h']/self.downsample)
         self.img_wh = [w,h]
+        print(f"Original Image size: {self.meta['w']} x {self.meta['h']}")
+        print(f"Image size: {w} x {h}")
         if 'aabb_scale' in self.meta:
             aabb_scale = self.meta['aabb_scale']
             self.scene_bbox *= aabb_scale
             self.radius *= aabb_scale
 
-        self.focal = 0.5 * self.meta['w'] / np.tan(0.5 * self.meta['camera_angle_x'])  # original focal length
-        self.focal *= self.img_wh[0] / w  # modify focal length to match size self.img_wh
+        self.focal = 0.5 * w / np.tan(0.5 * self.meta['camera_angle_x'])  # original focal length
 
 
         # ray directions for all pixels, same for all images (same H, W, focal)
