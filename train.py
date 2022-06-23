@@ -147,10 +147,14 @@ def reconstruction(args):
     # smoothing_vals = [0.6, 0.7, 0.8, 0.7, 0.5]
     smoothing_vals = torch.linspace(args.params.smoothing_start, args.params.smoothing_end, len(upsamp_list)+1).tolist()
     tensorf.rf.set_smoothing(smoothing_vals.pop(0))
-    # if tensorf.bg_module is not None:
-    #     res = args.params.bg_upsamp_res.pop(0)
-    #     print(f"Upsampling bg to {res}")
-    #     tensorf.bg_module.upsample(res)
+    upsamp_bg = hasattr(args.params, 'bg_upsamp_res') and tensorf.bg_module is not None
+    if upsamp_bg:
+        res = args.params.bg_upsamp_res.pop(0)
+        print(f"Upsampling bg to {res}")
+        tensorf.bg_module.upsample(res)
+        ind = [i for i, d in enumerate(grad_vars) if 'name' in d and d['name'] == 'bg'][0]
+        grad_vars[ind]['params'] = tensorf.bg_module.parameters()
+        optimizer = torch.optim.Adam(grad_vars, betas=(0.9, 0.99))
     # smoothing_vals = torch.linspace(0.5, 0.5, len(upsamp_list)+1).tolist()[1:]
 
 
@@ -250,9 +254,9 @@ def reconstruction(args):
             # now train on the environment maps
             env_loss = torch.tensor(1.0)
             torch.cuda.empty_cache()
-            if iteration > args.params.envmap_train_start and args.params.envmap_train_start > 0 and \
-               tensorf.ref_module is not None and \
-               args.params.num_env_train_iters > 0:
+            if args.params.num_env_train_iters > 0 and \
+               iteration > args.params.envmap_train_start and args.params.envmap_train_start > 0 and \
+               tensorf.ref_module is not None:
                 with torch.cuda.amp.autocast(enabled=args.fp16):
                     # sample termination_xyz
                     with torch.no_grad():
@@ -408,8 +412,13 @@ def reconstruction(args):
                 summary_writer.add_scalar('test/psnr', np.mean(PSNRs_test), global_step=iteration)
 
 
-            # if iteration in args.params.bg_upsamp_list and tensorf.bg_module is not None:
-            #     tensorf.bg_module.upsample(args.params.bg_upsamp_res.pop(0))
+            if upsamp_bg and iteration in args.params.bg_upsamp_list:
+                res = args.params.bg_upsamp_res.pop(0)
+                print(f"Upsampling bg to {res}")
+                tensorf.bg_module.upsample(res)
+                ind = [i for i, d in enumerate(grad_vars) if 'name' in d and d['name'] == 'bg'][0]
+                grad_vars[ind]['params'] = tensorf.bg_module.parameters()
+                optimizer = torch.optim.Adam(grad_vars, betas=(0.9, 0.99))
 
             if iteration in args.params.bounce_iter_list:
                 print(f"Max bounces {tensorf.max_bounce_rays} -> {bounce_n_list[0]}")

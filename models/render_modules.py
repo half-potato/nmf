@@ -52,17 +52,21 @@ class BackgroundRender(torch.nn.Module):
         self.view_encoder = view_encoder
         self.bg_rank = bg_rank
         d = self.view_encoder.dim() if self.view_encoder is not None else 0
-        self.bg_net = nn.Sequential(
-            nn.Linear(bg_rank+d, featureC, bias=False),
-            *sum([[
-                    torch.nn.ReLU(inplace=True),
-                    torch.nn.Linear(featureC, featureC, bias=False)
-                ] for _ in range(num_layers-2)], []),
-            torch.nn.ReLU(inplace=True),
-            nn.Linear(featureC, 3, bias=False),
-            nn.Sigmoid()
-        )
+        if num_layers == 0 and bg_rank == 3:
+            self.bg_net = nn.Sigmoid()
+        else:
+            self.bg_net = nn.Sequential(
+                nn.Linear(bg_rank+d, featureC, bias=False),
+                *sum([[
+                        torch.nn.ReLU(inplace=True),
+                        torch.nn.Linear(featureC, featureC, bias=False)
+                    ] for _ in range(num_layers-2)], []),
+                torch.nn.ReLU(inplace=True),
+                nn.Linear(featureC, 3, bias=False),
+                nn.Sigmoid()
+            )
 
+    @torch.no_grad()
     def upsample(self, bg_resolution):
         self.bg_mat = torch.nn.Parameter(
             F.interpolate(self.bg_mat.data, size=(bg_resolution*2, bg_resolution), mode='bilinear', align_corners=True)

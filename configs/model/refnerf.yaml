@@ -8,8 +8,9 @@ rayMarch_weight_thres: 0.0001
 nEnvSamples: 0
 fea2denseAct: 'softplus_shift'
 # fea2denseAct: 'relu_shift'
-max_recurs: 2
+max_recurs: 0
 infinity_border: False
+enable_alpha_mask: true
 
 rf:
   _partial_: True

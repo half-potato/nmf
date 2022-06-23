@@ -49,12 +49,13 @@ class TensorBase(torch.nn.Module):
             self.register_buffer(name, val)
 
     def update_stepSize(self, grid_size):
+        grid_size = torch.LongTensor(grid_size)
         print("grid size", grid_size)
         print("density grid size", [int(self.density_res_multi*g) for g in grid_size])
         print("aabb", self.aabb.view(-1))
         aabbSize = self.aabb[1] - self.aabb[0]
         self.set_register('invaabbSize', 2.0/aabbSize)
-        self.set_register('grid_size', torch.LongTensor(grid_size))
+        self.set_register('grid_size', grid_size)
         self.set_register('units', aabbSize.to(self.grid_size.device) / (self.grid_size-1))
         # min is more accurate than mean
         self.set_register('stepSize', torch.min(self.units)*self.step_ratio)

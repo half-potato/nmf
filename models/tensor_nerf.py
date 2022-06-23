@@ -92,7 +92,7 @@ class TensorNeRF(torch.nn.Module):
                  alphaMask=None, near_far=[2.0, 6.0], nEnvSamples=100, specularity_threshold=0.1, max_recurs=0,
                  max_normal_similarity=1, infinity_border=False,
                  density_shift=-10, alphaMask_thres=0.001, distance_scale=25, rayMarch_weight_thres=0.0001,
-                 fea2denseAct='softplus'):
+                 fea2denseAct='softplus', enable_alpha_mask=True):
         super(TensorNeRF, self).__init__()
         self.rf = rf(aabb=aabb, grid_size=grid_size)
         self.ref_module = ref_module(in_channels=self.rf.app_dim) if ref_module is not None else None
@@ -102,6 +102,7 @@ class TensorNeRF(torch.nn.Module):
 
         self.alphaMask = alphaMask
         self.infinity_border = infinity_border
+        self.enable_alpha_mask = enable_alpha_mask
 
         self.density_shift = density_shift
         self.alphaMask_thres = alphaMask_thres
@@ -141,7 +142,7 @@ class TensorNeRF(torch.nn.Module):
                            'lr': lr_init_network}]
         if hasattr(self, 'bg_module') and isinstance(self.bg_module, torch.nn.Module):
             grad_vars += [{'params': self.bg_module.parameters(),
-                           'lr': lr_init_network*10}]
+                'lr': 0.03, 'name': 'bg'}]
         return grad_vars
 
     def save(self, path, config):
@@ -264,6 +265,7 @@ class TensorNeRF(torch.nn.Module):
 
         grid_size = [int(self.rf.density_res_multi*g) for g in grid_size]
         alpha, dense_xyz = self.getDenseAlpha(grid_size)
+
         dense_xyz = dense_xyz.transpose(0, 2).contiguous()
         alpha = alpha.clamp(0, 1).transpose(0, 2).contiguous()[None, None]
         total_voxels = grid_size[0] * grid_size[1] * grid_size[2]
@@ -416,6 +418,7 @@ class TensorNeRF(torch.nn.Module):
             envmap = torch.zeros(res, 2*res, 3)
         color, tint, _, _ = self.diffuse_module(xyz_samp, ang_vecs.reshape(-1, 3), app_features)
         color = color.reshape(res, 2*res, 3)
+        
         return envmap, color
 
     def at_infinity(self, xyz_sampled, max_dist=10):
@@ -462,7 +465,7 @@ class TensorNeRF(torch.nn.Module):
 
         # sample alphas and cull samples from the ray
         alphas = torch.zeros(xyz_sampled_shape[:-1], device=device)
-        if self.alphaMask is not None:
+        if self.alphaMask is not None and self.enable_alpha_mask:
             alphas[ray_valid] = self.alphaMask.sample_alpha(
                 xyz_sampled[ray_valid], contract_space=self.rf.contract_space)
 

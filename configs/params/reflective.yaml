@@ -1,5 +1,6 @@
 smoothing_start: 1.0
 smoothing_end: 0.5
+smoothing_list: [70000, 10000, 15000]
 
 N_voxel_init: 2097156 # 128**3
 # N_voxel_final: 27000000 # 300**3
@@ -32,3 +33,5 @@ floater_lambda: 0.01
 charbonier_eps: 0.001
 Ortho_weight: 0
 
+num_rays_per_envmap: 64
+num_env_train_iters: 0

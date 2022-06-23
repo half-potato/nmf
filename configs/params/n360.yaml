@@ -36,3 +36,4 @@ envmap_train_start: 20
 # num_rays_per_envmap: 512
 num_rays_per_envmap: 64
 num_env_train_iters: 1
+disable_alpha_mask: False

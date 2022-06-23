@@ -179,8 +179,10 @@ class TensorVMSplit(TensorBase):
 
     @torch.no_grad()
     def shrink(self, new_aabb, apply_correction):
+        # the new_aabb is in normalized coordinates, from -1 to 1
         print("====> shrinking ...")
-        xyz_min, xyz_max = new_aabb
+        xyz_min, xyz_max = new_aabb * self.aabb.abs()
+        # t_l, b_r = xyz_min * self.grid_size // 2, xyz_max * self.grid_size // 2 - 1
         t_l, b_r = (xyz_min - self.aabb[0]) / self.units, (xyz_max - self.aabb[0]) / self.units
         # print(new_aabb, self.aabb)
         # print(t_l, b_r,self.alphaMask.alpha_volume.shape)
@@ -188,7 +190,7 @@ class TensorVMSplit(TensorBase):
         t_l, b_r = torch.round(torch.round(t_l)).long(), torch.round(b_r).long() + 1
         b_r = torch.stack([b_r, self.grid_size]).amin(0)
         db_r = torch.stack([db_r, (self.density_res_multi*self.grid_size).long()]).amin(0)
-        ic(db_r, dt_l, b_r, t_l, xyz_min, xyz_max, self.units, self.aabb)
+        ic(db_r, dt_l, b_r, t_l, xyz_min, xyz_max, self.units, self.aabb, self.density_line[0].shape, self.grid_size)
 
         for i in range(len(self.vecMode)):
             mode0 = self.vecMode[i]
@@ -217,7 +219,7 @@ class TensorVMSplit(TensorBase):
             new_aabb = correct_aabb
 
         newSize = b_r - t_l
-        self.aabb = new_aabb
+        self.aabb *= new_aabb.abs()
         self.update_stepSize((newSize[0], newSize[1], newSize[2]))
 
 
