@@ -60,11 +60,12 @@ class BundleRender:
         num_rays = height * width
         device = rays.device
 
-        data = self.base_renderer(rays, tensorf, keys=['depth_map', 'rgb_map', 'normal_map', 'acc_map', 'termination_xyz'],
+        data = self.base_renderer(rays, tensorf, keys=['depth_map', 'rgb_map', 'normal_map', 'acc_map', 'termination_xyz', 'debug_map'],
                                   focal=self.focal, chunk=self.chunk, **kwargs)
         rgb_map = data['rgb_map']
         depth_map = data['depth_map']
         normal_map = data['normal_map']
+        debug_map = data['debug_map']
         acc_map = data['acc_map']
         points = data['termination_xyz']
         #  ind = [598,532]
@@ -93,6 +94,7 @@ class BundleRender:
 
 
         rgb_map, depth_map, acc_map = reshape(rgb_map.detach()).cpu(), reshape(depth_map.detach()).cpu(), reshape(acc_map.detach()).cpu()
+        debug_map = reshape(debug_map.detach()).cpu()
         rgb_map = rgb_map.clamp(0.0, 1.0)
         if normal_map is not None:
             normal_map = normal_map.reshape(height, width, 3).cpu()
@@ -131,7 +133,7 @@ class BundleRender:
         # fig.show()
         # assert(False)
 
-        return rgb_map, depth_map, normal_map, env_map, col_map
+        return rgb_map, depth_map, debug_map, normal_map, env_map, col_map
 
 
 def depth_to_normals(depth, focal):
@@ -179,7 +181,7 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
         # rgb_map, _, depth_map, _, _ = renderer(rays, tensorf, chunk=4096, N_samples=N_samples,
         #                                 ndc_ray=ndc_ray, white_bg = white_bg, device=device)
         # rgb_map = rgb_map.clamp(0.0, 1.0)
-        rgb_map, depth_map, normal_map, env_map, col_map = brender(rays, tensorf, N_samples=N_samples,
+        rgb_map, depth_map, debug_map, normal_map, env_map, col_map = brender(rays, tensorf, N_samples=N_samples,
                                      ndc_ray=ndc_ray, white_bg = white_bg)
         
         normal_map = (normal_map * 127 + 128).clamp(0, 255).byte()
@@ -214,6 +216,7 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
             rgb_map = np.concatenate((rgb_map, depth_map), axis=1)
             imageio.imwrite(f'{savePath}/rgbd/{prtx}{idx:03d}.png', rgb_map)
             imageio.imwrite(f'{savePath}/rgbd/{prtx}normal_{idx:03d}.png', normal_map)
+            imageio.imwrite(f'{savePath}/rgbd/{prtx}debug_{idx:03d}.png', debug_map.numpy().astype(np.uint8))
             imageio.imwrite(f'{savePath}/envmaps/{prtx}ref_map_{idx:03d}.png', env_map)
             imageio.imwrite(f'{savePath}/envmaps/{prtx}view_map_{idx:03d}.png', col_map)
 

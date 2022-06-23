@@ -122,7 +122,8 @@ def reconstruction(args):
         tensorf = hydra.utils.instantiate(args.model)(aabb=aabb, grid_size=reso_cur).to(device)
 
 
-    grad_vars = tensorf.get_optparam_groups(args.lr_init, args.lr_basis)
+    lr_bg = 0.03
+    grad_vars = tensorf.get_optparam_groups(args.lr_init, args.lr_basis, lr_bg)
     if args.lr_decay_iters > 0:
         lr_factor = args.lr_decay_target_ratio**(1/args.lr_decay_iters)
     else:
@@ -150,10 +151,12 @@ def reconstruction(args):
     upsamp_bg = hasattr(args.params, 'bg_upsamp_res') and tensorf.bg_module is not None
     if upsamp_bg:
         res = args.params.bg_upsamp_res.pop(0)
+        lr_bg = args.params.bg_upsamp_lr.pop(0)
         print(f"Upsampling bg to {res}")
         tensorf.bg_module.upsample(res)
         ind = [i for i, d in enumerate(grad_vars) if 'name' in d and d['name'] == 'bg'][0]
         grad_vars[ind]['params'] = tensorf.bg_module.parameters()
+        grad_vars[ind]['lr'] = lr_bg
         optimizer = torch.optim.Adam(grad_vars, betas=(0.9, 0.99))
     # smoothing_vals = torch.linspace(0.5, 0.5, len(upsamp_list)+1).tolist()[1:]
 
@@ -414,10 +417,12 @@ def reconstruction(args):
 
             if upsamp_bg and iteration in args.params.bg_upsamp_list:
                 res = args.params.bg_upsamp_res.pop(0)
+                lr_bg = args.params.bg_upsamp_lr.pop(0)
                 print(f"Upsampling bg to {res}")
                 tensorf.bg_module.upsample(res)
                 ind = [i for i, d in enumerate(grad_vars) if 'name' in d and d['name'] == 'bg'][0]
                 grad_vars[ind]['params'] = tensorf.bg_module.parameters()
+                grad_vars[ind]['lr'] = lr_bg
                 optimizer = torch.optim.Adam(grad_vars, betas=(0.9, 0.99))
 
             if iteration in args.params.bounce_iter_list:
@@ -461,7 +466,7 @@ def reconstruction(args):
                     lr_scale = 1 #0.1 ** (iteration / args.n_iters)
                 else:
                     lr_scale = args.lr_decay_target_ratio ** (iteration / args.n_iters)
-                grad_vars = tensorf.get_optparam_groups(args.lr_init*lr_scale, args.lr_basis*lr_scale)
+                grad_vars = tensorf.get_optparam_groups(args.lr_init*lr_scale, args.lr_basis*lr_scale, lr_bg=lr_bg)
                 optimizer = torch.optim.Adam(grad_vars, betas=(0.9, 0.99))
     # prof.export_chrome_trace('trace.json')
         

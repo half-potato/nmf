@@ -16,8 +16,10 @@ rf:
   _partial_: True
   _target_: models.tensoRF.TensorVMSplit
   density_n_comp: 16
-  appearance_n_comp: 48
-  app_dim: 48
+  # appearance_n_comp: 48
+  # app_dim: 48
+  appearance_n_comp: 8
+  app_dim: 8
   step_ratio: 0.5
   density_res_multi: 1
   contract_space: False
@@ -39,9 +41,9 @@ diffuse_module:
   _target_: models.render_modules.MLPDiffuse
   pospe: 0
   feape: 2
-  view_encoder:
-    _target_: models.ish.ISH
-    max_degree: 6
+  # view_encoder:
+  #   _target_: models.ish.ISH
+  #   max_degree: 6
   featureC: 128
   num_layers: 0
 

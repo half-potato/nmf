@@ -170,18 +170,21 @@ class MLPDiffuse(torch.nn.Module):
             self.in_mlpC += self.view_encoder.dim()
         self.feape = feape
         self.pospe = pospe
-        self.mlp = torch.nn.Sequential(
-            torch.nn.Linear(self.in_mlpC, featureC),
-            # torch.nn.ReLU(inplace=True),
-            # torch.nn.Linear(featureC, featureC),
-            *sum([[
-                    torch.nn.ReLU(inplace=True),
-                    torch.nn.Linear(featureC, featureC),
-                ] for _ in range(num_layers)], []),
-            torch.nn.ReLU(inplace=True),
-            torch.nn.Linear(featureC, 8),
-        )
-        torch.nn.init.constant_(self.mlp[-1].bias, 0)
+        if num_layers > 0:
+            self.mlp = torch.nn.Sequential(
+                torch.nn.Linear(self.in_mlpC, featureC),
+                # torch.nn.ReLU(inplace=True),
+                # torch.nn.Linear(featureC, featureC),
+                *sum([[
+                        torch.nn.ReLU(inplace=True),
+                        torch.nn.Linear(featureC, featureC),
+                    ] for _ in range(num_layers)], []),
+                torch.nn.ReLU(inplace=True),
+                torch.nn.Linear(featureC, 8),
+            )
+            torch.nn.init.constant_(self.mlp[-1].bias, 0)
+        else:
+            self.mlp = torch.nn.Identity()
         ang_roughness = 20/180*np.pi
         # self.max_roughness = 30/180*np.pi
         self.max_roughness = 40
@@ -204,8 +207,9 @@ class MLPDiffuse(torch.nn.Module):
         mlp_in = torch.cat(indata, dim=-1)
         mlp_out = self.mlp(mlp_in)
         rgb = torch.sigmoid(mlp_out)
+
         roughness = rgb[..., 6:7]*self.max_roughness
-        refraction_index = F.relu(mlp_out[..., 7:8]) + self.min_refraction_index
+        refraction_index = F.softplus(mlp_out[..., 7:8]) + self.min_refraction_index
         tint = rgb[..., 3:6] 
         diffuse = rgb[..., :3] 
 
