@@ -63,6 +63,12 @@ class TensorBase(torch.nn.Module):
         self.nSamples = int((self.aabbDiag / self.stepSize).item()) + 1
         print("sampling step size: ", self.stepSize)
         print("sampling number: ", self.nSamples)
+        
+    def contract_coord(self, xyz_sampled): 
+        dist = torch.linalg.norm(xyz_sampled[..., :3], dim=1, keepdim=True) + 1e-8
+        direction = xyz_sampled[..., :3] / dist
+        contracted = torch.where(dist > 1, (2-1/dist), dist) * direction
+        return torch.cat([ contracted, xyz_sampled[..., 3:] ], dim=-1)
 
     def normalize_coord(self, xyz_sampled):
         coords = (xyz_sampled[..., :3]-self.aabb[0]) * self.invaabbSize - 1

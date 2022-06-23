@@ -1,8 +1,11 @@
 
 dataset_name = blender
-scenedir = nerf_synthetic/materials
+scenedir = nerf_synthetic/bicycle
 expname =  ref_tensorf_materials_ref_pe12
 basedir = ./log
+
+downsample_train = 4
+downsample_test = 4
 
 n_iters = 60000
 batch_size = 4096
@@ -14,31 +17,26 @@ density_n_comp = 16
 appearance_n_comp = 36
 #appearance_n_comp = 72
 
-bounce_n_list = [100, 500, 1000, 5000, 20000]
-bounce_iter_list = [5000, 10000, 15000, 20000]
+#bounce_n_list = [100, 500, 1000, 5000, 20000]
+#bounce_iter_list = [5000, 10000, 15000, 20000]
+bounce_n_list = [0, 0]
+bounce_iter_list = [100]
 
 featureC = 128
 #featureC = 256
 N_voxel_init = 2097156 # 128**3
-N_voxel_final = 27000000 # 300**3
 #N_voxel_init = 262144 # 64**3
+N_voxel_final = 27000000 # 300**3
 #N_voxel_final = 47000000 # 300**3
 smoothing_start = 1.0
 smoothing_end = 0.5
 
-bounce_n_list = [100, 1000, 10000, 20000]
-bounce_iter_list = [9000, 12000, 14000]
-
 density_res_multi = 1
 
-step_ratio = 0.5
-
-upsamp_list = [3000,4000,5500,7000]
-#upsamp_list = [2000,3000,4000,5500,7000]
-#uplambda_list = [7000, 12000, 17000, 21000]
-#uplambda_list = [7000, 12000, 17000]
-uplambda_list = [7000, 10000, 12000]
-#update_AlphaMask_list = [4000,10000]
+step_ratio = 0.1
+nSamples = 2
+upsamp_list = [30000]
+uplambda_list = [30000]
 update_AlphaMask_list = [30000]
 
 N_vis = 5
@@ -63,11 +61,3 @@ fea_pe = 2
 L1_weight_inital = 8e-5
 L1_weight_rest = 4e-5
 rm_weight_mask_thre = 1e-4
-
-## please uncomment following configuration if hope to training on cp model
-#model_name = TensorCP
-#n_lamb_sigma = [96]
-#n_lamb_sh = [288]
-#N_voxel_final = 125000000 # 500**3
-#L1_weight_inital = 1e-5
-#L1_weight_rest = 1e-5

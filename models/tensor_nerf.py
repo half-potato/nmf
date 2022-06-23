@@ -15,6 +15,7 @@ from .tensoRF import TensorCP, TensorVM, TensorVMSplit
 from .multi_level_rf import MultiLevelRF
 from torch.autograd import grad
 import matplotlib.pyplot as plt
+from .envmap import NeuralEnvmap, HashEnvmap
 
 def snells_law(r, n, l):
     # n: (B, 3) surface outward normal
@@ -48,6 +49,8 @@ def raw2alpha(sigma, dist):
     # sigma, dist  [N_rays, N_samples]
     alpha = 1. - torch.exp(-sigma*dist)
 
+    # T is the term that integrates the alpha backwards to prevent occluded objects from influencing things
+    # multiply in exponential space to take exponential of integral
     T = torch.cumprod(torch.cat([
         torch.ones(alpha.shape[0], 1, device=alpha.device),
         1. - alpha + 1e-10
@@ -89,6 +92,12 @@ class AlphaGridMask(torch.nn.Module):
             return torch.cat([ contracted, xyz_sampled[..., 3:] ], dim=-1)
         else:
             return normed
+
+    def contract_coord(self, xyz_sampled): 
+        dist = torch.linalg.norm(xyz_sampled[..., :3], dim=1, keepdim=True) + 1e-8
+        direction = xyz_sampled[..., :3] / dist
+        contracted = torch.where(dist > 1, (2-1/dist), dist) * direction
+        return torch.cat([ contracted, xyz_sampled[..., 3:] ], dim=-1)
 
 
 class TensorNeRF(torch.nn.Module):
@@ -650,6 +659,16 @@ class TensorNeRF(torch.nn.Module):
         else:
             v_world_normal = world_normal
             roughness = torch.tensor(0.0)
+        
+        if env_app_mask.any():
+            # def compute_appfeature(self, upper_feature, view_dir, inner_dir, inv_depth, roughness):
+            upper_feat_mask = weight[env_mask] > self.rayMarch_weight_thres
+            app_features = self.envmap.compute_appfeature(env_upper_features[upper_feat_mask], xyz_env_normed[env_app_mask])
+            diffuse, tint, roughness = self.spatialModule(xyz_normed[env_app_mask], viewdirs[env_app_mask], app_features)
+            # keep in mind that the env_app_mask has no normals
+            rgb[rgb_env_app_mask] = diffuse
+            # ref_rgbs = self.renderModule(xyz_env_normed[env_app_mask], viewdirs[env_app_mask], app_features, refdirs=d_refdirs[env_app_mask], roughness=roughness)
+            # rgb[rgb_env_app_mask] = tint * ref_rgbs + diffuse
 
         acc_map = torch.sum(weight, 1)
         backwards_rays_loss = -torch.matmul(viewdirs.reshape(-1, 1, 3), v_world_normal.reshape(-1, 3, 1)).reshape(app_mask.shape).clamp(max=0)
