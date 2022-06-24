@@ -185,14 +185,10 @@ class MLPDiffuse(torch.nn.Module):
             torch.nn.init.constant_(self.mlp[-1].bias, 0)
         else:
             self.mlp = torch.nn.Identity()
-        ang_roughness = 20/180*np.pi
-        # self.max_roughness = 30/180*np.pi
-        self.max_roughness = 40
+        # to the neural network, roughness is unitless
+        self.max_roughness = 1
         self.max_refraction_index = 2
         self.min_refraction_index = 1
-        # x = ang_roughness / self.max_roughness
-        # sigmoid_out = np.log(x/(1-x))
-        # torch.nn.init.constant_(self.mlp[-1].bias[-1], sigmoid_out)
 
     def forward(self, pts, viewdirs, features, **kwargs):
         B = pts.shape[0]

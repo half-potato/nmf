@@ -15,7 +15,7 @@ from .tensoRF import TensorCP, TensorVM, TensorVMSplit
 from .multi_level_rf import MultiLevelRF
 from torch.autograd import grad
 import matplotlib.pyplot as plt
-from .envmap import NeuralEnvmap, HashEnvmap
+import math
 
 def snells_law(r, n, l):
     # n: (B, 3) surface outward normal
@@ -30,6 +30,7 @@ def snells_law(r, n, l):
     return (r*l + (r*c.abs() - torch.sqrt( (1 - r**2 * (1-c**2)).clip(min=1e-8) )) * sign*n).type(dtype)
 
 def select_top_n_app_mask(app_mask, weight, prob, N, t=0):
+    prob = prob.reshape(-1)
     M = prob.shape[0]
     bounce_mask = torch.zeros((M), dtype=bool, device=app_mask.device)
     full_bounce_mask = torch.zeros_like(app_mask)
@@ -579,8 +580,7 @@ class TensorNeRF(torch.nn.Module):
 
                 l = self.l if is_train else 0
                 v_world_normal = (1-l)*p_world_normal + l*world_normal
-                v_world_normal = v_world_normal / \
-                    (v_world_normal.norm(dim=-1, keepdim=True) + 1e-8)
+                v_world_normal = v_world_normal / (v_world_normal.norm(dim=-1, keepdim=True) + 1e-8)
             else:
                 v_world_normal = world_normal
 
@@ -619,10 +619,9 @@ class TensorNeRF(torch.nn.Module):
                     refract_data = self(rbounce_rays, focal, recur=recur+1, init_refraction_index=refraction_index[rbounce_mask], white_bg=white_bg,
                                     is_train=is_train, ndc_ray=ndc_ray, N_samples=N_samples)
 
-                    # TODO: filter the light according to the diffuse color
-                    rgb[rfull_bounce_mask] += refraction_weight[..., None][rbounce_mask] * refract_data['rgb_map']
-                    # Do I want to filter out light from behind?
-                    # ideally, the density would just be very high at the surface
+                    # the darker the glass, the more light is absorbed
+                    brightness = torch.linalg.norm(diffuse[rbounce_mask], dim=-1, keepdim=True)/math.sqrt(2)
+                    rgb[rfull_bounce_mask] += brightness * refraction_weight[..., None][rbounce_mask] * refract_data['rgb_map']
 
 
             # ===================================================
@@ -630,6 +629,7 @@ class TensorNeRF(torch.nn.Module):
             if recur < self.max_recurs:
                 # compute which rays to reflect
                 prob = torch.linalg.norm(tint, dim=-1).reshape(-1)
+                prob = 1-roughness
                 bounce_mask, full_bounce_mask, inv_full_bounce_mask = select_top_n_app_mask(app_mask, weight[app_mask], prob, self.max_bounce_rays, self.specularity_threshold)
 
                 if bounce_mask.sum() > 0:
@@ -643,10 +643,10 @@ class TensorNeRF(torch.nn.Module):
                     ref_data = self(bounce_rays, focal, recur=recur+1, white_bg=white_bg,
                                     is_train=is_train, ndc_ray=ndc_ray, N_samples=N_samples)
 
-                    rgb[full_bounce_mask] += tint[bounce_mask]*ref_data['rgb_map']
+                    rgb[full_bounce_mask] += (1-roughness[bounce_mask]) * tint[bounce_mask] * ref_data['rgb_map']
                 elif self.ref_module is not None and inv_full_bounce_mask.any():
                     # compute other reflections using ref module
-                    rgb[inv_full_bounce_mask] = tint[~bounce_mask]*self.ref_module(
+                    rgb[inv_full_bounce_mask] = (1-roughness[bounce_mask]) * tint[~bounce_mask] * self.ref_module(
                         xyz_normed[inv_full_bounce_mask], viewdirs[inv_full_bounce_mask],
                         app_features[~bounce_mask], refdirs=refdirs[inv_full_bounce_mask],
                         roughness=roughness[~bounce_mask])
@@ -660,16 +660,6 @@ class TensorNeRF(torch.nn.Module):
             v_world_normal = world_normal
             roughness = torch.tensor(0.0)
         
-        if env_app_mask.any():
-            # def compute_appfeature(self, upper_feature, view_dir, inner_dir, inv_depth, roughness):
-            upper_feat_mask = weight[env_mask] > self.rayMarch_weight_thres
-            app_features = self.envmap.compute_appfeature(env_upper_features[upper_feat_mask], xyz_env_normed[env_app_mask])
-            diffuse, tint, roughness = self.spatialModule(xyz_normed[env_app_mask], viewdirs[env_app_mask], app_features)
-            # keep in mind that the env_app_mask has no normals
-            rgb[rgb_env_app_mask] = diffuse
-            # ref_rgbs = self.renderModule(xyz_env_normed[env_app_mask], viewdirs[env_app_mask], app_features, refdirs=d_refdirs[env_app_mask], roughness=roughness)
-            # rgb[rgb_env_app_mask] = tint * ref_rgbs + diffuse
-
         acc_map = torch.sum(weight, 1)
         backwards_rays_loss = -torch.matmul(viewdirs.reshape(-1, 1, 3), v_world_normal.reshape(-1, 3, 1)).reshape(app_mask.shape).clamp(max=0)
         align_world_loss = -(p_world_normal * world_normal).sum(dim=-1).clamp(max=self.max_normal_similarity)
