@@ -1,6 +1,6 @@
 smoothing_start: 1.0
 smoothing_end: 0.5
-smoothing_list: [70000, 10000, 15000]
+smoothing_list: [10000, 15000, 20000]
 N_voxel_init: 2097156 # 128**3
 N_voxel_final: 27000000 # 300**3
 # N_voxel_init: 27000000 # 128**3
@@ -23,7 +23,7 @@ upsamp_list: [3000,4000,5500,7000]
 #uplambda_list: [7000, 12000, 17000, 21000]
 #uplambda_list: [7000, 12000, 17000]
 uplambda_list: [7000, 10000, 12000]
-update_AlphaMask_list: [4000, 70000]
+update_AlphaMask_list: [4000, 15000]
 # update_AlphaMask_list: [30000]
 L1_weight_inital: 8e-5
 L1_weight_rest: 4e-5

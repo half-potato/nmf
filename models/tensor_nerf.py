@@ -104,7 +104,7 @@ class AlphaGridMask(torch.nn.Module):
 class TensorNeRF(torch.nn.Module):
     def __init__(self, rf, grid_size, aabb, diffuse_module, normal_module=None, ref_module=None, bg_module=None,
                  alphaMask=None, near_far=[2.0, 6.0], nEnvSamples=100, specularity_threshold=0.005, max_recurs=0,
-                 max_normal_similarity=1, infinity_border=False, refraction_threshold=1.1,
+                 max_normal_similarity=1, infinity_border=False, refraction_threshold=1.1, enable_refraction=True,
                  density_shift=-10, alphaMask_thres=0.001, distance_scale=25, rayMarch_weight_thres=0.0001,
                  fea2denseAct='softplus', enable_alpha_mask=True):
         super(TensorNeRF, self).__init__()
@@ -117,6 +117,7 @@ class TensorNeRF(torch.nn.Module):
         self.alphaMask = alphaMask
         self.infinity_border = infinity_border
         self.enable_alpha_mask = enable_alpha_mask
+        self.enable_refraction = enable_refraction
 
         self.density_shift = density_shift
         self.alphaMask_thres = alphaMask_thres
@@ -596,7 +597,7 @@ class TensorNeRF(torch.nn.Module):
             )/refraction_index
 
             refractdirs = snells_law(density_ratio, -v_world_normal[app_mask], viewdirs[app_mask])
-            if recur < self.max_recurs:
+            if recur < self.max_recurs and self.enable_refraction:
                 # compute which rays to refract
                 prob = torch.maximum(density_ratio, 1/(density_ratio+1e-8)).flatten()
                 hard_weight = (prob - self.refraction_threshold)/(1.7 - self.refraction_threshold)
@@ -656,15 +657,17 @@ class TensorNeRF(torch.nn.Module):
                     app_features, refdirs=refdirs[app_mask],
                     roughness=roughness)#.detach()
                 rgb[app_mask] += (tint * ref_rgbs).type(rgb.dtype)
+
+            align_world_loss = -(p_world_normal[app_mask] * world_normal[app_mask]).sum(dim=-1).clamp(max=self.max_normal_similarity)
+            normal_loss = (weight[app_mask] * (align_world_loss)).mean()
         else:
             v_world_normal = world_normal
             roughness = torch.tensor(0.0)
+            normal_loss = torch.tensor(0.0)
         
+
         acc_map = torch.sum(weight, 1)
         backwards_rays_loss = -torch.matmul(viewdirs.reshape(-1, 1, 3), v_world_normal.reshape(-1, 3, 1)).reshape(app_mask.shape).clamp(max=0)
-        align_world_loss = -(p_world_normal * world_normal).sum(dim=-1).clamp(max=self.max_normal_similarity)
-        #  normal_loss = (weight * (align_world_loss + backwards_rays_loss)).mean()
-        normal_loss = (weight * (align_world_loss)).mean()
         backwards_rays_loss = (weight * (backwards_rays_loss)).mean()
 
         # calculate depth
@@ -690,8 +693,8 @@ class TensorNeRF(torch.nn.Module):
             v_world_normal_map = torch.sum(weight[..., None] * v_world_normal, 1)
             v_world_normal_map = v_world_normal_map / (torch.linalg.norm(d_world_normal_map, dim=-1, keepdim=True)+1e-8)
             d_normal_map = torch.matmul(row_basis, d_world_normal_map.unsqueeze(-1)).squeeze(-1)
-            # p_normal_map = torch.matmul(
-            #     row_basis, p_world_normal_map.unsqueeze(-1)).squeeze(-1)
+            p_normal_map = torch.matmul(
+                row_basis, p_world_normal_map.unsqueeze(-1)).squeeze(-1)
             v_normal_map = torch.matmul(row_basis, v_world_normal_map.unsqueeze(-1)).squeeze(-1)
 
             # # extract
@@ -720,7 +723,7 @@ class TensorNeRF(torch.nn.Module):
             rgb_map=rgb_map,
             depth_map=depth_map,
             debug_map=debug_map,
-            normal_map=v_normal_map.cpu(),
+            normal_map=p_normal_map.cpu(),
             acc_map=acc_map,
             normal_loss=normal_loss,
             backwards_rays_loss=backwards_rays_loss,

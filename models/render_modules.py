@@ -255,7 +255,7 @@ class DeepMLPNormal(torch.nn.Module):
     refpe: int
     featureC: int
     num_layers: int
-    def __init__(self, pospe=16, featureC=128, num_layers=2):
+    def __init__(self, pospe=16, in_channels=0, featureC=128, num_layers=2):
         super().__init__()
 
         self.in_mlpC = 2*pospe*3 + 3
@@ -271,17 +271,7 @@ class DeepMLPNormal(torch.nn.Module):
             torch.nn.Linear(featureC, 3),
             # torch.nn.ReLU(inplace=True),
         )
-        self.mlp1 = torch.nn.Sequential(
-            torch.nn.Linear(self.in_mlpC+featureC, featureC),
-            torch.nn.ReLU(inplace=True),
-            torch.nn.Linear(featureC, featureC),
-            torch.nn.ReLU(inplace=True),
-            torch.nn.Linear(featureC, featureC),
-            torch.nn.ReLU(inplace=True),
-            torch.nn.Linear(featureC, 3)
-        )
         self.mlp0.apply(self.init_weights)
-        self.mlp1.apply(self.init_weights)
 
     def init_weights(self, m):
         if isinstance(m, nn.Linear):
@@ -297,7 +287,8 @@ class DeepMLPNormal(torch.nn.Module):
         x1 = self.mlp0(x0)
         # x2 = torch.cat([x0, x1], dim=-1)
         # x3 = self.mlp1(x2)
-        normals = torch.sin(x1)
+        # normals = torch.sin(x1)
+        normals = x1
         normals = normals / torch.norm(normals, dim=-1, keepdim=True)
 
         return normals
