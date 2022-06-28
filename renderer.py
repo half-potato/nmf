@@ -32,7 +32,7 @@ def chunk_renderer(rays, tensorf, focal, keys=['rgb_map'], chunk=4096, **kwargs)
     return data
 
 class BundleRender:
-    def __init__(self, base_renderer, render_mode, H, W, focal, bundle_size=1, chunk=2*512, scale_normal=False):
+    def __init__(self, base_renderer, render_mode, H, W, focal, bundle_size=1, chunk=8*512, scale_normal=False):
         self.render_mode = render_mode
         self.base_renderer = base_renderer
         self.bundle_size = bundle_size
@@ -216,7 +216,7 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
             rgb_map = np.concatenate((rgb_map, depth_map), axis=1)
             imageio.imwrite(f'{savePath}/rgbd/{prtx}{idx:03d}.png', rgb_map)
             imageio.imwrite(f'{savePath}/rgbd/{prtx}normal_{idx:03d}.png', normal_map)
-            imageio.imwrite(f'{savePath}/rgbd/{prtx}debug_{idx:03d}.png', debug_map.numpy().astype(np.uint8))
+            imageio.imwrite(f'{savePath}/rgbd/{prtx}debug_{idx:03d}.png', (255*debug_map.numpy()).astype(np.uint8))
             imageio.imwrite(f'{savePath}/envmaps/{prtx}ref_map_{idx:03d}.png', env_map)
             imageio.imwrite(f'{savePath}/envmaps/{prtx}view_map_{idx:03d}.png', col_map)
 

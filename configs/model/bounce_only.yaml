@@ -20,7 +20,7 @@ rf:
   # appearance_n_comp: 48
   # app_dim: 48
   appearance_n_comp: 48
-  app_dim: 8
+  app_dim: 48
   step_ratio: 0.5
   density_res_multi: 1
   contract_space: False
@@ -35,7 +35,7 @@ bg_module:
   #   _target_: models.ish.ISH
   #   max_degree: 6
   # bg_resolution: [4096, 2048]
-  bg_resolution: 256
+  bg_resolution: 4096
 
 diffuse_module:
   _partial_: True
@@ -46,7 +46,7 @@ diffuse_module:
   #   _target_: models.ish.ISH
   #   max_degree: 6
   featureC: 128
-  num_layers: 0
+  num_layers: 2
 
 # ref_module:
 #   _partial_: True
@@ -63,18 +63,10 @@ diffuse_module:
 #   featureC: 128
 #   num_layers: 3
 
-# normal_module:
-#   _partial_: True
-#   _target_: models.render_modules.MLPNormal
-#   pospe: 0
-#   feape: 2
-#   featureC: 128
-#   num_layers: 1
-
-
 normal_module:
   _partial_: True
-  _target_: models.render_modules.DeepMLPNormal
-  pospe: 16
-  featureC: 256
-  num_layers: 5
+  _target_: models.render_modules.MLPNormal
+  pospe: 0
+  feape: 2
+  featureC: 128
+  num_layers: 1

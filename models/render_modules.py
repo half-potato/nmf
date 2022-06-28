@@ -180,7 +180,7 @@ class MLPDiffuse(torch.nn.Module):
                         torch.nn.Linear(featureC, featureC),
                     ] for _ in range(num_layers)], []),
                 torch.nn.ReLU(inplace=True),
-                torch.nn.Linear(featureC, 8),
+                torch.nn.Linear(featureC, 10),
             )
             torch.nn.init.constant_(self.mlp[-1].bias, 0)
         else:
@@ -204,12 +204,14 @@ class MLPDiffuse(torch.nn.Module):
         mlp_out = self.mlp(mlp_in)
         rgb = torch.sigmoid(mlp_out)
 
-        roughness = rgb[..., 6:7]*self.max_roughness
-        refraction_index = F.softplus(mlp_out[..., 7:8]) + self.min_refraction_index
+        roughness = torch.sigmoid(mlp_out[..., 6:7]+1) * self.max_roughness
+        refraction_index = F.softplus(mlp_out[..., 7:8]-1) + self.min_refraction_index
+        reflectivity = rgb[..., 8:9]
+        diffuse_ratio = torch.sigmoid(mlp_out[..., 9:10])
         tint = rgb[..., 3:6] 
         diffuse = rgb[..., :3] 
 
-        return diffuse, tint, roughness, refraction_index
+        return diffuse, tint, roughness, refraction_index, reflectivity, diffuse_ratio
 
 class MLPRender_Fea(torch.nn.Module):
     in_channels: int
@@ -335,6 +337,20 @@ class MLPNormal(torch.nn.Module):
         normals = self.mlp(mlp_in)
         normals = normals / torch.norm(normals, dim=-1, keepdim=True)
 
+        return normals
+
+class AppDimNormal(torch.nn.Module):                                                                                                                                                                               
+    def __init__(self, in_channels=0, activation=torch.nn.Identity):                                                                                                                                                                             
+        super().__init__()                                                                                                                                                                                         
+        self.activation = activation()
+                                                                                                                                                                                                                   
+    def forward(self, pts, features, **kwargs):                                                                                                                                                                    
+        start_ind = 10                                                                                                                                                                                              
+        # raw_norms = features[..., start_ind:start_ind+3]                                                                                                                                                           
+        raw_norms = features[..., start_ind:start_ind+3]
+        # raw_norms = 2*torch.sigmoid(raw_norms)-1
+        raw_norms = self.activation(raw_norms)
+        normals = raw_norms / (torch.norm(raw_norms, dim=-1, keepdim=True) + 1e-8)
         return normals
 
 class MLPRender_PE(torch.nn.Module):

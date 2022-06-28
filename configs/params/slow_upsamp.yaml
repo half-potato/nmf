@@ -18,12 +18,12 @@ bg_upsamp_list: [300, 800, 1000, 3000]
 bg_upsamp_res: [256, 512, 1024, 2048, 4096]
 # bg_upsamp_lr: [0.03, 0.01, 0.005, 0.003, 0.001]
 bg_upsamp_lr: [0.03, 0.01, 0.005, 0.003, 0.001]
-upsamp_list: [3000,4000,5500,7000]
+upsamp_list: [13000,14000,15500,17000]
 #upsamp_list: [2000,3000,4000,5500,7000]
 #uplambda_list: [7000, 12000, 17000, 21000]
 #uplambda_list: [7000, 12000, 17000]
 uplambda_list: [7000, 10000, 12000]
-update_AlphaMask_list: [4000, 15000]
+update_AlphaMask_list: [14000, 25000]
 # update_AlphaMask_list: [30000]
 L1_weight_inital: 8e-5
 L1_weight_rest: 4e-5
@@ -40,4 +40,5 @@ envmap_train_start: 20
 # num_rays_per_envmap: 512
 num_rays_per_envmap: 64
 num_env_train_iters: 0
+
 

@@ -25,11 +25,70 @@ def snells_law(r, n, l):
     dtype = n.dtype
     n = n.double()
     l = l.double()
-    c = -torch.matmul(n.reshape(-1, 1, 3), l.reshape(-1, 3, 1)).reshape(*n.shape[:-1], 1)
-    sign = torch.sign(c)
-    return (r*l + (r*c.abs() - torch.sqrt( (1 - r**2 * (1-c**2)).clip(min=1e-8) )) * sign*n).type(dtype)
+
+#     Vec3f refract(const Vec3f &I, const Vec3f &N, const float &ior) 
+# { 
+#     float cosi = clamp(-1, 1, dotProduct(I, N)); 
+#     float etai = 1, etat = ior; 
+#     Vec3f n = N; 
+#     if (cosi < 0) { cosi = -cosi; } else { std::swap(etai, etat); n= -N; } 
+#     float eta = etai / etat; 
+#     float k = 1 - eta * eta * (1 - cosi * cosi); 
+#     return k < 0 ? 0 : eta * I + (eta * cosi - sqrtf(k)) * n; 
+# }
+
+    cosi = torch.matmul(n.reshape(-1, 1, 3), l.reshape(-1, 3, 1)).reshape(*n.shape[:-1], 1)
+    Nsign = torch.sign(cosi)
+    N = torch.where(cosi < 0, n, -n)
+    cosi = cosi * Nsign
+    R = torch.where(cosi < 0, 1/r, r)
+
+    k = 1 - R * R * (1 - cosi * cosi);
+    refractdir = R * l + (R * cosi - torch.sqrt(k.clip(min=0))) * N
+
+    # c = -torch.matmul(n.reshape(-1, 1, 3), l.reshape(-1, 3, 1)).reshape(*n.shape[:-1], 1)
+    # sign = torch.sign(c).abs()
+    # refractdir = (r*l + (r * c.abs() - torch.sqrt( (1 - r**2 * (1-c**2)).clip(min=1e-8) )) * sign*n)
+    return refractdir.type(dtype)
+
+def fresnel_law(ior1, ior2, n, l, o):
+    # input: 
+    #  n: (B, 3) surface outward normal
+    #  l: (B, 3) light direction towards surface
+    #  o: (B, 3) refracted light direction given by snells_law
+    #  ior1: index of refraction for material from which light was emitted
+    #  ior2: index of refraction for material after surface
+    # output:
+    #  ratio reflected, between 0 and 1
+    cos_i = torch.matmul(n.reshape(-1, 1, 3), l.reshape(-1, 3, 1)).reshape(*n.shape[:-1], 1)
+    cos_t = torch.matmul(n.reshape(-1, 1, 3), o.reshape(-1, 3, 1)).reshape(*n.shape[:-1], 1)
+    sin_t = torch.sqrt(1 - cos_t**2)
+    s_polar = (ior2 * cos_i - ior1 * cos_t) / (ior2 * cos_i + ior1 * cos_t)
+    p_polar = (ior2 * cos_t - ior1 * cos_i) / (ior2 * cos_t + ior1 * cos_i)
+    ratio_reflected = (s_polar + p_polar)/2
+    return torch.where(sin_t >= 1, torch.ones_like(ratio_reflected), ratio_reflected)
+
+def refract_reflect(ior1, ior2, n, l, p):
+    # n: (B, 3) surface outward normal
+    # l: (B, 3) light direction towards surface
+    # p: (B) reflectivity of material, between 0 and 1
+    # ior1: index of refraction for material from which light was emitted
+    # ior2: index of refraction for material after surface
+    ratio = ior2/ior1
+    o = snells_law(ratio, n, l)
+    ratio_reflected = fresnel_law(ior1, ior2, n, l, o)
+    ratio_refracted = 1 - ratio_reflected
+    out_ratio_reflected = 1 - p * ratio_refracted
+    return out_ratio_reflected
+
+
 
 def select_top_n_app_mask(app_mask, weight, prob, N, t=0):
+    # weight: (M)
+    # prob: (M)
+    # app_mask: (B, N) with M true elements
+    # N: int max number of selected
+    # t: threshold
     prob = prob.reshape(-1)
     M = prob.shape[0]
     bounce_mask = torch.zeros((M), dtype=bool, device=app_mask.device)
@@ -104,8 +163,9 @@ class AlphaGridMask(torch.nn.Module):
 class TensorNeRF(torch.nn.Module):
     def __init__(self, rf, grid_size, aabb, diffuse_module, normal_module=None, ref_module=None, bg_module=None,
                  alphaMask=None, near_far=[2.0, 6.0], nEnvSamples=100, specularity_threshold=0.005, max_recurs=0,
-                 max_normal_similarity=1, infinity_border=False, refraction_threshold=1.1, enable_refraction=True,
+                 max_normal_similarity=1, infinity_border=False, min_refraction=1.1, enable_refraction=True,
                  density_shift=-10, alphaMask_thres=0.001, distance_scale=25, rayMarch_weight_thres=0.0001,
+                 max_bounce_rays=4000, roughness_rays=4,
                  fea2denseAct='softplus', enable_alpha_mask=True):
         super(TensorNeRF, self).__init__()
         self.rf = rf(aabb=aabb, grid_size=grid_size)
@@ -117,21 +177,24 @@ class TensorNeRF(torch.nn.Module):
         self.alphaMask = alphaMask
         self.infinity_border = infinity_border
         self.enable_alpha_mask = enable_alpha_mask
-        self.enable_refraction = enable_refraction
 
         self.density_shift = density_shift
         self.alphaMask_thres = alphaMask_thres
         self.distance_scale = distance_scale
         self.rayMarch_weight_thres = rayMarch_weight_thres
         self.fea2denseAct = fea2denseAct
-        self.refraction_threshold = refraction_threshold
+
 
         self.near_far = near_far
+        self.nEnvSamples = nEnvSamples
 
+        self.min_refraction = min_refraction
+        self.enable_refraction = enable_refraction
+        self.roughness_rays = roughness_rays
         self.max_recurs = max_recurs
         self.specularity_threshold = specularity_threshold
-        self.max_bounce_rays = 100
-        self.nEnvSamples = nEnvSamples
+        self.max_bounce_rays = max_bounce_rays
+
 
         f_blur = torch.tensor([1, 2, 1]) / 4
         f_edge = torch.tensor([-1, 0, 1]) / 2
@@ -432,7 +495,7 @@ class TensorNeRF(torch.nn.Module):
                 -1, 3), roughness=roughness).reshape(res, 2*res, 3)
         else:
             envmap = torch.zeros(res, 2*res, 3)
-        color, tint, _, _ = self.diffuse_module(xyz_samp, ang_vecs.reshape(-1, 3), app_features)
+        color, tint, _, _, _, _ = self.diffuse_module(xyz_samp, ang_vecs.reshape(-1, 3), app_features)
         color = color.reshape(res, 2*res, 3)
         
         return envmap, color
@@ -442,6 +505,13 @@ class TensorNeRF(torch.nn.Module):
         at_infinity = torch.linalg.norm(
             xyz_sampled, dim=-1, ord=torch.inf).abs() >= margin
         return at_infinity
+
+    def roughness2noisestd(self, roughness):
+        return roughness
+        slope = 6
+        zero_point = 0.001
+        offset = math.exp(slope*(zero_point-1))
+        return torch.exp(slope*(roughness-1)).clip(min=0, max=1) - offset
 
     def forward(self, rays_chunk, focal, recur=0, init_refraction_index=1, output_alpha=None, white_bg=True, is_train=False, ndc_ray=False, N_samples=-1):
         # rays_chunk: (N, 6)
@@ -462,6 +532,7 @@ class TensorNeRF(torch.nn.Module):
             dists = torch.cat(
                 (z_vals[:, 1:] - z_vals[:, :-1], torch.zeros_like(z_vals[:, :1])), dim=-1)
 
+        ray_valid |= True
         # xyz_sampled_shape: (N, N_samples, 3+1)
         # z_vals.shape: (N, N_samples)
         # ray_valid.shape: (N, N_samples)
@@ -538,7 +609,8 @@ class TensorNeRF(torch.nn.Module):
 
         # app stands for appearance
         app_mask = (weight > self.rayMarch_weight_thres)
-        debug = torch.zeros((B, n_samples, 3), dtype=torch.short, device=device)
+        # debug = torch.zeros((B, n_samples, 3), dtype=torch.short, device=device)
+        debug = torch.zeros((B, n_samples, 3), dtype=torch.float, device=device)
 
         if app_mask.any():
             #  Compute normals for app mask
@@ -569,11 +641,9 @@ class TensorNeRF(torch.nn.Module):
 
             # get base color of the point
             app_features = self.rf.compute_appfeature(xyz_normed[app_mask])
-            diffuse, tint, roughness, refraction_index = self.diffuse_module(
+            diffuse, tint, roughness, refraction_index, reflectivity, ratio_diffuse = self.diffuse_module(
                 xyz_normed[app_mask], viewdirs[app_mask], app_features)
-
-            
-            rgb[app_mask] = diffuse.type(rgb.dtype)
+            diffuse = diffuse.type(rgb.dtype)
 
             # interpolate between the predicted and world normals
             if self.normal_module is not None:
@@ -588,75 +658,122 @@ class TensorNeRF(torch.nn.Module):
             # calculate reflected ray direction
             refdirs = viewdirs - 2 * \
                 (viewdirs * v_world_normal).sum(-1, keepdim=True) * v_world_normal
+            cosref = torch.matmul(refdirs.reshape(-1, 1, 3), v_world_normal.reshape(-1, 3, 1)).reshape(*viewdirs.shape[:-1], 1)
+            # refdirs = torch.sign(cosref) * refdirs
 
-            # calculate refracted ray direction
-            density_ratio = (
-                init_refraction_index.expand(app_mask.shape)[app_mask].reshape(-1, 1)
-                if torch.is_tensor(init_refraction_index)
-                else init_refraction_index
-            )/refraction_index
+            ior1 = init_refraction_index.expand(app_mask.shape)[app_mask].reshape(-1, 1) \
+                   if torch.is_tensor(init_refraction_index) \
+                   else init_refraction_index
+            ior2 = refraction_index
 
-            refractdirs = snells_law(density_ratio, -v_world_normal[app_mask], viewdirs[app_mask])
-            if recur < self.max_recurs and self.enable_refraction:
+            # calculated interpolated snell's law
+            n = -v_world_normal[app_mask]
+            l = viewdirs[app_mask]
+            density_ratio = ior2/ior1
+            # refractdirs = snells_law(density_ratio, n, l)
+            # ratio_reflected = fresnel_law(ior1, ior2, n, l, refractdirs)
+            # snell's law
+            cos_i = torch.matmul(n.reshape(-1, 1, 3), l.reshape(-1, 3, 1)).reshape(*n.shape[:-1], 1)
+            Nsign = torch.sign(cos_i)
+            N = torch.where(cos_i < 0, n, -n)
+            cos_i = cos_i * Nsign
+            R = torch.where(cos_i < 0, 1/density_ratio, density_ratio)
+
+            k = 1 - R * R * (1 - cos_i * cos_i);
+            refractdirs = R * l + (R * cos_i - torch.sqrt(k.clip(min=0))) * N
+
+            # compute fresnel_law
+            cos_t = torch.matmul(n.reshape(-1, 1, 3), refractdirs.reshape(-1, 3, 1)).reshape(*n.shape[:-1], 1)
+            sin_t = torch.sqrt(1 - cos_t**2)
+            s_polar = (ior2 * cos_i - ior1 * cos_t) / (ior2 * cos_i + ior1 * cos_t)
+            p_polar = (ior2 * cos_t - ior1 * cos_i) / (ior2 * cos_t + ior1 * cos_i)
+            ratio_reflected = (s_polar + p_polar)/2
+            ratio_reflected = torch.where((sin_t >= 1) | (k > 0), torch.ones_like(ratio_reflected), ratio_reflected)
+            ratio_reflected *= 0
+
+            # beyond a certain roughness, it's probably better to try and do view dependent color
+            # ratio_diffuse = roughness
+            ratio_refracted = (1-ratio_diffuse) * (1-reflectivity) * (1 - ratio_reflected)
+            ratio_reflected = (1-ratio_diffuse) * (1 - ratio_refracted)
+            # ic(ratio_reflected.min(), ratio_diffuse.max(), ratio_refracted.max(), reflectivity.max(), ratio_reflected.max(), ratio_diffuse.min())
+            # ic(reflected)
+
+            refract_rgb = torch.zeros_like(diffuse)
+            reflect_rgb = torch.zeros_like(diffuse)
+
+            M = diffuse.shape[0]
+            if recur < self.max_recurs:
                 # compute which rays to refract
-                prob = torch.maximum(density_ratio, 1/(density_ratio+1e-8)).flatten()
-                hard_weight = (prob - self.refraction_threshold)/(1.7 - self.refraction_threshold)
-                # refraction_weight = (hard_weight.clip(min=1e-8, max=3).log() + 1).clip(min=0, max=1)
-                refraction_weight = hard_weight.clip(min=0, max=1)
-                # ic(refraction_weight.min())
-                rbounce_mask, rfull_bounce_mask, rinv_full_bounce_mask = select_top_n_app_mask(app_mask, weight[app_mask], refraction_weight, self.max_bounce_rays, 0.01)
-                # ic(refractdirs[rbounce_mask], viewdirs[rfull_bounce_mask], refraction_index[rbounce_mask])
-                # ic(snells_law(1, -v_world_normal[app_mask], viewdirs[app_mask])[rbounce_mask])
-                # ic(snells_law(1.2, -v_world_normal[app_mask], viewdirs[app_mask])[rbounce_mask])
+                rbounce_mask, rfull_bounce_mask, rinv_full_bounce_mask = select_top_n_app_mask(app_mask, weight[app_mask], ratio_refracted, self.max_bounce_rays, 0.01)
                 if rbounce_mask.sum() > 0:
-                    # ic(refraction_weight.mean(), rbounce_mask.sum())
-                    debug[..., 0][rfull_bounce_mask] = 1
+                    # debug[..., 0][rfull_bounce_mask] = 1
                     # decide how many bounces to calculate
                     rbounce_rays = torch.cat([
-                        xyz_sampled[rfull_bounce_mask][..., :3],
+                        xyz_sampled[rfull_bounce_mask][..., :3] + 0.1*refractdirs[rbounce_mask],
                         refractdirs[rbounce_mask],
                         rays_up[rfull_bounce_mask]
                     ], dim=-1)
-                    refract_data = self(rbounce_rays, focal, recur=recur+1, init_refraction_index=refraction_index[rbounce_mask], white_bg=white_bg,
+
+                    # add noise to simulate roughness
+                    D = rbounce_rays.shape[-1]
+                    ray_noise = torch.normal(0, 1, (rbounce_rays.shape[0], self.roughness_rays, 3), device=device) * self.roughness2noisestd(roughness[rbounce_mask].reshape(-1, 1, 1))
+                    rbounce_rays = rbounce_rays.reshape(-1, 1, D).repeat(1, self.roughness_rays, 1)
+                    noise_rays = rbounce_rays[..., 3:6] + ray_noise
+                    rbounce_rays[..., 3:6] = noise_rays / (torch.linalg.norm(noise_rays, dim=-1, keepdim=True)+1e-8)
+
+                    rinit_refraction_index = refraction_index[rbounce_mask]
+                    rinit_refraction_index = rinit_refraction_index.reshape(-1, 1).repeat(1, self.roughness_rays).reshape(-1)
+                    refract_data = self(rbounce_rays.reshape(-1, D), focal, recur=recur+1, init_refraction_index=init_refraction_index, white_bg=white_bg,
                                     is_train=is_train, ndc_ray=ndc_ray, N_samples=N_samples)
 
-                    # the darker the glass, the more light is absorbed
-                    brightness = torch.linalg.norm(diffuse[rbounce_mask], dim=-1, keepdim=True)/math.sqrt(2)
-                    rgb[rfull_bounce_mask] += brightness * refraction_weight[..., None][rbounce_mask] * refract_data['rgb_map']
+                    refract_col = refract_data['rgb_map'].reshape(-1, self.roughness_rays, 3).mean(dim=1)
+
+                    refract_rgb[rbounce_mask] = refract_col
+                    debug[rfull_bounce_mask] = ratio_refracted[rbounce_mask] * refract_col
 
 
-            # ===================================================
-            M = diffuse.shape[0]
-            if recur < self.max_recurs:
                 # compute which rays to reflect
-                prob = torch.linalg.norm(tint, dim=-1).reshape(-1)
-                prob = 1-roughness
-                bounce_mask, full_bounce_mask, inv_full_bounce_mask = select_top_n_app_mask(app_mask, weight[app_mask], prob, self.max_bounce_rays, self.specularity_threshold)
+                bounce_mask, full_bounce_mask, inv_full_bounce_mask = select_top_n_app_mask(app_mask, weight[app_mask], ratio_reflected, self.max_bounce_rays, self.specularity_threshold)
 
                 if bounce_mask.sum() > 0:
-                    debug[..., 1][full_bounce_mask] = 1
+                    # debug[..., 1][full_bounce_mask] = 1
                     # decide how many bounces to calculate
                     bounce_rays = torch.cat([
-                        xyz_sampled[full_bounce_mask][..., :3],
+                        xyz_sampled[full_bounce_mask][..., :3] + 0.15 * refdirs[full_bounce_mask],
                         refdirs[full_bounce_mask],
                         rays_up[full_bounce_mask]
                     ], dim=-1)
-                    ref_data = self(bounce_rays, focal, recur=recur+1, white_bg=white_bg,
+
+                    # add noise to simulate roughness
+                    D = bounce_rays.shape[-1]
+                    ray_noise = torch.normal(0, 1, (bounce_rays.shape[0], self.roughness_rays, 3), device=device) * self.roughness2noisestd(roughness[bounce_mask].reshape(-1, 1, 1))
+                    bounce_rays = bounce_rays.reshape(-1, 1, D).repeat(1, self.roughness_rays, 1)
+                    noise_rays = bounce_rays[..., 3:6] + ray_noise
+                    bounce_rays[..., 3:6] = noise_rays / (torch.linalg.norm(noise_rays, dim=-1, keepdim=True)+1e-8)
+
+                    ref_data = self(bounce_rays.reshape(-1, D), focal, recur=recur+1, white_bg=white_bg,
                                     is_train=is_train, ndc_ray=ndc_ray, N_samples=N_samples)
 
-                    rgb[full_bounce_mask] += (1-roughness[bounce_mask]) * tint[bounce_mask] * ref_data['rgb_map']
-                elif self.ref_module is not None and inv_full_bounce_mask.any():
-                    # compute other reflections using ref module
-                    rgb[inv_full_bounce_mask] = (1-roughness[bounce_mask]) * tint[~bounce_mask] * self.ref_module(
-                        xyz_normed[inv_full_bounce_mask], viewdirs[inv_full_bounce_mask],
-                        app_features[~bounce_mask], refdirs=refdirs[inv_full_bounce_mask],
-                        roughness=roughness[~bounce_mask])
-            elif self.ref_module is not None:
-                ref_rgbs = self.ref_module(
-                    xyz_normed[app_mask], viewdirs[app_mask],
-                    app_features, refdirs=refdirs[app_mask],
-                    roughness=roughness)#.detach()
-                rgb[app_mask] += (tint * ref_rgbs).type(rgb.dtype)
+                    ref_rgb = ref_data['rgb_map'].reshape(-1, self.roughness_rays, 3).mean(dim=1)
+                    tinted_ref_rgb = (diffuse[bounce_mask] * ref_rgb).clip(min=0, max=1)
+                    debug[full_bounce_mask] = ratio_reflected[bounce_mask] * ref_rgb
+                    reflect_rgb[bounce_mask] = tinted_ref_rgb
+
+                # elif self.ref_module is not None and inv_full_bounce_mask.any():
+                #     # compute other reflections using ref module
+                #     ref_rgb = self.ref_module(
+                #         xyz_normed[inv_full_bounce_mask], viewdirs[inv_full_bounce_mask],
+                #         app_features[~bounce_mask], refdirs=refdirs[inv_full_bounce_mask],
+                #         roughness=roughness[~bounce_mask])
+                #     tinted_ref_rgb = (1-roughness[~bounce_mask]) * tint[~bounce_mask] * ref_data['rgb_map']
+                #     rgb[inv_full_bounce_mask] = tinted_ref_rgb
+            # elif self.ref_module is not None:
+            #     ref_rgbs = self.ref_module(
+            #         xyz_normed[app_mask], viewdirs[app_mask],
+            #         app_features, refdirs=refdirs[app_mask],
+            #         roughness=roughness)#.detach()
+            #     rgb[app_mask] += (tint * ref_rgbs).type(rgb.dtype)
+            rgb[app_mask] = ratio_diffuse * diffuse + ratio_reflected * reflect_rgb + ratio_refracted * refract_rgb
 
             align_world_loss = -(p_world_normal[app_mask] * world_normal[app_mask]).sum(dim=-1).clamp(max=self.max_normal_similarity)
             normal_loss = (weight[app_mask] * (align_world_loss)).mean()
@@ -681,9 +798,9 @@ class TensorNeRF(torch.nn.Module):
             # view dependent normal map
             # N, 3, 3
             row_basis = torch.stack([
-                -torch.cross(viewdirs[:, 0], rays_up[:, 0]),
+                torch.cross(viewdirs[:, 0], rays_up[:, 0]),
                 viewdirs[:, 0],
-                rays_up[:, 0],
+                -rays_up[:, 0],
             ], dim=1)
             p_world_normal_map = torch.sum(weight[..., None] * p_world_normal, 1)
             p_world_normal_map = p_world_normal_map / \
@@ -718,12 +835,13 @@ class TensorNeRF(torch.nn.Module):
         # process debug to turn it into map
         # 1 = refracted. -1 = reflected
         # we want to represent these two values by represnting them in the 1s and 10s place
-        debug_map = debug.sum(dim=1)
+        debug_map = (weight[..., None]*debug).sum(dim=1).clamp(0, 1)
         return dict(
             rgb_map=rgb_map,
             depth_map=depth_map,
             debug_map=debug_map,
-            normal_map=p_normal_map.cpu(),
+            normal_map=v_normal_map.cpu(),
+            # normal_map=v_world_normal_map.cpu(),
             acc_map=acc_map,
             normal_loss=normal_loss,
             backwards_rays_loss=backwards_rays_loss,

@@ -64,12 +64,14 @@ class GridSampler2D(torch.autograd.Function):
         grad_grid = None
         if ctx.needs_input_grad[1]:
             f_blur = torch.tensor([0, 1, 0], device=grid.device)
-            f_edge = torch.tensor([-1, 0, 1], device=grid.device) / 2
+            f_edge = torch.tensor([1, 0, -1], device=grid.device) / 2
+            # f_blur = torch.tensor([0.5, 0.5], device=grid.device)
+            # f_edge = torch.tensor([-1, 1], device=grid.device) / 2
             l = len(f_blur)
             dy_filter = (f_blur[None, :] * f_edge[:, None]).reshape(1, 1, l, l)
             dx_filter = dy_filter.permute(0, 1, 3, 2)
 
-            smooth_kern = gkern(2*int(ctx.smoothing)+3, std=ctx.smoothing+1e-8, device=grad_output.device)
+            smooth_kern = gkern(2*int(ctx.smoothing)+1, std=ctx.smoothing+1e-8, device=grad_output.device)
             sm_dx_filter = combine_kernels2d(smooth_kern, dx_filter)
             sm_dy_filter = combine_kernels2d(smooth_kern, dy_filter)
             s = sm_dx_filter.shape[-1]
@@ -125,7 +127,7 @@ class GridSampler1D(torch.autograd.Function):
         smoothing = ctx.smoothing
         grad_grid = None
         if ctx.needs_input_grad[1]:
-            f_edge = torch.tensor([-1, 0, 1]) / 2
+            f_edge = torch.tensor([1, 0, -1]) / 2
             l = len(f_edge)
 
             dz_filter = f_edge.reshape(1, 1, l)

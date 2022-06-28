@@ -1,12 +1,13 @@
-from tkinter import W
 from .tensor_base import TensorBase
 import torch
 import torch.nn.functional as F
 from icecream import ic
-import time
 from .convolver import Convolver
 from .grid_sample_Cinf import grid_sample
 
+# here is original grid sample derivative for testing
+# def grid_sample(*args, smoothing, **kwargs):
+#     return F.grid_sample(*args, **kwargs)
 
 def d_softplus(x, beta=1.0, shift=-10):
     return torch.exp(shift+beta*x) / (1.0 + torch.exp(shift+beta*x))

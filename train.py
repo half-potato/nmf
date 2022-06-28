@@ -1,11 +1,6 @@
-import cv2
 import os
-import torchvision
 from tqdm.auto import tqdm
 from models.tensor_nerf import TensorNeRF
-
-
-
 from renderer import *
 from utils import *
 from torch.utils.tensorboard import SummaryWriter
@@ -14,15 +9,11 @@ from omegaconf import DictConfig, OmegaConf
 
 from dataLoader import dataset_dict
 import sys
-
-import time
-
-import matplotlib.pyplot as plt
-
-from torch.profiler import profile, record_function, ProfilerActivity
-
 import hydra
 from omegaconf import OmegaConf
+
+# from torch.profiler import profile, record_function, ProfilerActivity
+
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -47,27 +38,28 @@ class SimpleSampler:
 
 @torch.no_grad()
 def render_test(args):
-    # init dataset
-    dataset = dataset_dict[args.dataset_name]
-    test_dataset = dataset(os.path.join(args.datadir, args.dataset.scenedir), split='test', downsample=args.downsample_train, is_stack=True)
-    white_bg = test_dataset.white_bg
-    ndc_ray = args.dataset.ndc_ray
-
     if not os.path.exists(args.ckpt):
         print('the ckpt path does not exists!!')
         return
 
     ckpt = torch.load(args.ckpt)
+    ckpt['config']['bg_module']['bg_resolution'] = ckpt['state_dict']['bg_module.bg_mat'].shape[-1]
     tensorf = TensorNeRF.load(ckpt).to(device)
     tensorf.rf.set_smoothing(1)
+
+    # init dataset
+    dataset = dataset_dict[args.dataset.dataset_name]
+    test_dataset = dataset(os.path.join(args.datadir, args.dataset.scenedir), split='test', downsample=args.dataset.downsample_train, is_stack=True)
+    white_bg = test_dataset.white_bg
+    ndc_ray = args.dataset.ndc_ray
 
     logfolder = os.path.dirname(args.ckpt)
     if args.render_train:
         os.makedirs(f'{logfolder}/imgs_train_all', exist_ok=True)
-        train_dataset = dataset(os.path.join(args.datadir, args.dataset.scenedir), split='train', downsample=args.downsample_train, is_stack=True)
+        train_dataset = dataset(os.path.join(args.datadir, args.dataset.scenedir), split='train', downsample=args.dataset.downsample_train, is_stack=True)
         PSNRs_test = evaluation(train_dataset,tensorf, args, renderer, f'{logfolder}/imgs_train_all/',
                                 N_vis=-1, N_samples=-1, white_bg = white_bg, ndc_ray=ndc_ray,device=device,
-                                bundle_size=args.bundle_size, render_mode=args.render_mode)
+                                render_mode=args.render_mode)
         print(f'======> {args.expname} train all psnr: {np.mean(PSNRs_test)} <========================')
 
     if args.render_test:
@@ -76,7 +68,7 @@ def render_test(args):
         print(f"Saving test to {folder}")
         evaluation(test_dataset,tensorf, args, renderer, folder,
                    N_vis=-1, N_samples=-1, white_bg = white_bg, ndc_ray=ndc_ray,device=device,
-                   bundle_size=args.bundle_size, render_mode=args.render_mode)
+                   render_mode=args.render_mode)
 
     #  if args.render_path:
     #      c2ws = test_dataset.render_path
