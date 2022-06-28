@@ -51,6 +51,7 @@ def main(cfg: DictConfig):
     tensorf.normal_module = render_modules.DeepMLPNormal(pospe=16, num_layers=3).to(device)
     tensorf.rf.basis_mat = AddBasis(48)
     tensorf.alphaMask = None
+    tensorf.max_recurs = 3
 
     # tensorf.rf.density_plane[i][:, :, 40:100, 40:100] += 1
     # tensorf.rf.density_line[i][:, :, ind:ind+8] += 100
@@ -62,8 +63,12 @@ def main(cfg: DictConfig):
     row, col, line = torch.meshgrid(torch.linspace(-d, d, H, device=device), torch.linspace(-d, d, W, device=device), torch.linspace(-d, d, H, device=device), indexing='ij')
 
     dist = torch.sqrt(row**2 + col**2 + line**2)
+    inner_r = 0.13
+    outer_r = 0.2
+    eps = 0.0
 
-    optim = torch.optim.Adam(tensorf.parameters(), lr=1e-1)
+    # train shape
+    optim = torch.optim.Adam(tensorf.parameters(), lr=3e-1)
     with torch.enable_grad():
         for _ in tqdm(range(50)):
             ox, oy, oz = torch.rand(3, H, W, H, device=device)/H
@@ -72,54 +77,69 @@ def main(cfg: DictConfig):
             z = (line+oz)
             xyz = torch.stack([x, y, z, torch.zeros_like(x)], dim=-1).reshape(-1, 4)
             dist = torch.sqrt(x**2 + y**2 + z**2).reshape(-1)
-            mask = (dist < 0.2)
+            # mask = (dist < 0.2)
+            mask = (dist < outer_r) & (dist > inner_r) & (y.reshape(-1) > 0)
             feat = tensorf.rf.compute_densityfeature(xyz)
             sigma_feat = tensorf.feature2density(feat)
-
-            world_loss = 0
-            # """
-            # shell = (dist < 0.2) & (dist > 0.19)
-            # app_features = tensorf.rf.compute_appfeature(xyz[shell])
-            # p_norm = tensorf.normal_module(xyz[shell], app_features)
-            # gt_norm = xyz[shell, :3] / (torch.linalg.norm(xyz[shell, :3], dim=1, keepdim=True)+1e-10)
-            # world_loss = -(p_norm * gt_norm).sum(dim=-1).sum()
-            # """
 
 
             # sigma = 1-torch.exp(-sigma_feat * 0.025)
             sigma = 1-torch.exp(-sigma_feat)
             loss = (-sigma[mask].clip(max=200).sum() + sigma[~mask].clip(min=0).sum())
-            loss = loss + world_loss
             optim.zero_grad()
             loss.backward()
             optim.step()
 
     optim = torch.optim.Adam(tensorf.parameters(), lr=3e-2)
-    # optim = torch.optim.Adam(tensorf.parameters(), lr=3e-3)
     with torch.enable_grad():
-        for _ in tqdm(range(100)):
+        for _ in tqdm(range(50)):
             ox, oy, oz = torch.rand(3, H, W, H, device=device)/H
             y = (col+oy)
             x = (row+ox)
             z = (line+oz)
             xyz = torch.stack([x, y, z, torch.zeros_like(x)], dim=-1).reshape(-1, 4)
             dist = torch.sqrt(x**2 + y**2 + z**2).reshape(-1)
-            mask = (dist < 0.2)
+            full_shell = (dist < outer_r + eps) & (dist > inner_r - eps)
+            app_features = tensorf.rf.compute_appfeature(xyz[full_shell])
+            p_norm = tensorf.normal_module(xyz[full_shell], app_features)
+            gt_norm = xyz[full_shell, :3] / (torch.linalg.norm(xyz[full_shell, :3], dim=1, keepdim=True)+1e-10)
+            world_loss = -(p_norm * gt_norm).sum(dim=-1).sum()
+            optim.zero_grad()
+            world_loss.backward()
+            optim.step()
+
+    # train normals and appearance
+    optim = torch.optim.Adam(tensorf.parameters(), lr=7e-1)
+    with torch.enable_grad():
+        for _ in tqdm(range(50)):
+            ox, oy, oz = torch.rand(3, H, W, H, device=device)/H
+            y = (col+oy)
+            x = (row+ox)
+            z = (line+oz)
+            xyz = torch.stack([x, y, z, torch.zeros_like(x)], dim=-1).reshape(-1, 4)
+            dist = torch.sqrt(x**2 + y**2 + z**2).reshape(-1)
+            mask = (dist < outer_r + eps)
             app_features = tensorf.rf.compute_appfeature(xyz[mask])
             diffuse, tint, roughness, refraction_index, reflectivity, ratio_diffuse = tensorf.diffuse_module(
                 xyz[mask], None, app_features)
 
-            shell = (dist[mask] > 0.18)
-            full_shell = (dist < 0.2) & (dist > 0.18)
-            p_norm = tensorf.normal_module(xyz[mask][shell], app_features[shell])
-            gt_norm = xyz[full_shell, :3] / (torch.linalg.norm(xyz[full_shell, :3], dim=1, keepdim=True)+1e-10)
-            world_loss = -(p_norm * gt_norm).sum(dim=-1).sum()
-
-            # diffuse = 1
-            loss = (diffuse - 1)**2 + (roughness - 0.0)**2 + (refraction_index - 1.4)**2 + (reflectivity - 0.01)**2 + (ratio_diffuse - 0.00)**2
+            # shell = (dist[mask] > inner_r - eps)
+            # full_shell = (dist < outer_r + eps) & (dist > inner_r - eps)
+            # p_norm = tensorf.normal_module(xyz[mask][shell], app_features[shell])
+            # gt_norm = xyz[full_shell, :3] / (torch.linalg.norm(xyz[full_shell, :3], dim=1, keepdim=True)+1e-10)
+            # world_loss = -(p_norm * gt_norm).sum(dim=-1).sum()
+            
+            loss = (diffuse - 1)**2 + (roughness - 0.0)**2 + (refraction_index - 1.4)**2 + (reflectivity - 0.00)**2 + (ratio_diffuse - 0.00)**2
             optim.zero_grad()
-            (loss.mean() + world_loss).backward()
+            loss.mean().backward()
             optim.step()
+
+    # tensorf.save('diffuse_sphere.pth', cfg)
+
+    # for i in range(len(tensorf.rf.app_plane)):
+    #     tensorf.rf.app_plane[i][:, :6] = 2
+    #     tensorf.rf.app_plane[i][:, 48:48+6] = 2
+    #     tensorf.rf.app_plane[i][:, 48*2:48*2+6] = 2
 
     # init dataset
     dataset = dataset_dict[cfg.dataset.dataset_name]
