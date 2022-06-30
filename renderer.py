@@ -8,6 +8,7 @@ from dataLoader.ray_utils import ndc_rays_blender
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
 from icecream import ic
+from models.tensor_nerf import LOGGER
 
 def chunk_renderer(rays, tensorf, focal, keys=['rgb_map'], chunk=4096, **kwargs):
 
@@ -62,6 +63,9 @@ class BundleRender:
 
         data = self.base_renderer(rays, tensorf, keys=['depth_map', 'rgb_map', 'normal_map', 'acc_map', 'termination_xyz', 'debug_map'],
                                   focal=self.focal, chunk=self.chunk, **kwargs)
+
+        LOGGER.save('rays.pkl')
+        LOGGER.reset()
         rgb_map = data['rgb_map']
         depth_map = data['depth_map']
         normal_map = data['normal_map']

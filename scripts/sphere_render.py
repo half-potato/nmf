@@ -47,11 +47,13 @@ def main(cfg: DictConfig):
     ckpt['config']['bg_module']['bg_resolution'] = ckpt['state_dict']['bg_module.bg_mat'].shape[-1]
     tensorf = TensorNeRF.load(ckpt).to(device)
     tensorf.rf.set_smoothing(1)
+    tensorf.max_bounce_rays = 8000
     # tensorf.normal_module = render_modules.AppDimNormal(1, activation=torch.nn.Identity)
     tensorf.normal_module = render_modules.DeepMLPNormal(pospe=16, num_layers=3).to(device)
     tensorf.rf.basis_mat = AddBasis(48)
     tensorf.alphaMask = None
     tensorf.max_recurs = 3
+    tensorf.roughness_rays = 1
 
     # tensorf.rf.density_plane[i][:, :, 40:100, 40:100] += 1
     # tensorf.rf.density_line[i][:, :, ind:ind+8] += 100
@@ -77,29 +79,32 @@ def main(cfg: DictConfig):
             z = (line+oz)
             xyz = torch.stack([x, y, z, torch.zeros_like(x)], dim=-1).reshape(-1, 4)
             dist = torch.sqrt(x**2 + y**2 + z**2).reshape(-1)
-            # mask = (dist < 0.2)
-            mask = (dist < outer_r) & (dist > inner_r) & (y.reshape(-1) > 0)
+            mask = (dist < outer_r)
+            # mask = (dist < outer_r) & (dist > inner_r) & (y.reshape(-1) > 0)
             feat = tensorf.rf.compute_densityfeature(xyz)
             sigma_feat = tensorf.feature2density(feat)
 
 
             # sigma = 1-torch.exp(-sigma_feat * 0.025)
             sigma = 1-torch.exp(-sigma_feat)
-            loss = (-sigma[mask].clip(max=200).sum() + sigma[~mask].clip(min=0).sum())
+            loss = (-sigma[mask].clip(max=500).sum() + sigma[~mask].clip(min=-500).sum())
             optim.zero_grad()
             loss.backward()
             optim.step()
 
-    optim = torch.optim.Adam(tensorf.parameters(), lr=3e-2)
+    # train normals
+    optim = torch.optim.Adam(tensorf.parameters(), lr=5e-2)
     with torch.enable_grad():
-        for _ in tqdm(range(50)):
+        for _ in tqdm(range(150)):
             ox, oy, oz = torch.rand(3, H, W, H, device=device)/H
             y = (col+oy)
             x = (row+ox)
             z = (line+oz)
             xyz = torch.stack([x, y, z, torch.zeros_like(x)], dim=-1).reshape(-1, 4)
             dist = torch.sqrt(x**2 + y**2 + z**2).reshape(-1)
-            full_shell = (dist < outer_r + eps) & (dist > inner_r - eps)
+            # full_shell = (dist < outer_r + eps) & (dist > inner_r - eps)
+            full_shell = (dist < outer_r + eps)
+
             app_features = tensorf.rf.compute_appfeature(xyz[full_shell])
             p_norm = tensorf.normal_module(xyz[full_shell], app_features)
             gt_norm = xyz[full_shell, :3] / (torch.linalg.norm(xyz[full_shell, :3], dim=1, keepdim=True)+1e-10)
@@ -108,7 +113,7 @@ def main(cfg: DictConfig):
             world_loss.backward()
             optim.step()
 
-    # train normals and appearance
+    # train appearance
     optim = torch.optim.Adam(tensorf.parameters(), lr=7e-1)
     with torch.enable_grad():
         for _ in tqdm(range(50)):
@@ -129,7 +134,7 @@ def main(cfg: DictConfig):
             # gt_norm = xyz[full_shell, :3] / (torch.linalg.norm(xyz[full_shell, :3], dim=1, keepdim=True)+1e-10)
             # world_loss = -(p_norm * gt_norm).sum(dim=-1).sum()
             
-            loss = (diffuse - 1)**2 + (roughness - 0.0)**2 + (refraction_index - 1.4)**2 + (reflectivity - 0.00)**2 + (ratio_diffuse - 0.00)**2
+            loss = (diffuse - 1)**2 + (roughness - 0.00)**2 + (refraction_index - 1.7)**2 + (reflectivity - 0.00)**2 + (ratio_diffuse - 0.00)**2
             optim.zero_grad()
             loss.mean().backward()
             optim.step()
