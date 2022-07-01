@@ -47,12 +47,12 @@ def main(cfg: DictConfig):
     ckpt['config']['bg_module']['bg_resolution'] = ckpt['state_dict']['bg_module.bg_mat'].shape[-1]
     tensorf = TensorNeRF.load(ckpt).to(device)
     tensorf.rf.set_smoothing(1)
-    tensorf.max_bounce_rays = 8000
+    tensorf.max_bounce_rays = 16000
     # tensorf.normal_module = render_modules.AppDimNormal(1, activation=torch.nn.Identity)
     tensorf.normal_module = render_modules.DeepMLPNormal(pospe=16, num_layers=3).to(device)
     tensorf.rf.basis_mat = AddBasis(48)
     tensorf.alphaMask = None
-    tensorf.max_recurs = 3
+    tensorf.max_recurs = 9
     tensorf.roughness_rays = 1
 
     # tensorf.rf.density_plane[i][:, :, 40:100, 40:100] += 1
@@ -134,7 +134,7 @@ def main(cfg: DictConfig):
             # gt_norm = xyz[full_shell, :3] / (torch.linalg.norm(xyz[full_shell, :3], dim=1, keepdim=True)+1e-10)
             # world_loss = -(p_norm * gt_norm).sum(dim=-1).sum()
             
-            loss = (diffuse - 1)**2 + (roughness - 0.00)**2 + (refraction_index - 1.7)**2 + (reflectivity - 0.00)**2 + (ratio_diffuse - 0.00)**2
+            loss = (diffuse - 1)**2 + (roughness - 0.00)**2 + (refraction_index - 1.5)**2 + (reflectivity - 0.00)**2 + (ratio_diffuse - 0.00)**2
             optim.zero_grad()
             loss.mean().backward()
             optim.step()

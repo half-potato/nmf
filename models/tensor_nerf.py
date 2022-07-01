@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 import math
 from .logger import Logger
 
-LOGGER = Logger()
+LOGGER = Logger(enable=False)
 
 def snells_law(r, n, l):
     # n: (B, 3) surface outward normal
@@ -169,9 +169,9 @@ class AlphaGridMask(torch.nn.Module):
 class TensorNeRF(torch.nn.Module):
     def __init__(self, rf, grid_size, aabb, diffuse_module, normal_module=None, ref_module=None, bg_module=None,
                  alphaMask=None, near_far=[2.0, 6.0], nEnvSamples=100, specularity_threshold=0.005, max_recurs=0,
-                 max_normal_similarity=1, infinity_border=False, min_refraction=1.1, enable_refraction=True,
+                 max_normal_similarity=1, infinity_border=False, min_refraction=1.2, enable_refraction=True,
                  density_shift=-10, alphaMask_thres=0.001, distance_scale=25, rayMarch_weight_thres=0.0001,
-                 max_bounce_rays=4000, roughness_rays=4, bounce_min_weight=0.001,
+                 max_bounce_rays=4000, roughness_rays=3, bounce_min_weight=0.01,
                  fea2denseAct='softplus', enable_alpha_mask=True):
         super(TensorNeRF, self).__init__()
         self.rf = rf(aabb=aabb, grid_size=grid_size)
@@ -631,7 +631,8 @@ class TensorNeRF(torch.nn.Module):
         # ic(app_mask.sum())
         # debug = torch.zeros((B, n_samples, 3), dtype=torch.short, device=device)
         debug = torch.zeros((B, n_samples, 3), dtype=torch.float, device=device)
-        depth_map = torch.sum(weight * z_vals, 1)
+        recur_depth = z_vals.clone()
+        depth_map = torch.sum(weight * recur_depth, 1)
         acc_map = torch.sum(weight, 1)
         depth_map = depth_map + (1. - acc_map) * rays_chunk[..., -1]
 
@@ -672,7 +673,9 @@ class TensorNeRF(torch.nn.Module):
             if self.normal_module is not None:
                 p_world_normal[app_mask] = self.normal_module(xyz_normed[app_mask], app_features)
 
-                l = self.l if is_train else 0
+                l = self.l if is_train else 1
+                # ic(p_world_normal[app_mask].T @ world_normal[app_mask])
+                # ic(p_world_normal[app_mask], world_normal[app_mask])
                 v_world_normal = (1-l)*p_world_normal + l*world_normal
                 v_world_normal = v_world_normal / (v_world_normal.norm(dim=-1, keepdim=True) + 1e-8)
             else:
@@ -682,46 +685,51 @@ class TensorNeRF(torch.nn.Module):
             refdirs = viewdirs - 2 * \
                 (viewdirs * v_world_normal).sum(-1, keepdim=True) * v_world_normal
             cosref = torch.matmul(refdirs.reshape(-1, 1, 3), v_world_normal.reshape(-1, 3, 1)).reshape(*viewdirs.shape[:-1], 1)
-            # refdirs = torch.sign(cosref) * refdirs
 
             ior_i = ior_i_full[app_mask].reshape(-1, 1)
             ior_t = refraction_index
 
             # calculated interpolated snell's law
-            n = v_world_normal[app_mask]
-            l = viewdirs[app_mask]
+            n = v_world_normal[app_mask].double()
+            l = viewdirs[app_mask].double()
 
             # snell's law
             cos_i = torch.matmul(n.reshape(-1, 1, 3), l.reshape(-1, 3, 1)).reshape(*n.shape[:-1], 1)
             N = torch.where(cos_i < 0, n, -n)
-            density_ratio = ior_i/ior_t
+            density_ratio = (ior_i/ior_t).double()
             R = torch.where(cos_i < 0, density_ratio, 1/density_ratio)
             cos_i = cos_i.abs()
 
-            k = 1 - R * R * (1 - cos_i * cos_i);
-            refractdirs = R * l + (R * cos_i - torch.sqrt(k.clip(min=0))) * N
+            k = 1 - R * R * (1 - cos_i * cos_i)
+            refractdirs = R * l + (R * cos_i - torch.sqrt(k.clip(min=1e-5))) * N
+            refractdirs = refractdirs.float()
+
+            refract_sim = (refractdirs * l.float()).sum(dim=-1, keepdim=True)
+            sim_weight = (1-refract_sim)/2
 
             # compute fresnel_law
-            sin_t = R * torch.sqrt((1-cos_i**2).clip(min=0))
-            cos_t = torch.sqrt((1-sin_t**2).clip(min=0))
+            sin_t = R * torch.sqrt((1-cos_i**2).clip(min=1e-5))
+            cos_t = torch.sqrt((1-sin_t**2).clip(min=1e-5))
             s_polar = (ior_t * cos_i - ior_i * cos_t) / (ior_t * cos_i + ior_i * cos_t)
             p_polar = (ior_i * cos_i - ior_t * cos_t) / (ior_t * cos_t + ior_i * cos_i)
             ratio_reflected = (s_polar**2 + p_polar**2)/2
             ratio_reflected = torch.where((sin_t >= 1), torch.ones_like(ratio_reflected), ratio_reflected)
 
             # beyond a certain roughness, it's probably better to try and do view dependent color
-            # ratio_diffuse = roughness
-            ratio_refracted = (1-ratio_diffuse) * (1-reflectivity) * (1 - ratio_reflected)
-            ratio_reflected = (1-ratio_diffuse) * (1 - ratio_refracted)
-            # ic(ratio_reflected.min(), ratio_reflected.max(), ratio_refracted.min(), ratio_refracted.max())#, ratio_diffuse.max(), reflectivity.max())
+            r = (1-reflectivity) * (1 - ratio_reflected).float()
+            ratio_refracted = ((1-ratio_diffuse) * r)
+            ratio_reflected = ((1-ratio_diffuse) * (1 - r))
 
             refract_rgb = torch.zeros_like(diffuse)
             reflect_rgb = torch.zeros_like(diffuse)
 
             M = diffuse.shape[0]
             if recur < self.max_recurs:
+                num_roughness_rays = 1 if recur > 0 else self.roughness_rays
                 # compute which rays to refract
-                rbounce_mask, rfull_bounce_mask, rinv_full_bounce_mask = select_top_n_app_mask(app_mask, weight[app_mask], ratio_refracted, self.max_bounce_rays, 0.01, self.bounce_min_weight)
+                rbounce_mask, rfull_bounce_mask, rinv_full_bounce_mask = select_top_n_app_mask(
+                        app_mask, weight[app_mask], ratio_refracted, self.max_bounce_rays,
+                        0.00, self.bounce_min_weight)
                 if rbounce_mask.sum() > 0:
                     # debug[..., 0][rfull_bounce_mask] = 1
                     # decide how many bounces to calculate
@@ -734,30 +742,41 @@ class TensorNeRF(torch.nn.Module):
 
                     # add noise to simulate roughness
                     D = rbounce_rays.shape[-1]
-                    ray_noise = torch.normal(0, 1, (rbounce_rays.shape[0], self.roughness_rays, 3), device=device) * self.roughness2noisestd(roughness[rbounce_mask].reshape(-1, 1, 1))
-                    rbounce_rays = rbounce_rays.reshape(-1, 1, D).repeat(1, self.roughness_rays, 1)
+                    ray_noise = torch.normal(0, 1, (rbounce_rays.shape[0], num_roughness_rays, 3), device=device) * self.roughness2noisestd(roughness[rbounce_mask].reshape(-1, 1, 1))
+                    rbounce_rays = rbounce_rays.reshape(-1, 1, D).repeat(1, num_roughness_rays, 1)
+                    ray_noise[:, 0] = 0
                     noise_rays = rbounce_rays[..., 3:6] + ray_noise
                     rbounce_rays[..., 3:6] = noise_rays / (torch.linalg.norm(noise_rays, dim=-1, keepdim=True)+1e-8)
 
                     rinit_refraction_index = refraction_index[rbounce_mask]
                     rinit_refraction_index = torch.where(flip[app_mask][rbounce_mask][:, None], torch.ones_like(rinit_refraction_index), rinit_refraction_index)
-                    rinit_refraction_index = rinit_refraction_index.reshape(-1, 1).repeat(1, self.roughness_rays).reshape(-1)
+                    rinit_refraction_index = rinit_refraction_index.reshape(-1, 1).repeat(1, num_roughness_rays).reshape(-1)
                     refract_data = self(rbounce_rays.reshape(-1, D), focal, recur=recur+1, init_refraction_index=rinit_refraction_index, white_bg=white_bg,
-                                    override_near=0.01,
+                                    override_near=0.05,
                                     is_train=is_train, ndc_ray=ndc_ray, N_samples=N_samples)
 
-                    refract_col = refract_data['rgb_map'].reshape(-1, self.roughness_rays, 3).mean(dim=1)
+                    refract_depth = refract_data['depth_map'].reshape(-1, num_roughness_rays)
+                    refract_col = refract_data['rgb_map'].reshape(-1, num_roughness_rays, 3)
+                    recur_depth[rfull_bounce_mask] = refract_depth.max(dim=1).values
+                    refract_col = refract_col.mean(dim=1)
                     # ic(refract_data['depth_map'].mean(), recur, refract_col.mean(), refract_data['acc_map'].mean(), ratio_refracted[rbounce_mask].mean())
                     m = rfull_bounce_mask.sum(dim=1) > 0
                     LOGGER.log_rays(rays_chunk[m].reshape(-1, D), recur, dict(depth_map=depth_map.detach()[m]))
                     LOGGER.log_rays(rbounce_rays.reshape(-1, D), recur+1, refract_data)
+                    recur += refract_data['recur']
 
-                    refract_rgb[rbounce_mask] = diffuse[rbounce_mask] * refract_col
+                    refract_rgb[rbounce_mask] = (diffuse[rbounce_mask] * refract_col)
                     debug[rfull_bounce_mask] = ratio_refracted[rbounce_mask] * diffuse[rbounce_mask] * refract_col
+                        # ratio_diffuse[rbounce_mask] += ratio_refracted[rbounce_mask]
+                        # ratio_refracted[rbounce_mask] = 0
+                        # refract_rgb[rbounce_mask] = 1
+                    # ic(refract_rgb.max(dim=0))
 
 
                 # compute which rays to reflect
-                bounce_mask, full_bounce_mask, inv_full_bounce_mask = select_top_n_app_mask(app_mask, weight[app_mask], ratio_reflected, self.max_bounce_rays, self.specularity_threshold, self.bounce_min_weight)
+                bounce_mask, full_bounce_mask, inv_full_bounce_mask = select_top_n_app_mask(
+                        app_mask, weight[app_mask], ratio_reflected, self.max_bounce_rays,
+                        self.specularity_threshold, self.bounce_min_weight)
 
                 if bounce_mask.sum() > 0:
                     # debug[..., 1][full_bounce_mask] = 1
@@ -770,18 +789,19 @@ class TensorNeRF(torch.nn.Module):
 
                     # add noise to simulate roughness
                     D = bounce_rays.shape[-1]
-                    ray_noise = torch.normal(0, 1, (bounce_rays.shape[0], self.roughness_rays, 3), device=device) * self.roughness2noisestd(roughness[bounce_mask].reshape(-1, 1, 1))
-                    bounce_rays = bounce_rays.reshape(-1, 1, D).repeat(1, self.roughness_rays, 1)
+                    ray_noise = torch.normal(0, 1, (bounce_rays.shape[0], num_roughness_rays, 3), device=device) * self.roughness2noisestd(roughness[bounce_mask].reshape(-1, 1, 1))
+                    bounce_rays = bounce_rays.reshape(-1, 1, D).repeat(1, num_roughness_rays, 1)
                     noise_rays = bounce_rays[..., 3:6] + ray_noise
                     bounce_rays[..., 3:6] = noise_rays / (torch.linalg.norm(noise_rays, dim=-1, keepdim=True)+1e-8)
 
-                    ref_data = self(bounce_rays.reshape(-1, D), focal, recur=recur+1, white_bg=white_bg,
+                    reflect_data = self(bounce_rays.reshape(-1, D), focal, recur=recur+1, white_bg=white_bg,
                                     is_train=is_train, ndc_ray=ndc_ray, N_samples=N_samples)
 
-                    ref_rgb = ref_data['rgb_map'].reshape(-1, self.roughness_rays, 3).mean(dim=1)
+                    ref_rgb = reflect_data['rgb_map'].reshape(-1, num_roughness_rays, 3).mean(dim=1)
                     tinted_ref_rgb = (diffuse[bounce_mask] * ref_rgb).clip(min=0, max=1)
                     debug[full_bounce_mask] = ratio_reflected[bounce_mask] * tinted_ref_rgb
                     reflect_rgb[bounce_mask] = tinted_ref_rgb
+                    recur += reflect_data['recur']
 
                 # elif self.ref_module is not None and inv_full_bounce_mask.any():
                 #     # compute other reflections using ref module
@@ -789,7 +809,7 @@ class TensorNeRF(torch.nn.Module):
                 #         xyz_normed[inv_full_bounce_mask], viewdirs[inv_full_bounce_mask],
                 #         app_features[~bounce_mask], refdirs=refdirs[inv_full_bounce_mask],
                 #         roughness=roughness[~bounce_mask])
-                #     tinted_ref_rgb = (1-roughness[~bounce_mask]) * tint[~bounce_mask] * ref_data['rgb_map']
+                #     tinted_ref_rgb = (1-roughness[~bounce_mask]) * tint[~bounce_mask] * reflect_data['rgb_map']
                 #     rgb[inv_full_bounce_mask] = tinted_ref_rgb
             # elif self.ref_module is not None:
             #     ref_rgbs = self.ref_module(
@@ -806,6 +826,9 @@ class TensorNeRF(torch.nn.Module):
             roughness = torch.tensor(0.0)
             normal_loss = torch.tensor(0.0)
         
+        depth_map = torch.sum(weight * recur_depth, 1)
+        acc_map = torch.sum(weight, 1)
+        depth_map = depth_map + (1. - acc_map) * rays_chunk[..., -1]
 
         backwards_rays_loss = -torch.matmul(viewdirs.reshape(-1, 1, 3), v_world_normal.reshape(-1, 3, 1)).reshape(app_mask.shape).clamp(max=0)
         backwards_rays_loss = (weight * (backwards_rays_loss)).mean()
@@ -863,6 +886,7 @@ class TensorNeRF(torch.nn.Module):
             debug_map=debug_map,
             normal_map=v_normal_map.cpu(),
             # normal_map=v_world_normal_map.cpu(),
+            recur=recur,
             acc_map=acc_map,
             normal_loss=normal_loss,
             backwards_rays_loss=backwards_rays_loss,

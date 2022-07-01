@@ -180,8 +180,8 @@ def reconstruction(args):
     focal = (train_dataset.focal[0] if ndc_ray else train_dataset.focal)
     # / train_dataset.img_wh[0]
     # with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], with_stack=True, record_shapes=True) as prof:
-    if True:
-    # with torch.autograd.detect_anomaly():
+    # if True:
+    with torch.autograd.detect_anomaly():
         for iteration in pbar:
 
             if iteration < 16:

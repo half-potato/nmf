@@ -64,6 +64,7 @@ class GridSampler2D(torch.autograd.Function):
         grad_grid = None
         if ctx.needs_input_grad[1]:
             f_blur = torch.tensor([0, 1, 0], device=grid.device)
+            # f_edge = torch.tensor([-1, 0, 1], device=grid.device) / 2
             f_edge = torch.tensor([1, 0, -1], device=grid.device) / 2
             # f_blur = torch.tensor([0.5, 0.5], device=grid.device)
             # f_edge = torch.tensor([-1, 1], device=grid.device) / 2
@@ -82,8 +83,8 @@ class GridSampler2D(torch.autograd.Function):
             dx = F.grid_sample(dx_input.permute(1, 0, 2, 3), grid, mode=ctx.mode, padding_mode=ctx.padding_mode, align_corners=ctx.align_corners)
             dy = F.grid_sample(dy_input.permute(1, 0, 2, 3), grid, mode=ctx.mode, padding_mode=ctx.padding_mode, align_corners=ctx.align_corners)
 
-            #  grad_grid = torch.stack([dy, dx], dim=-1)
             grad_grid = torch.stack([(grad_output*dx).sum(dim=1), (grad_output*dy).sum(dim=1)], dim=-1)
+            # grad_grid = torch.stack([(grad_output*dy).sum(dim=1), (grad_output*dx).sum(dim=1)], dim=-1)
 
         grad_input = None
         if ctx.needs_input_grad[0]:
@@ -127,6 +128,7 @@ class GridSampler1D(torch.autograd.Function):
         smoothing = ctx.smoothing
         grad_grid = None
         if ctx.needs_input_grad[1]:
+            # f_edge = torch.tensor([-1, 0, 1]) / 2
             f_edge = torch.tensor([1, 0, -1]) / 2
             l = len(f_edge)
 
@@ -137,7 +139,7 @@ class GridSampler1D(torch.autograd.Function):
 
             dx_input = F.conv1d(input, sm_dx_filter.reshape(1, 1, s), stride=1, padding=s//2)
 
-            grad_grid = F.grid_sample(dx_input, grid, mode=mode, padding_mode=padding_mode, align_corners=align_corners)
+            grad_grid = grad_output * F.grid_sample(dx_input, grid, mode=mode, padding_mode=padding_mode, align_corners=align_corners)
 
         grad_input = None
         if ctx.needs_input_grad[0]:
