@@ -9,8 +9,9 @@ N_voxel_final: 27000000 # 300**3
 # bounce_n_list: [100, 1000, 10000, 20000]
 # bounce_iter_list: [9000, 12000, 14000]
 
-bounce_n_list: [2000, 2000]
+bounce_n_list: [4000, 4000]
 bounce_iter_list: [0]
+diffuse_lambda: 1e-8
 
 num_bw_iters: 0
 

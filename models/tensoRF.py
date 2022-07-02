@@ -16,14 +16,12 @@ def d_softplus(x, beta=1.0, shift=-10):
 class TensorVMSplit(TensorBase):
     def __init__(self, aabb, grid_size, *args, hier_sizes, **kargs):
         super(TensorVMSplit, self).__init__(aabb, grid_size, *args, **kargs)
-
-
         self.convolver = Convolver(hier_sizes, False)
         self.sizes = self.convolver.sizes
 
         # num_levels x num_outputs
-        self.interp_mode = 'bilinear'
-        # self.interp_mode = 'bicubic'
+        # self.interp_mode = 'bilinear'
+        self.interp_mode = 'bicubic'
 
     def set_smoothing(self, sm):
         self.smoothing = sm

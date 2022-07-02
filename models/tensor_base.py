@@ -60,7 +60,7 @@ class TensorBase(torch.nn.Module):
         # min is more accurate than mean
         self.set_register('stepSize', torch.min(self.units)*self.step_ratio)
         self.set_register('aabbDiag', torch.sqrt(torch.sum(torch.square(aabbSize))))
-        self.nSamples = int((self.aabbDiag / self.stepSize).item()) + 1
+        self.nSamples = int((self.aabbDiag / self.stepSize).item()) * 2
         print("sampling step size: ", self.stepSize)
         print("sampling number: ", self.nSamples)
         

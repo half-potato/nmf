@@ -180,8 +180,8 @@ def reconstruction(args):
     focal = (train_dataset.focal[0] if ndc_ray else train_dataset.focal)
     # / train_dataset.img_wh[0]
     # with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], with_stack=True, record_shapes=True) as prof:
-    # if True:
-    with torch.autograd.detect_anomaly():
+    if True:
+    # with torch.autograd.detect_anomaly():
         for iteration in pbar:
 
             if iteration < 16:
@@ -208,12 +208,13 @@ def reconstruction(args):
             #rgb_map, alphas_map, depth_map, weights, uncertainty
             with torch.cuda.amp.autocast(enabled=args.fp16):
                 data = renderer(rays_train, tensorf,
-                        keys = ['rgb_map', 'floater_loss', 'normal_loss', 'roughness', 'backwards_rays_loss', 'termination_xyz', 'normal_map'],
+                        keys = ['rgb_map', 'floater_loss', 'normal_loss', 'roughness', 'backwards_rays_loss', 'termination_xyz', 'normal_map', 'diffuse_loss'],
                         focal=focal, output_alpha=alpha_train, chunk=args.batch_size,
                         N_samples=nSamples, white_bg = white_bg, ndc_ray=ndc_ray, is_train=True)
 
                 # loss = torch.mean((rgb_map[:, 1, 1] - rgb_train[:, 1, 1]) ** 2)
                 normal_loss = data['normal_loss'].mean()
+                diffuse_loss = data['diffuse_loss'].mean()
                 floater_loss = data['floater_loss'].mean()
                 roughness = data['roughness'].mean()
                 loss = torch.sqrt((data['rgb_map'] - rgb_train) ** 2 + args.params.charbonier_eps**2).mean()
@@ -222,7 +223,12 @@ def reconstruction(args):
 
 
                 # loss
-                total_loss = loss + args.params.normal_lambda*normal_loss + args.params.floater_lambda*floater_loss + args.params.backwards_rays_lambda*backwards_rays_loss
+                total_loss = loss + \
+                    args.params.normal_lambda*normal_loss + \
+                    args.params.floater_lambda*floater_loss + \
+                    args.params.backwards_rays_lambda*backwards_rays_loss + \
+                    args.params.diffuse_lambda*diffuse_loss
+
                 if Ortho_reg_weight > 0:
                     loss_reg = tensorf.rf.vector_comp_diffs()
                     total_loss += Ortho_reg_weight*loss_reg
