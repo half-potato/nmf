@@ -43,7 +43,7 @@ def main(cfg: DictConfig):
     ckpt = torch.load(cfg.ckpt)
     ckpt['config']['bg_module']['bg_resolution'] = ckpt['state_dict']['bg_module.bg_mat'].shape[-1]
     tensorf = TensorNeRF.load(ckpt).to(device)
-    tensorf.rf.set_smoothing(2)
+    tensorf.rf.set_smoothing(0.5)
 
     # model surgery
     # zero out values
@@ -60,8 +60,9 @@ def main(cfg: DictConfig):
     i = 0
     n = [0, 0, 0]
     n[i] = 1
-    # tensorf.rf.density_plane[i][:, :, 40:100, 40:100] += 1
-    # tensorf.rf.density_line[i][:, :, ind:ind+8] += 100
+    ind = 40
+    tensorf.rf.density_plane[i][:, :, 40:100, 40:100] += 1
+    tensorf.rf.density_line[i][:, :, ind:ind+8] += 100
     tensorf.rf.app_plane[i][:, 8] = 0
     tensorf.rf.app_plane[i][:, 9] = -1
     tensorf.rf.app_plane[i][:, 10] = 0
@@ -69,44 +70,6 @@ def main(cfg: DictConfig):
     H, W = tensorf.rf.density_plane[0].shape[-2:]
     C = tensorf.rf.density_plane[0].shape[1]
 
-    d = 10
-    k = d-1
-    row, col, line = torch.meshgrid(torch.linspace(-d-k, d-k, H, device=device), torch.linspace(-d+0, d+0, W, device=device), torch.linspace(1, 0, H, device=device), indexing='ij')
-
-    c = H // C
-    l = 1
-    o = 150
-    dist = torch.sqrt(row**2 + col**2 + line**2)
-    mask = (dist < 1).float()
-    for j in range(C):
-        m = mask[..., c*j:c*j+c].sum(dim=-1) > 0
-        tensorf.rf.density_plane[i][0, j][m] = 10
-
-        k = C - j
-        p = l * C + o - 1
-        tensorf.rf.density_line[i][0, j, l*j+o:l*j+l+o] += 10
-        tensorf.rf.density_line[i][0, j, l*k+p:l*k+l+p] += 10
-
-    optim = torch.optim.Adam(tensorf.parameters(), lr=1e-3)
-    with torch.enable_grad():
-        for _ in tqdm(range(50)):
-            ox, oy, oz = torch.rand(3, H, W, H, device=device)
-            y = (col+oy)
-            x = (row+ox)
-            z = (line+oz)
-            xyz = torch.stack([x, y, z], dim=-1)
-            dist = torch.sqrt(x**2 + y**2 + z**2)
-            mask = (dist < 0.3).float()
-            feat = tensorf.rf.compute_densityfeature(xyz)
-            sigma_feat = tensorf.feature2density(feat)
-            sigma = 1-torch.exp(-sigma_feat * 0.025)
-            ic(sigma.min(), sigma.max(), sigma_feat.min(), sigma_feat.max(), feat.min(), feat.max())
-            # loss = ((sigma - mask)**2).mean()
-            loss = ((feat - 200*mask)**2).mean()
-            optim.zero_grad()
-            loss.backward()
-            optim.step()
-    # print("HI")
 
     tensorf.rf.basis_mat = AddBasis(48)
     # tensorf.rf.basis_mat = torch.nn.Identity()

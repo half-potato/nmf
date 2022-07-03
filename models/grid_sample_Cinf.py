@@ -2,6 +2,9 @@ import torch
 import torch.nn.functional as F
 from icecream import ic
 
+SIGN = -1
+# sign = -1 matches grid sample
+
 def gaussian_fn(M, std, **kwargs):
     n = torch.arange(0, M, **kwargs) - (M - 1.0) / 2.0
     sig2 = 2 * std * std
@@ -63,11 +66,11 @@ class GridSampler2D(torch.autograd.Function):
         input, grid = ctx.saved_tensors
         grad_grid = None
         if ctx.needs_input_grad[1]:
-            f_blur = torch.tensor([0, 1, 0], device=grid.device)
-            # f_edge = torch.tensor([-1, 0, 1], device=grid.device) / 2
-            f_edge = torch.tensor([1, 0, -1], device=grid.device) / 2
-            # f_blur = torch.tensor([0.5, 0.5], device=grid.device)
-            # f_edge = torch.tensor([-1, 1], device=grid.device) / 2
+            # f_blur = torch.tensor([0, 1, 0], device=grid.device)
+            # f_edge = torch.tensor([1, 0, -1], device=grid.device) / 2
+
+            f_blur = torch.tensor([0.5, 0.5], device=grid.device)
+            f_edge = SIGN*torch.tensor([1, -1], device=grid.device) / 2
             l = len(f_blur)
             dy_filter = (f_blur[None, :] * f_edge[:, None]).reshape(1, 1, l, l)
             dx_filter = dy_filter.permute(0, 1, 3, 2)
@@ -129,7 +132,8 @@ class GridSampler1D(torch.autograd.Function):
         grad_grid = None
         if ctx.needs_input_grad[1]:
             # f_edge = torch.tensor([-1, 0, 1]) / 2
-            f_edge = torch.tensor([1, 0, -1]) / 2
+            # f_edge = torch.tensor([1, 0, -1]) / 2
+            f_edge = SIGN*torch.tensor([1, -1]) / 2
             l = len(f_edge)
 
             dz_filter = f_edge.reshape(1, 1, l)

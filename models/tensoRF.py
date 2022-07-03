@@ -20,8 +20,8 @@ class TensorVMSplit(TensorBase):
         self.sizes = self.convolver.sizes
 
         # num_levels x num_outputs
-        # self.interp_mode = 'bilinear'
-        self.interp_mode = 'bicubic'
+        self.interp_mode = 'bilinear'
+        # self.interp_mode = 'bicubic'
 
     def set_smoothing(self, sm):
         self.smoothing = sm

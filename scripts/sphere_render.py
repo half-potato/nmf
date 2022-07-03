@@ -46,7 +46,7 @@ def main(cfg: DictConfig):
     ckpt = torch.load(cfg.ckpt)
     ckpt['config']['bg_module']['bg_resolution'] = ckpt['state_dict']['bg_module.bg_mat'].shape[-1]
     tensorf = TensorNeRF.load(ckpt).to(device)
-    tensorf.rf.set_smoothing(1)
+    tensorf.rf.set_smoothing(0)
     tensorf.max_bounce_rays = 16000
     # tensorf.normal_module = render_modules.AppDimNormal(1, activation=torch.nn.Identity)
     tensorf.normal_module = render_modules.DeepMLPNormal(pospe=16, num_layers=3).to(device)
@@ -59,7 +59,10 @@ def main(cfg: DictConfig):
     # tensorf.rf.density_line[i][:, :, ind:ind+8] += 100
     H, W = tensorf.rf.density_plane[0].shape[-2:]
     C = tensorf.rf.density_plane[0].shape[1]
-    # tensorf.bg_module.bg_mat[..., :4000, :] = 0
+    # tensorf.bg_module.bg_mat[..., :, :, :] = -4
+    # tensorf.bg_module.bg_mat[..., 0, :, :] = 0
+    # tensorf.bg_module.bg_mat[..., 1, :, :] = 0
+    # tensorf.bg_module.bg_mat[..., 2, :, :] = 0
 
     d = 1
     row, col, line = torch.meshgrid(torch.linspace(-d, d, H, device=device), torch.linspace(-d, d, W, device=device), torch.linspace(-d, d, H, device=device), indexing='ij')
@@ -71,9 +74,9 @@ def main(cfg: DictConfig):
     eps = 0.0
 
     # train shape
-    optim = torch.optim.Adam(tensorf.parameters(), lr=3e-1)
+    optim = torch.optim.Adam(tensorf.parameters(), lr=1e-0)
     with torch.enable_grad():
-        for _ in tqdm(range(50)):
+        for _ in tqdm(range(100)):
             ox, oy, oz = torch.rand(3, H, W, H, device=device)/H
             y = (col+oy)
             x = (row+ox)
@@ -141,7 +144,7 @@ def main(cfg: DictConfig):
             # gt_norm = xyz[full_shell, :3] / (torch.linalg.norm(xyz[full_shell, :3], dim=1, keepdim=True)+1e-10)
             # world_loss = -(p_norm * gt_norm).sum(dim=-1).sum()
             
-            loss = (diffuse - 1)**2 + (roughness - 0.00)**2 + (refraction_index - 1.5)**2 + (reflectivity - 0.00)**2 + (ratio_diffuse - 0.00)**2
+            loss = (diffuse - 1)**2 + (roughness - 0.00)**2 + (refraction_index - 1.5)**2 + (reflectivity - 1.00)**2 + (ratio_diffuse - 0.00)**2
             optim.zero_grad()
             loss.mean().backward()
             optim.step()
