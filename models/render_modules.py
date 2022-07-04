@@ -207,7 +207,7 @@ class MLPDiffuse(torch.nn.Module):
         roughness = torch.sigmoid(mlp_out[..., 6:7]+1) * self.max_roughness
         refraction_index = F.softplus(mlp_out[..., 7:8]-1) + self.min_refraction_index
         reflectivity = rgb[..., 8:9]
-        diffuse_ratio = torch.sigmoid(mlp_out[..., 9:10])
+        diffuse_ratio = rgb[..., 9:10]
         tint = rgb[..., 3:6] 
         diffuse = rgb[..., :3] 
 

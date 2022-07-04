@@ -55,6 +55,8 @@ def main(cfg: DictConfig):
     tensorf.max_recurs = 3
     tensorf.roughness_rays = 1
 
+    tensorf.rf.init_svd_volume(300)
+
     # tensorf.rf.density_plane[i][:, :, 40:100, 40:100] += 1
     # tensorf.rf.density_line[i][:, :, ind:ind+8] += 100
     H, W = tensorf.rf.density_plane[0].shape[-2:]
@@ -89,8 +91,8 @@ def main(cfg: DictConfig):
             sigma_feat = tensorf.feature2density(feat)
 
 
-            # sigma = 1-torch.exp(-sigma_feat * 0.025)
-            sigma = 1-torch.exp(-sigma_feat)
+            sigma = 1-torch.exp(-sigma_feat * 0.025 * 25)
+            # sigma = 1-torch.exp(-sigma_feat)
             loss = (-sigma[mask].clip(max=1).sum() + sigma[~mask].clip(min=1e-8).sum())
             optim.zero_grad()
             loss.backward()

@@ -31,6 +31,9 @@ class TensorVMSplit(TensorBase):
         self.density_plane, self.density_line = self.init_one_svd(self.density_n_comp, [int(self.density_res_multi*g) for g in self.grid_size], 0.1, -0)
         self.app_plane, self.app_line = self.init_one_svd(self.app_n_comp, self.grid_size, 0.1, 0)
         self.basis_mat = torch.nn.Linear(sum(self.app_n_comp), self.app_dim, bias=False)
+        # self.dbasis_mat = torch.nn.Linear(1, 1, bias=True)
+        # torch.nn.init.constant_(self.dbasis_mat.bias, -10)
+        # torch.nn.init.constant_(self.dbasis_mat.weight, 1)
 
     def init_one_svd(self, n_component, grid_size, scale, shift):
         plane_coef, line_coef = [], []
@@ -95,23 +98,18 @@ class TensorVMSplit(TensorBase):
         sigma_feature = torch.zeros((xyz_sampled.shape[0],), device=xyz_sampled.device)
         # size_weights = self.convolver.compute_size_weights(xyz_sampled, self.units/self.density_res_multi)
         size_weights = 1
-        # plane_kerns, line_kerns = self.convolver.get_kernels(size_weights)
         plane_kerns, line_kerns = [[None]], [[None]]
 
         for idx_plane in range(len(self.density_plane)):
-            # plane_coef_point = self.convolver.multi_size_plane(self.density_plane[idx_plane], coordinate_plane[[idx_plane]], size_weights, plane_kerns)
-            # line_coef_point = self.convolver.multi_size_line(self.density_line[idx_plane], coordinate_line[[idx_plane]], size_weights, line_kerns)
-
-            #  plane_coef_point = F.grid_sample(self.density_plane[idx_plane], coordinate_plane[[idx_plane]],
-            #                                      align_corners=True).view(-1, *xyz_sampled.shape[:1])
-            #  line_coef_point = F.grid_sample(self.density_line[idx_plane], coordinate_line[[idx_plane]],
-            #                                  align_corners=True).view(-1, *xyz_sampled.shape[:1])
             plane_coef_point = grid_sample(self.density_plane[idx_plane], coordinate_plane[[idx_plane]],
                                                 align_corners=True, smoothing=self.smoothing).view(-1, *xyz_sampled.shape[:1])
             line_coef_point = grid_sample(self.density_line[idx_plane], coordinate_line[[idx_plane]],
                                             align_corners=True, smoothing=self.smoothing).view(-1, *xyz_sampled.shape[:1])
-            # ic(plane_coef_point.mean(), line_coef_point.mean())
+            ic((plane_coef_point * line_coef_point).max())
+            ic((plane_coef_point * line_coef_point).shape)
+            ic(torch.sum(plane_coef_point * line_coef_point, dim=0).max())
             sigma_feature = sigma_feature + torch.sum(plane_coef_point * line_coef_point, dim=0)
+        # return self.dbasis_mat(sigma_feature.reshape(-1, 1)).reshape(-1)
         return sigma_feature
 
     def compute_density_norm(self, xyz_sampled, activation_fn):

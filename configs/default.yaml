@@ -18,7 +18,7 @@ render_test: true
 render_path: false
 
 add_timestamp: false
-nSamples: 4096
+nSamples: 1e6
 N_vis: 5
 vis_every: 5000
 progress_refresh_rate: 10
