@@ -105,9 +105,6 @@ class TensorVMSplit(TensorBase):
                                                 align_corners=True, smoothing=self.smoothing).view(-1, *xyz_sampled.shape[:1])
             line_coef_point = grid_sample(self.density_line[idx_plane], coordinate_line[[idx_plane]],
                                             align_corners=True, smoothing=self.smoothing).view(-1, *xyz_sampled.shape[:1])
-            ic((plane_coef_point * line_coef_point).max())
-            ic((plane_coef_point * line_coef_point).shape)
-            ic(torch.sum(plane_coef_point * line_coef_point, dim=0).max())
             sigma_feature = sigma_feature + torch.sum(plane_coef_point * line_coef_point, dim=0)
         # return self.dbasis_mat(sigma_feature.reshape(-1, 1)).reshape(-1)
         return sigma_feature

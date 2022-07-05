@@ -9,6 +9,7 @@ import numpy as np
 from models.ise import ISE, RandISE
 from models.ish import ISH, RandISH
 from typing import List
+import cv2
 
 def positional_encoding(positions, freqs):
     freq_bands = (2**torch.arange(freqs).float()).to(positions.device)  # (F,)
@@ -42,14 +43,59 @@ def RGBRender(xyz_sampled, viewdirs, features):
     rgb = features
     return rgb
 
+class PanoUnwrap(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.H_mul = 1
+        self.W_mul = 2
+
+    def forward(self, viewdirs):
+        B = viewdirs.shape[0]
+        a, b, c = viewdirs[:, 0:1], viewdirs[:, 1:2], viewdirs[:, 2:3]
+        norm2d = torch.sqrt(a**2+b**2)
+        phi = safemath.atan2(b, a)
+        theta = safemath.atan2(c, norm2d)
+        x = torch.cat([
+            (phi % (2*np.pi) - np.pi) / np.pi,
+            theta/np.pi/2,
+        ], dim=1).reshape(1, 1, -1, 2)
+        return x
+
+class CubeUnwrap(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.H_mul = 1
+        self.W_mul = 6
+
+    def forward(self, viewdirs):
+        B = viewdirs.shape[0]
+        mul = (1+1e-5)
+        sqdirs = mul * viewdirs / (torch.linalg.norm(viewdirs, dim=-1, keepdim=True, ord=torch.inf) + 1e-8)
+        a, b, c = sqdirs[:, 0], sqdirs[:, 1], sqdirs[:, 2]
+        # quadrants are +x, -x, +y, -y, +z, -z
+        quadrants = [
+            (a >=  mul, (b, c), 0),
+            (a <= -mul, (b, c), 1),
+            (b >=  mul, (a, c), 2),
+            (b <= -mul, (a, c), 3),
+            (c >=  mul, (a, b), 4),
+            (c <= -mul, (a, b), 5),
+        ]
+        coords = torch.zeros_like(viewdirs[..., :2])
+        for cond, (x, y), offset_mul in quadrants:
+            coords[..., 0][cond] = ((x[cond] / mul +1)/2 + offset_mul)/3 - 1
+            coords[..., 1][cond] = y[cond] / mul
+        return coords.reshape(1, 1, -1, 2)
+
 
 class BackgroundRender(torch.nn.Module):
     bg_rank: int
     bg_resolution: List[int]
-    def __init__(self, bg_rank, bg_resolution=512, view_encoder=None, featureC=128, num_layers=2):
+    def __init__(self, bg_rank, unwrap_fn, bg_resolution=512, view_encoder=None, featureC=128, num_layers=2):
         super().__init__()
-        self.bg_mat = nn.Parameter(0.1 * torch.randn((1, bg_rank, bg_resolution*2, bg_resolution))) # [1, R, H, W]
+        self.bg_mat = nn.Parameter(0.1 * torch.randn((1, bg_rank, bg_resolution*unwrap_fn.H_mul, bg_resolution*unwrap_fn.W_mul))) # [1, R, H, W]
         self.view_encoder = view_encoder
+        self.unwrap_fn = unwrap_fn
         self.bg_rank = bg_rank
         d = self.view_encoder.dim() if self.view_encoder is not None else 0
         if num_layers == 0 and bg_rank == 3:
@@ -67,21 +113,23 @@ class BackgroundRender(torch.nn.Module):
             )
 
     @torch.no_grad()
+    def save(self, path):
+        im = (255*self.bg_net(self.bg_mat)).short().permute(0, 2, 3, 1).squeeze(0)
+        im = im.cpu().numpy()
+        im = im[::-1].astype(np.uint8)
+        im = cv2.cvtColor(im, cv2.COLOR_RGB2BGR)
+        cv2.imwrite(path, im)
+
+    @torch.no_grad()
     def upsample(self, bg_resolution):
         self.bg_mat = torch.nn.Parameter(
-            F.interpolate(self.bg_mat.data, size=(bg_resolution*2, bg_resolution), mode='bilinear', align_corners=True)
+            F.interpolate(self.bg_mat.data, size=(bg_resolution*self.unwrap_fn.H_mul, bg_resolution*self.unwrap_fn.W_mul), mode='bilinear', align_corners=True)
         )
         
     def forward(self, viewdirs):
         B = viewdirs.shape[0]
-        a, b, c = viewdirs[:, 0:1], viewdirs[:, 1:2], viewdirs[:, 2:3]
-        norm2d = torch.sqrt(a**2+b**2)
-        phi = safemath.atan2(b, a)
-        theta = safemath.atan2(c, norm2d)
-        x = torch.cat([
-            (phi % (2*np.pi) - np.pi) / np.pi,
-            theta/np.pi/2,
-        ], dim=1).reshape(1, 1, -1, 2)
+        x = self.unwrap_fn(viewdirs)
+
         emb = F.grid_sample(self.bg_mat, x, mode='bicubic', align_corners=True)
         emb = emb.reshape(self.bg_rank, -1).T
         # return torch.sigmoid(emb)
@@ -167,7 +215,7 @@ class MLPDiffuse(torch.nn.Module):
 
         self.view_encoder = view_encoder
         if view_encoder is not None:
-            self.in_mlpC += self.view_encoder.dim()
+            self.in_mlpC += self.view_encoder.dim() + 3
         self.feape = feape
         self.pospe = pospe
         if num_layers > 0:
@@ -199,7 +247,7 @@ class MLPDiffuse(torch.nn.Module):
         if self.feape > 0:
             indata += [positional_encoding(features, self.feape)]
         if self.view_encoder is not None:
-            indata += [self.view_encoder(viewdirs, torch.tensor(20.0, device=pts.device)).reshape(B, -1)]
+            indata += [self.view_encoder(viewdirs, torch.tensor(20.0, device=pts.device)).reshape(B, -1), viewdirs]
         mlp_in = torch.cat(indata, dim=-1)
         mlp_out = self.mlp(mlp_in)
         rgb = torch.sigmoid(mlp_out)

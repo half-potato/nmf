@@ -15,7 +15,7 @@ enable_alpha_mask: true
 rf:
   _partial_: True
   _target_: models.tensoRF.TensorVMSplit
-  density_n_comp: 16
+  density_n_comp: 24
   appearance_n_comp: 48
   app_dim: 48
   step_ratio: 0.5
@@ -26,12 +26,15 @@ rf:
 
 bg_module:
   _target_: models.render_modules.BackgroundRender
-  bg_rank: 8
+  bg_rank: 3
+  num_layers: 0
+  unwrap_fn: 
+    _target_: models.render_modules.CubeUnwrap
   # view_encoder:
   #   _target_: models.ish.ISH
   #   max_degree: 6
   # bg_resolution: [4096, 2048]
-  bg_resolution: 1024
+  bg_resolution: 256
 
 diffuse_module:
   _partial_: True
@@ -39,31 +42,32 @@ diffuse_module:
   pospe: 0
   feape: 2
   view_encoder:
-    _target_: models.ish.ISH
-    max_degree: 6
+    _target_: models.ish.FullISH
+    max_degree: 4
   featureC: 128
-  num_layers: 0
+  num_layers: 2
 
 ref_module:
   _partial_: True
   _target_: models.render_modules.MLPRender_FP
   feape: 2
-  # view_encoder:
-  #   _target_: models.ish.ISH
-  #   max_degree: 6
+  view_encoder:
+    _target_: models.ish.FullISH
+    max_degree: 4
+  # ref_encoder:
+  #   _target_: models.ish.FullISH
+  #   max_degree: 4
   ref_encoder:
     _target_: models.ish.RandISH
     # rand_n: 8
-    rand_n: 64
-    std: 7
+    rand_n: 32
+    std: 5
   featureC: 128
   num_layers: 3
 
 normal_module:
   _partial_: True
-  _target_: models.render_modules.MLPNormal
-  pospe: 0
-  feape: 2
+  _target_: models.render_modules.DeepMLPNormal
+  pospe: 16
   featureC: 128
-  num_layers: 1
-
+  num_layers: 4

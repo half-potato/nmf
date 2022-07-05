@@ -175,16 +175,37 @@ def reconstruction(args):
 
     allrgbs = allrgbs.to(device)
     allrays = allrays.to(device)
-    pbar = tqdm(range(args.n_iters), miniters=args.progress_refresh_rate, file=sys.stdout)
     # ratio of meters to pixels at a distance of 1 meter
     focal = (train_dataset.focal[0] if ndc_ray else train_dataset.focal)
     # / train_dataset.img_wh[0]
     # with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], with_stack=True, record_shapes=True) as prof:
+    print(tensorf)
+    if tensorf.bg_module is not None:
+        pbar = tqdm(range(args.n_bg_iters), miniters=args.progress_refresh_rate, file=sys.stdout)
+        # warm up by training bg
+        for _ in pbar:
+            ray_idx, rgb_idx = trainingSampler.nextids()
+            rays_train, rgba_train = allrays[ray_idx], allrgbs[rgb_idx].reshape(-1, allrgbs.shape[-1])
+            rgb_train = rgba_train[..., :3]
+            if rgba_train.shape[-1] == 4:
+                alpha_train = rgba_train[..., 3]
+            else:
+                alpha_train = None
+            rgb = tensorf.render_just_bg(rays_train)
+            loss = torch.sqrt((rgb - rgb_train) ** 2 + args.params.charbonier_eps**2).mean()
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            photo_loss = loss.detach().item()
+            pbar.set_description(f'psnr={-10.0 * np.log(photo_loss) / np.log(10.0):.04f}')
+        tensorf.bg_module.save('test.png')
+
+    pbar = tqdm(range(args.n_iters), miniters=args.progress_refresh_rate, file=sys.stdout)
     if True:
     # with torch.autograd.detect_anomaly():
         for iteration in pbar:
 
-            if iteration < 16:
+            if iteration < 100:
                 ray_idx, rgb_idx = trainingSampler.nextids(args.batch_size // 4)
             else:
                 ray_idx, rgb_idx = trainingSampler.nextids()
@@ -247,138 +268,9 @@ def reconstruction(args):
                     total_loss = total_loss + loss_tv
                     summary_writer.add_scalar('train/reg_tv_app', loss_tv.detach().item(), global_step=iteration)
 
-                optimizer.zero_grad()
-                total_loss.backward()
-                optimizer.step()
-            # now train on the environment maps
-            env_loss = torch.tensor(1.0)
-            torch.cuda.empty_cache()
-            if args.params.num_env_train_iters > 0 and \
-               iteration > args.params.envmap_train_start and args.params.envmap_train_start > 0 and \
-               tensorf.ref_module is not None:
-                with torch.cuda.amp.autocast(enabled=args.fp16):
-                    # sample termination_xyz
-                    with torch.no_grad():
-                        termination_xyz = data['termination_xyz']
-                        normal_map = data['normal_map']
-                        #  termination_xyz = rays_train[:, :4]
-                        L = args.params.num_rays_per_envmap
-                        H = 1
-                        M = args.batch_size // L
-
-                        # num per ray to allow smoothing
-                        inds = np.random.permutation(args.batch_size)[:M]
-                        # remember the difference between tile and repeat
-                        env_rays_o = termination_xyz[inds][:, :3] \
-                            .reshape(M, 1, 1, 3) \
-                            .expand(M, L, H, 3) \
-                            .reshape(-1, 3) \
-                            .to(device)
-                        outward = normal_map[inds] \
-                            .reshape(M, 1, 3) \
-                            .expand(M, L, 3) \
-                            .reshape(-1, 3) \
-                            .to(device)
-
-                        env_rays_d = torch.rand(M*L, 3, device=device)
-                        env_rays_d /= torch.linalg.norm(env_rays_d, dim=1, keepdim=True)+1e-6
-
-                        # project env_rays_d onto half space
-                        similarity = torch.sum(env_rays_d * outward, dim=1, keepdim=True)
-                        ortho_component = env_rays_d - similarity * outward
-                        env_rays_d = ortho_component + similarity.abs() * outward
-
-                        env_rays_d = env_rays_d.reshape(M, L, 1, 3)
-                        env_rays_d = env_rays_d / torch.linalg.norm(env_rays_d, axis=-1, keepdim=True)
-                        env_rays_d = env_rays_d.reshape(-1, 3)
-
-                        env_rays_up = torch.rand(args.batch_size, 3, device=device)
-                        env_rays_up /= torch.linalg.norm(env_rays_up, dim=1, keepdim=True)
-
-                        env_rays = torch.cat([env_rays_o, env_rays_d, env_rays_up], dim=1)
-
-                    # right? I don't want a gradient attached
-                    with torch.no_grad():
-                        env_data = renderer(env_rays, tensorf, keys = ['rgb_map'],
-                                focal=focal, output_alpha=alpha_train, chunk=args.batch_size,
-                                N_samples=nSamples, white_bg = white_bg, ndc_ray=ndc_ray, is_train=True)
-
-                    for _ in range(args.params.num_env_train_iters):
-                        render_rgb = env_data['rgb_map']
-                        pred_rgb = tensorf.render_env_sparse(
-                                termination_xyz[inds][:, :3].to(device),
-                                env_rays_d.reshape(M, L * H, 3), roughness=20)
-
-                        env_loss = torch.sqrt((render_rgb-pred_rgb)**2+args.params.charbonier_eps**2).mean()
-                        optimizer.zero_grad()
-                        env_loss.backward()
-                        optimizer.step()
-
-                    """
-                    if iteration % 100 == 0:
-
-                        res = 200
-                        ele_grid, azi_grid = torch.meshgrid(
-                            torch.linspace(-np.pi/2, np.pi/2, res, dtype=torch.float32),
-                            torch.linspace(-np.pi, np.pi, 2*res, dtype=torch.float32), indexing='ij')
-                        # each col of x ranges from -pi/2 to pi/2
-                        # each row of y ranges from -pi to pi
-                        ang_vecs = torch.stack([
-                            torch.cos(ele_grid) * torch.cos(azi_grid),
-                            torch.cos(ele_grid) * torch.sin(azi_grid),
-                            -torch.sin(ele_grid),
-                        ], dim=-1).to(device)
-                        env_rays_d = ang_vecs.reshape(-1, 3)
-                        mask = env_rays_d @ outward[0] < 0
-                        env_rays_d[mask, 0] = 0
-                        env_rays_d[mask, 1] = 0
-                        env_rays_d[mask, 2] = 1
-
-                        #  similarity = torch.sum(env_rays_d * outward[0], dim=1, keepdim=True)
-                        #  ortho_component = env_rays_d - similarity * outward[0:1]
-                        #  env_rays_d = ortho_component + similarity.abs() * outward[0:1]
-
-                        env_rays = torch.cat([
-                            env_rays_o[0].reshape(1, 3).repeat(env_rays_d.shape[0], 1),
-                            env_rays_d, torch.rand(*env_rays_d.shape, device=env_rays_o.device)], dim=1)
-                        with torch.no_grad():
-                            env_data = renderer(env_rays, tensorf,
-                                    keys = ['rgb_map'],
-                                    focal=focal, output_alpha=alpha_train, chunk=args.batch_size,
-                                    N_samples=nSamples, white_bg = white_bg, ndc_ray=ndc_ray, is_train=True)
-                        raw_env_map = env_data['rgb_map'].detach()
-                        env_map = (raw_env_map.cpu().numpy().reshape(res, 2*res, 3)*255).astype(np.uint8)
-                        env_map = cv2.cvtColor(env_map, cv2.COLOR_BGR2RGB)
-                        cv2.imwrite(f'env_map{iteration}.png', env_map)
-
-                        pbar2 = tqdm(range(500), miniters=args.progress_refresh_rate, file=sys.stdout)
-                        for _ in pbar2:
-                            pred_rgb = tensorf.render_env_sparse(
-                                    env_rays_o[0].reshape(1, 3),
-                                    env_rays_d[~mask].reshape(1, -1, 3), roughness=20)
-                            env_loss = torch.sqrt((raw_env_map[~mask]-pred_rgb)**2+args.params.charbonier_eps**2).mean()
-                            optimizer.zero_grad()
-                            env_loss.backward()
-                            optimizer.step()
-                            pbar2.set_description(f'loss: {env_loss.detach().item():.4f}')
-
-                        pred_env_map, _ = tensorf.recover_envmap(res, termination_xyz[inds][0])
-                        pred_env_map = (pred_env_map.detach().cpu().numpy() * 255).astype('uint8')
-                        pred_env_map = cv2.cvtColor(pred_env_map, cv2.COLOR_BGR2RGB)
-                        cv2.imwrite(f'pred_env_map{iteration}.png', pred_env_map)
-                        #  pred_env_map = pred_rgb.reshape(M, -1, 3)[0].detach().cpu().numpy().reshape(res, 2*res, 3)
-                        #  fig, axs = plt.subplots(2)
-                        #  axs[0].imshow(env_map)
-                        #  axs[1].imshow(pred_env_map)
-                        #  plt.show()
-                    """
-
-            #  total_loss += 2*env_loss
-            env_loss = env_loss.detach().item()
-
-            #  optimizer.zero_grad()
-            #  total_loss.backward()
-            #  optimizer.step()
+            optimizer.zero_grad()
+            total_loss.backward()
+            optimizer.step()
 
             photo_loss = photo_loss.detach().item()
             
@@ -395,7 +287,6 @@ def reconstruction(args):
                     f'Iteration {iteration:05d}:'
                     + f' train_psnr = {float(np.mean(PSNRs)):.2f}'
                     + f' test_psnr = {float(np.mean(PSNRs_test)):.2f}'
-                    + f' env_psnr = {-10 * np.log(float(env_loss**2))/np.log(10.0):.4f}'
                     + f' normal_loss = {normal_loss:.5f}'
                     + f' floater_loss = {floater_loss:.6f}'
                     + f' mse = {photo_loss:.6f}'
@@ -409,6 +300,7 @@ def reconstruction(args):
                                         prtx=f'{iteration:06d}_', N_samples=nSamples, white_bg = white_bg, ndc_ray=ndc_ray,
                                         compute_extra_metrics=False, render_mode=args.render_mode)
                 summary_writer.add_scalar('test/psnr', np.mean(PSNRs_test), global_step=iteration)
+                tensorf.bg_module.save('test.png')
 
 
             if upsamp_bg and iteration in args.params.bg_upsamp_list:
