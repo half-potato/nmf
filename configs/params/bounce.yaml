@@ -1,4 +1,4 @@
-smoothing_start: 0.5
+smoothing_start: 2.5
 smoothing_end: 0.5
 smoothing_list: [10000, 15000, 20000]
 N_voxel_init: 2097156 # 128**3
@@ -18,9 +18,10 @@ num_bw_iters: 0
 # bg_upsamp_list: [300, 800, 1000, 3000]
 # bg_upsamp_res: [256, 512, 1024, 2048, 4096]
 # bg_upsamp_lr: [0.03, 0.015, 0.005, 0.003, 0.001]
-bg_upsamp_list: [800, 1000]
-bg_upsamp_res: [512, 1024, 2048]
-bg_upsamp_lr: [0.05, 0.003, 0.001]
+
+# bg_upsamp_list: [500, 1000, 2000, 3000]
+# bg_upsamp_res: [128, 512, 1024, 1024, 2048]
+# bg_upsamp_lr: [0.03, 0.03, 0.015, 0.015, 0.015]
 
 upsamp_list: [3000,4000,5500,7000]
 #upsamp_list: [2000,3000,4000,5500,7000]

@@ -4,6 +4,7 @@ import torch.nn.functional as F
 from icecream import ic
 from .convolver import Convolver
 from .grid_sample_Cinf import grid_sample
+import random
 
 # here is original grid sample derivative for testing
 # def grid_sample(*args, smoothing, **kwargs):
@@ -20,8 +21,8 @@ class TensorVMSplit(TensorBase):
         self.sizes = self.convolver.sizes
 
         # num_levels x num_outputs
-        self.interp_mode = 'bilinear'
-        # self.interp_mode = 'bicubic'
+        # self.interp_mode = 'bilinear'
+        self.interp_mode = 'bicubic'
 
     def set_smoothing(self, sm):
         self.smoothing = sm
@@ -41,9 +42,16 @@ class TensorVMSplit(TensorBase):
             vec_id = self.vecMode[i]
             mat_id_0, mat_id_1 = self.matMode[i]
             plane_coef.append(torch.nn.Parameter(
-                scale * torch.randn((1, n_component[i], grid_size[mat_id_1], grid_size[mat_id_0])) + shift/sum(n_component)
+                scale * torch.randn((1, n_component[i], grid_size[mat_id_1], grid_size[mat_id_0])).abs()
+                # scale * torch.rand((1, n_component[i], grid_size[mat_id_1], grid_size[mat_id_0])) + shift/sum(n_component)
+                # scale * torch.ones((1, n_component[i], grid_size[mat_id_1], grid_size[mat_id_0]))
+                # scale * torch.ones((1, n_component[i], grid_size[mat_id_1], grid_size[mat_id_0])) * torch.linspace(0.1, 1, n_component[i]).reshape(1, -1, 1, 1)
             ))
-            line_coef.append(torch.nn.Parameter(scale * torch.randn((1, n_component[i], grid_size[vec_id], 1)) + shift/sum(n_component)
+            line_coef.append(torch.nn.Parameter(
+                scale * torch.randn((1, n_component[i], grid_size[vec_id], 1)).abs()
+                # scale * torch.rand((1, n_component[i], grid_size[vec_id], 1))
+                # scale * torch.ones((1, n_component[i], grid_size[vec_id], 1)) * torch.linspace(0.1, 1, n_component[i]).reshape(1, -1, 1, 1)
+                # scale * torch.ones((1, n_component[i], grid_size[vec_id], 1))
             ))
 
         return torch.nn.ParameterList(plane_coef), torch.nn.ParameterList(line_coef)
@@ -107,6 +115,7 @@ class TensorVMSplit(TensorBase):
                                             align_corners=True, smoothing=self.smoothing).view(-1, *xyz_sampled.shape[:1])
             sigma_feature = sigma_feature + torch.sum(plane_coef_point * line_coef_point, dim=0)
         # return self.dbasis_mat(sigma_feature.reshape(-1, 1)).reshape(-1)
+        mul = 24*3 / sum(self.density_n_comp)
         return sigma_feature
 
     def compute_density_norm(self, xyz_sampled, activation_fn):

@@ -25,10 +25,13 @@ rf:
   hier_sizes: [1]
 
 bg_module:
-  _target_: models.render_modules.BackgroundRender
+  # _target_: models.render_modules.BackgroundRender
+  _target_: models.render_modules.HierarchicalBG
   bg_rank: 3
+  num_levels: 3
   num_layers: 0
   unwrap_fn: 
+    # _target_: models.render_modules.PanoUnwrap
     _target_: models.render_modules.CubeUnwrap
   # view_encoder:
   #   _target_: models.ish.ISH

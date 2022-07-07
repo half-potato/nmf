@@ -28,7 +28,7 @@ class AddBasis(torch.nn.Module):
         return x[..., :self.n] + x[..., self.n:2*self.n] + x[..., 2*self.n:3*self.n]
 
 @hydra.main(version_base=None, config_path=str(Path(__file__).parent.parent / 'configs'), config_name='default')
-@torch.no_grad()
+# @torch.no_grad()
 def main(cfg: DictConfig):
     device = torch.device('cuda')
     torch.set_default_dtype(torch.float32)
@@ -44,18 +44,24 @@ def main(cfg: DictConfig):
 
     # init model
     ckpt = torch.load(cfg.ckpt)
-    ckpt['config']['bg_module']['bg_resolution'] = ckpt['state_dict']['bg_module.bg_mat'].shape[-1]
-    tensorf = TensorNeRF.load(ckpt).to(device)
-    tensorf.rf.set_smoothing(0)
+    # ckpt['config']['bg_module']['bg_resolution'] = ckpt['state_dict']['bg_module.bg_mat'].shape[-1] // 6
+    ckpt['config']['bg_module']['bg_resolution'] = 256
+    tensorf = hydra.utils.instantiate(cfg.model)(aabb=torch.tensor([[-1.5, -1.5, -1.5], [1.5, 1.5, 1.5]]), grid_size=[128]*3).to(device)
+    tensorf2 = TensorNeRF.load(ckpt).to(device)
+    tensorf.bg_module = tensorf2.bg_module
+    tensorf.rf.set_smoothing(0.5)
+    tensorf.fea2denseAct = 'softplus_shift'
     tensorf.max_bounce_rays = 16000
     # tensorf.normal_module = render_modules.AppDimNormal(1, activation=torch.nn.Identity)
     tensorf.normal_module = render_modules.DeepMLPNormal(pospe=16, num_layers=3).to(device)
-    tensorf.rf.basis_mat = AddBasis(48)
+    tensorf.l = 1
+    # tensorf.rf.basis_mat = AddBasis(48)
     tensorf.alphaMask = None
     tensorf.max_recurs = 3
-    tensorf.roughness_rays = 1
+    tensorf.roughness_rays = 5
 
-    tensorf.rf.init_svd_volume(300)
+    # tensorf.rf.init_svd_volume(16)
+    # tensorf.to(device)
 
     # tensorf.rf.density_plane[i][:, :, 40:100, 40:100] += 1
     # tensorf.rf.density_line[i][:, :, ind:ind+8] += 100
@@ -70,15 +76,15 @@ def main(cfg: DictConfig):
     row, col, line = torch.meshgrid(torch.linspace(-d, d, H, device=device), torch.linspace(-d, d, W, device=device), torch.linspace(-d, d, H, device=device), indexing='ij')
 
     ord = torch.inf
-    # ord = 2
+    ord = 2
     inner_r = 0.13
-    outer_r = 0.2
+    outer_r = 0.5
     eps = 0.0
 
     # train shape
-    optim = torch.optim.Adam(tensorf.parameters(), lr=1e-0)
+    optim = torch.optim.Adam(tensorf.parameters(), lr=5e-3)
     with torch.enable_grad():
-        for _ in tqdm(range(100)):
+        for _ in tqdm(range(500)):
             ox, oy, oz = torch.rand(3, H, W, H, device=device)/H
             y = (col+oy)
             x = (row+ox)
@@ -90,10 +96,10 @@ def main(cfg: DictConfig):
             feat = tensorf.rf.compute_densityfeature(xyz)
             sigma_feat = tensorf.feature2density(feat)
 
-
             sigma = 1-torch.exp(-sigma_feat * 0.025 * 25)
             # sigma = 1-torch.exp(-sigma_feat)
-            loss = (-sigma[mask].clip(max=1).sum() + sigma[~mask].clip(min=1e-8).sum())
+            # sigma = sigma_feat
+            loss = ((sigma[mask]-1).abs().mean() + sigma[~mask].abs().mean())
             optim.zero_grad()
             loss.backward()
             optim.step()
@@ -115,7 +121,7 @@ def main(cfg: DictConfig):
             p_norm = tensorf.normal_module(xyz[full_shell], app_features)
             sxyz = xyz[full_shell, :3]
             if ord == 2:
-                gt_norm = xyz / (torch.linalg.norm(xyz, dim=1, keepdim=True)+1e-10)
+                gt_norm = sxyz / (torch.linalg.norm(sxyz, dim=1, keepdim=True)+1e-10)
             else:
                 gt_norm = torch.zeros_like(sxyz)
                 inds = torch.argmax(sxyz.abs(), dim=1)
@@ -125,10 +131,11 @@ def main(cfg: DictConfig):
             world_loss.backward()
             optim.step()
 
+    r, g, b = 0.955, 0.638, 0.538
     # train appearance
-    optim = torch.optim.Adam(tensorf.parameters(), lr=7e-1)
+    optim = torch.optim.Adam(tensorf.parameters(), lr=1e-3)
     with torch.enable_grad():
-        for _ in tqdm(range(50)):
+        for _ in tqdm(range(200)):
             ox, oy, oz = torch.rand(3, H, W, H, device=device)/H
             y = (col+oy)
             x = (row+ox)
@@ -138,7 +145,7 @@ def main(cfg: DictConfig):
             mask = (dist < outer_r + eps)
             app_features = tensorf.rf.compute_appfeature(xyz[mask])
             diffuse, tint, roughness, refraction_index, reflectivity, ratio_diffuse = tensorf.diffuse_module(
-                xyz[mask], None, app_features)
+                    xyz[mask], torch.rand_like(xyz[..., :3][mask]), app_features)
 
             # shell = (dist[mask] > inner_r - eps)
             # full_shell = (dist < outer_r + eps) & (dist > inner_r - eps)
@@ -146,9 +153,12 @@ def main(cfg: DictConfig):
             # gt_norm = xyz[full_shell, :3] / (torch.linalg.norm(xyz[full_shell, :3], dim=1, keepdim=True)+1e-10)
             # world_loss = -(p_norm * gt_norm).sum(dim=-1).sum()
             
-            loss = (diffuse - 1)**2 + (roughness - 0.00)**2 + (refraction_index - 1.5)**2 + (reflectivity - 1.00)**2 + (ratio_diffuse - 0.00)**2
+            tint_loss = (tint[..., 0]-r)**2 + (tint[..., 1]-g)**2 + (tint[..., 2]-b)**2
+            diffuse_loss = (diffuse[..., 0]-r)**2 + (diffuse[..., 1]-g)**2 + (diffuse[..., 2]-b)**2
+            property_loss = (roughness - 0.05)**2 + (refraction_index - 1.5)**2 + (reflectivity - 1.00)**2 + (ratio_diffuse - 0.00)**2
+            loss = tint_loss.mean() + diffuse_loss.mean() + property_loss.mean()
             optim.zero_grad()
-            loss.mean().backward()
+            loss.backward()
             optim.step()
 
     # tensorf.save('diffuse_sphere.pth', cfg)

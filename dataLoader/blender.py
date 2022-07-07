@@ -8,6 +8,7 @@ from torchvision import transforms as T
 
 # import matplotlib.pyplot as plt
 from icecream import ic
+import imageio
 
 from .ray_utils import *
 
@@ -89,7 +90,8 @@ class BlenderDataset(Dataset):
 
             image_path = os.path.join(self.root_dir, f"{frame['file_path']}{ext}")
             self.image_paths += [image_path]
-            img = Image.open(image_path)
+            # img = Image.open(image_path)
+            img = imageio.imread(image_path)
             
             if self.downsample!=1.0:
                 img = img.resize(self.img_wh, Image.LANCZOS)

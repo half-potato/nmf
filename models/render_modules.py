@@ -46,8 +46,8 @@ def RGBRender(xyz_sampled, viewdirs, features):
 class PanoUnwrap(torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
-        self.H_mul = 1
-        self.W_mul = 2
+        self.H_mul = 2
+        self.W_mul = 4
 
     def forward(self, viewdirs):
         B = viewdirs.shape[0]
@@ -57,7 +57,7 @@ class PanoUnwrap(torch.nn.Module):
         theta = safemath.atan2(c, norm2d)
         x = torch.cat([
             (phi % (2*np.pi) - np.pi) / np.pi,
-            theta/np.pi/2,
+            theta/np.pi*2,
         ], dim=1).reshape(1, 1, -1, 2)
         return x
 
@@ -69,13 +69,15 @@ class CubeUnwrap(torch.nn.Module):
 
     def forward(self, viewdirs):
         B = viewdirs.shape[0]
-        mul = (1+1e-5)
+        # mul = (1+1e-5)
+        mul = 1
+        l = 1/(1-1/64)
         sqdirs = mul * viewdirs / (torch.linalg.norm(viewdirs, dim=-1, keepdim=True, ord=torch.inf) + 1e-8)
         a, b, c = sqdirs[:, 0], sqdirs[:, 1], sqdirs[:, 2]
-        # quadrants are +x, -x, +y, -y, +z, -z
+        # quadrants are -x, +x, +y, -y, +z, -z
         quadrants = [
-            (a >=  mul, (b, c), 0),
-            (a <= -mul, (b, c), 1),
+            (a >=  mul, (b, c), 1),
+            (a <= -mul, (b, c), 0),
             (b >=  mul, (a, c), 2),
             (b <= -mul, (a, c), 3),
             (c >=  mul, (a, b), 4),
@@ -83,14 +85,72 @@ class CubeUnwrap(torch.nn.Module):
         ]
         coords = torch.zeros_like(viewdirs[..., :2])
         for cond, (x, y), offset_mul in quadrants:
-            coords[..., 0][cond] = ((x[cond] / mul +1)/2 + offset_mul)/3 - 1
-            coords[..., 1][cond] = y[cond] / mul
+            coords[..., 0][cond] = ((x[cond] / l +1)/2 + offset_mul)/3 - 1
+            coords[..., 1][cond] = y[cond] / l
         return coords.reshape(1, 1, -1, 2)
+
+class HierarchicalBG(torch.nn.Module):
+    def __init__(self, bg_rank, unwrap_fn, bg_resolution=512, num_levels=2, featureC=128, num_layers=2):
+        super().__init__()
+        self.num_levels = num_levels
+        self.bg_mats = nn.ParameterList([
+            nn.Parameter(0.1 * torch.randn((1, bg_rank, 2**i * bg_resolution*unwrap_fn.H_mul, 2**i * bg_resolution*unwrap_fn.W_mul)))
+            for i in range(num_levels)])
+        self.unwrap_fn = unwrap_fn
+        self.bg_rank = bg_rank
+        if num_layers == 0 and bg_rank == 3:
+            self.bg_net = nn.Softplus()
+        else:
+            self.bg_net = nn.Sequential(
+                nn.Linear(bg_rank, featureC, bias=False),
+                *sum([[
+                        torch.nn.ReLU(inplace=True),
+                        torch.nn.Linear(featureC, featureC, bias=False)
+                    ] for _ in range(num_layers-2)], []),
+                torch.nn.ReLU(inplace=True),
+                nn.Linear(featureC, 3, bias=False),
+                nn.Softplus()
+            )
+        self.align_corners = False
+
+    @torch.no_grad()
+    def save(self, path):
+        bg_resolution = self.bg_mats[-1].shape[2] // self.unwrap_fn.H_mul
+        bg_mats = []
+        for i in range(self.num_levels):
+            bg_mat = F.interpolate(self.bg_mats[i].data, size=(bg_resolution*self.unwrap_fn.H_mul, bg_resolution*self.unwrap_fn.W_mul), mode='bilinear', align_corners=self.align_corners)
+            bg_mats.append(bg_mat)
+        bg_mat = sum(bg_mats)
+        im = (255*self.bg_net(bg_mat).clamp(0, 1)).short().permute(0, 2, 3, 1).squeeze(0)
+        im = im.cpu().numpy()
+        im = im[::-1].astype(np.uint8)
+        im = cv2.cvtColor(im, cv2.COLOR_RGB2BGR)
+        cv2.imwrite(path, im)
+
+    @torch.no_grad()
+    def upsample(self, bg_resolution):
+        return
+        self.bg_mats = nn.ParameterList([
+                nn.Parameter(
+                    F.interpolate(self.bg_mats[i].data, size=(2**i * bg_resolution*self.unwrap_fn.H_mul, 2**i * bg_resolution*self.unwrap_fn.W_mul), mode='bilinear', align_corners=self.align_corners)
+                )
+                for i in range(self.num_levels)
+            ])
+        
+    def forward(self, viewdirs):
+        B = viewdirs.shape[0]
+        x = self.unwrap_fn(viewdirs)
+
+        embs = []
+        for i, bg_mat in enumerate(self.bg_mats):
+            emb = F.grid_sample(bg_mat, x, mode='bilinear', align_corners=self.align_corners)
+            emb = emb.reshape(self.bg_rank, -1).T
+            embs.append(emb / 2**i)
+        emb = sum(embs)
+        return self.bg_net(emb)
 
 
 class BackgroundRender(torch.nn.Module):
-    bg_rank: int
-    bg_resolution: List[int]
     def __init__(self, bg_rank, unwrap_fn, bg_resolution=512, view_encoder=None, featureC=128, num_layers=2):
         super().__init__()
         self.bg_mat = nn.Parameter(0.1 * torch.randn((1, bg_rank, bg_resolution*unwrap_fn.H_mul, bg_resolution*unwrap_fn.W_mul))) # [1, R, H, W]
@@ -99,7 +159,7 @@ class BackgroundRender(torch.nn.Module):
         self.bg_rank = bg_rank
         d = self.view_encoder.dim() if self.view_encoder is not None else 0
         if num_layers == 0 and bg_rank == 3:
-            self.bg_net = nn.Sigmoid()
+            self.bg_net = nn.Softplus()
         else:
             self.bg_net = nn.Sequential(
                 nn.Linear(bg_rank+d, featureC, bias=False),
@@ -109,12 +169,13 @@ class BackgroundRender(torch.nn.Module):
                     ] for _ in range(num_layers-2)], []),
                 torch.nn.ReLU(inplace=True),
                 nn.Linear(featureC, 3, bias=False),
-                nn.Sigmoid()
+                nn.Softplus()
             )
+        self.align_corners = False
 
     @torch.no_grad()
     def save(self, path):
-        im = (255*self.bg_net(self.bg_mat)).short().permute(0, 2, 3, 1).squeeze(0)
+        im = (255*self.bg_net(self.bg_mat).clamp(0, 1)).short().permute(0, 2, 3, 1).squeeze(0)
         im = im.cpu().numpy()
         im = im[::-1].astype(np.uint8)
         im = cv2.cvtColor(im, cv2.COLOR_RGB2BGR)
@@ -123,14 +184,14 @@ class BackgroundRender(torch.nn.Module):
     @torch.no_grad()
     def upsample(self, bg_resolution):
         self.bg_mat = torch.nn.Parameter(
-            F.interpolate(self.bg_mat.data, size=(bg_resolution*self.unwrap_fn.H_mul, bg_resolution*self.unwrap_fn.W_mul), mode='bilinear', align_corners=True)
+            F.interpolate(self.bg_mat.data, size=(bg_resolution*self.unwrap_fn.H_mul, bg_resolution*self.unwrap_fn.W_mul), mode='bilinear', align_corners=self.align_corners)
         )
         
     def forward(self, viewdirs):
         B = viewdirs.shape[0]
         x = self.unwrap_fn(viewdirs)
 
-        emb = F.grid_sample(self.bg_mat, x, mode='bicubic', align_corners=True)
+        emb = F.grid_sample(self.bg_mat, x, mode='bilinear', align_corners=self.align_corners)
         emb = emb.reshape(self.bg_rank, -1).T
         # return torch.sigmoid(emb)
         if self.view_encoder is not None:
@@ -252,51 +313,16 @@ class MLPDiffuse(torch.nn.Module):
         mlp_out = self.mlp(mlp_in)
         rgb = torch.sigmoid(mlp_out)
 
-        roughness = torch.sigmoid(mlp_out[..., 6:7]+1) * self.max_roughness
+        roughness = torch.sigmoid(mlp_out[..., 6:7]) * self.max_roughness
         refraction_index = F.softplus(mlp_out[..., 7:8]-1) + self.min_refraction_index
-        reflectivity = rgb[..., 8:9]
+        reflectivity = torch.sigmoid(mlp_out[..., 8:9])
         diffuse_ratio = rgb[..., 9:10]
-        tint = rgb[..., 3:6] 
-        diffuse = rgb[..., :3] 
+        # tint = rgb[..., 3:6] 
+        # diffuse = rgb[..., :3]
+        tint = F.softplus(mlp_out[..., 3:6])
+        diffuse = F.softplus(mlp_out[..., :3])
 
         return diffuse, tint, roughness, refraction_index, reflectivity, diffuse_ratio
-
-class MLPRender_Fea(torch.nn.Module):
-    in_channels: int
-    viewpe: int
-    feape: int
-    refpe: int
-    featureC: int
-    num_layers: int
-    def __init__(self, in_channels, viewpe=6, feape=6, refpe=6, featureC=128):
-        super().__init__()
-
-        self.in_mlpC = 2*refpe*3 + 2*viewpe*3 + 2*feape*in_channels + 3 + in_channels
-        self.in_mlpC += 3 if refpe > 0 else 0
-        self.viewpe = viewpe
-        self.refpe = refpe
-        self.feape = feape
-        layer1 = torch.nn.Linear(self.in_mlpC, featureC)
-        layer2 = torch.nn.Linear(featureC, featureC)
-        layer3 = torch.nn.Linear(featureC, 3)
-
-        self.mlp = torch.nn.Sequential(layer1, torch.nn.ReLU(
-            inplace=True), layer2, torch.nn.ReLU(inplace=True), layer3)
-        torch.nn.init.constant_(self.mlp[-1].bias, 0)
-
-    def forward(self, pts, viewdirs, features, refdirs=None, **kwargs):
-        indata = [features, viewdirs]
-        if self.feape > 0:
-            indata += [positional_encoding(features, self.feape)]
-        if self.viewpe > 0:
-            indata += [positional_encoding(viewdirs, self.viewpe)]
-        if self.refpe > 0:
-            indata += [positional_encoding(refdirs, self.refpe), refdirs]
-        mlp_in = torch.cat(indata, dim=-1)
-        rgb = self.mlp(mlp_in)
-        rgb = torch.sigmoid(rgb)
-
-        return rgb
 
 class DeepMLPNormal(torch.nn.Module):
     in_channels: int
@@ -305,11 +331,12 @@ class DeepMLPNormal(torch.nn.Module):
     refpe: int
     featureC: int
     num_layers: int
-    def __init__(self, pospe=16, in_channels=0, featureC=128, num_layers=2):
+    def __init__(self, pospe=16, in_channels=0, featureC=128, num_layers=2, lr=1e-4):
         super().__init__()
 
         self.in_mlpC = 2*pospe*3 + 3
         self.pospe = pospe
+        self.lr = lr
 
         self.mlp0 = torch.nn.Sequential(
             torch.nn.Linear(self.in_mlpC, featureC),
@@ -348,12 +375,13 @@ class MLPNormal(torch.nn.Module):
     feape: int
     featureC: int
     num_layers: int
-    def __init__(self, in_channels, pospe=6, feape=6, featureC=128, num_layers=2):
+    def __init__(self, in_channels, pospe=6, feape=6, featureC=128, num_layers=2, lr=1e-4):
         super().__init__()
 
         self.in_mlpC = 2*pospe*3 + 2*feape*in_channels + 3 + in_channels
         self.pospe = pospe
         self.feape = feape
+        self.lr = lr
 
         self.mlp = torch.nn.Sequential(
             torch.nn.Linear(self.in_mlpC, featureC),
@@ -428,6 +456,43 @@ class MLPRender_PE(torch.nn.Module):
 
         return rgb
 
+
+class MLPRender_Fea(torch.nn.Module):
+    in_channels: int
+    viewpe: int
+    feape: int
+    refpe: int
+    featureC: int
+    num_layers: int
+    def __init__(self, in_channels, viewpe=6, feape=6, refpe=6, featureC=128):
+        super().__init__()
+
+        self.in_mlpC = 2*refpe*3 + 2*viewpe*3 + 2*feape*in_channels + 3 + in_channels
+        self.in_mlpC += 3 if refpe > 0 else 0
+        self.viewpe = viewpe
+        self.refpe = refpe
+        self.feape = feape
+        layer1 = torch.nn.Linear(self.in_mlpC, featureC)
+        layer2 = torch.nn.Linear(featureC, featureC)
+        layer3 = torch.nn.Linear(featureC, 3)
+
+        self.mlp = torch.nn.Sequential(layer1, torch.nn.ReLU(
+            inplace=True), layer2, torch.nn.ReLU(inplace=True), layer3)
+        torch.nn.init.constant_(self.mlp[-1].bias, 0)
+
+    def forward(self, pts, viewdirs, features, refdirs=None, **kwargs):
+        indata = [features, viewdirs]
+        if self.feape > 0:
+            indata += [positional_encoding(features, self.feape)]
+        if self.viewpe > 0:
+            indata += [positional_encoding(viewdirs, self.viewpe)]
+        if self.refpe > 0:
+            indata += [positional_encoding(refdirs, self.refpe), refdirs]
+        mlp_in = torch.cat(indata, dim=-1)
+        rgb = self.mlp(mlp_in)
+        rgb = torch.sigmoid(rgb)
+
+        return rgb
 
 class MLPRender(torch.nn.Module):
     def __init__(self, in_channels, viewpe=6, featureC=128):

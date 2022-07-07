@@ -133,7 +133,9 @@ def reconstruction(args):
     bounce_n_list = args.params.bounce_n_list
     #linear in logrithmic space
     N_voxel_list = (torch.round(torch.exp(torch.linspace(np.log(args.params.N_voxel_init), np.log(args.params.N_voxel_final), len(upsamp_list)+1))).long()).tolist()[1:]
-    l_list = torch.linspace(1.0, 0.0, len(uplambda_list)+1).tolist()
+    # l_list = torch.linspace(0.7, 0.0, len(uplambda_list)+1).tolist()
+    # TODO FIX
+    l_list = torch.linspace(0.9, 0.9, len(uplambda_list)+1).tolist()
     tensorf.l = l_list.pop(0)
     tensorf.max_bounce_rays = bounce_n_list.pop(0)
 
@@ -237,7 +239,8 @@ def reconstruction(args):
                 normal_loss = data['normal_loss'].mean()
                 floater_loss = data['floater_loss'].mean()
                 roughness = data['roughness'].mean()
-                loss = torch.sqrt((data['rgb_map'] - rgb_train) ** 2 + args.params.charbonier_eps**2).mean()
+                # loss = torch.sqrt((data['rgb_map'] - rgb_train) ** 2 + args.params.charbonier_eps**2).mean()
+                loss = F.huber_loss(data['rgb_map'], rgb_train, delta=1)
                 photo_loss = ((data['rgb_map'] - rgb_train) ** 2).mean().detach()
                 backwards_rays_loss = data['backwards_rays_loss']
 

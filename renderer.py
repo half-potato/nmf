@@ -29,7 +29,10 @@ def chunk_renderer(rays, tensorf, focal, keys=['rgb_map'], chunk=4096, **kwargs)
         if torch.is_tensor(data[key][0]):
             data[key] = torch.cat(data[key], dim=0)
         else:
-            data[key] = torch.tensor(data[key])
+            try:
+                data[key] = torch.tensor(data[key])
+            except:
+                ic(key, data[key][0])
     return data
 
 class BundleRender:
@@ -175,8 +178,8 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
     focal = (test_dataset.focal[0] if ndc_ray else test_dataset.focal)
     brender = BundleRender(renderer, render_mode, H, W, focal)
     env_map, col_map = tensorf.recover_envmap(512, xyz=torch.tensor([-0.3042,  0.8466,  0.8462,  0.0027], device='cuda:0'))
-    env_map = (env_map.detach().cpu().numpy() * 255).astype('uint8')
-    col_map = (col_map.detach().cpu().numpy() * 255).astype('uint8')
+    env_map = (env_map.clamp(0, 1).detach().cpu().numpy() * 255).astype('uint8')
+    col_map = (col_map.clamp(0, 1).detach().cpu().numpy() * 255).astype('uint8')
     imageio.imwrite(f'{savePath}/envmaps/{prtx}view_map.png', col_map)
     imageio.imwrite(f'{savePath}/envmaps/{prtx}ref_map.png', env_map)
     print(f"Using {render_mode} render mode")
@@ -211,7 +214,7 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
                 l_alex.append(l_a)
                 l_vgg.append(l_v)
 
-        rgb_map = (rgb_map.numpy() * 255).astype('uint8')
+        rgb_map = (rgb_map.clamp(0, 1).numpy() * 255).astype('uint8')
         # rgb_map = np.concatenate((rgb_map, depth_map), axis=1)
         rgb_maps.append(rgb_map)
         depth_maps.append(depth_map)
@@ -220,7 +223,7 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
             rgb_map = np.concatenate((rgb_map, depth_map), axis=1)
             imageio.imwrite(f'{savePath}/rgbd/{prtx}{idx:03d}.png', rgb_map)
             imageio.imwrite(f'{savePath}/rgbd/{prtx}normal_{idx:03d}.png', normal_map)
-            imageio.imwrite(f'{savePath}/rgbd/{prtx}debug_{idx:03d}.png', (255*debug_map.numpy()).astype(np.uint8))
+            imageio.imwrite(f'{savePath}/rgbd/{prtx}debug_{idx:03d}.png', (255*debug_map.clamp(0, 1).numpy()).astype(np.uint8))
             imageio.imwrite(f'{savePath}/envmaps/{prtx}ref_map_{idx:03d}.png', env_map)
             imageio.imwrite(f'{savePath}/envmaps/{prtx}view_map_{idx:03d}.png', col_map)
 
