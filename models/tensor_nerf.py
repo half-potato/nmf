@@ -1,6 +1,4 @@
-from numbers import Rational
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 import time
@@ -13,7 +11,6 @@ import random
 import hydra
 
 from .tensoRF import TensorCP, TensorVM, TensorVMSplit
-from .multi_level_rf import MultiLevelRF
 from torch.autograd import grad
 import matplotlib.pyplot as plt
 import math
@@ -108,6 +105,7 @@ def select_top_n_app_mask(app_mask, weight, prob, N, t=0, wt=0):
 
 def raw2alpha(sigma, flip, dist):
     # sigma, dist  [N_rays, N_samples]
+    # TODO REMOVE
     v = torch.exp(-sigma*dist)
     alpha = torch.where(flip, v, 1-v)
     # alpha = 1. - torch.exp(-sigma*dist)
@@ -838,7 +836,7 @@ class TensorNeRF(torch.nn.Module):
 
                     # tinted_ref_rgb = ref_rgb.mean(dim=1)
                     # debug[full_bounce_mask] += ratio_reflected[bounce_mask] * tinted_ref_rgb
-                    debug[full_bounce_mask] += tinted_ref_rgb
+                    debug[full_bounce_mask] += ref_rgb.mean(dim=1)
                     reflect_rgb[bounce_mask] = tinted_ref_rgb
                     # recur += reflect_data['recur']
 

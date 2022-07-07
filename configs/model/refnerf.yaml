@@ -15,7 +15,7 @@ enable_alpha_mask: true
 rf:
   _partial_: True
   _target_: models.tensoRF.TensorVMSplit
-  density_n_comp: 24
+  density_n_comp: 16
   appearance_n_comp: 48
   app_dim: 48
   step_ratio: 0.5
@@ -24,20 +24,20 @@ rf:
   # num_levels: 1
   hier_sizes: [1]
 
-bg_module:
-  # _target_: models.render_modules.BackgroundRender
-  _target_: models.render_modules.HierarchicalBG
-  bg_rank: 3
-  num_levels: 3
-  num_layers: 0
-  unwrap_fn: 
-    # _target_: models.render_modules.PanoUnwrap
-    _target_: models.render_modules.CubeUnwrap
-  # view_encoder:
-  #   _target_: models.ish.ISH
-  #   max_degree: 6
-  # bg_resolution: [4096, 2048]
-  bg_resolution: 256
+# bg_module:
+#   # _target_: models.render_modules.BackgroundRender
+#   _target_: models.render_modules.HierarchicalBG
+#   bg_rank: 3
+#   num_levels: 3
+#   num_layers: 0
+#   unwrap_fn: 
+#     # _target_: models.render_modules.PanoUnwrap
+#     _target_: models.render_modules.CubeUnwrap
+#   # view_encoder:
+#   #   _target_: models.ish.ISH
+#   #   max_degree: 6
+#   # bg_resolution: [4096, 2048]
+#   bg_resolution: 256
 
 diffuse_module:
   _partial_: True

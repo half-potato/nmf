@@ -46,10 +46,13 @@ def main(cfg: DictConfig):
     ckpt = torch.load(cfg.ckpt)
     # ckpt['config']['bg_module']['bg_resolution'] = ckpt['state_dict']['bg_module.bg_mat'].shape[-1] // 6
     ckpt['config']['bg_module']['bg_resolution'] = 256
-    tensorf = hydra.utils.instantiate(cfg.model)(aabb=torch.tensor([[-1.5, -1.5, -1.5], [1.5, 1.5, 1.5]]), grid_size=[128]*3).to(device)
+    tensorf = hydra.utils.instantiate(cfg.model)(aabb=torch.tensor([[-1.0, -1.0, -1.0], [1.0, 1.0, 1.0]]), grid_size=[128]*3).to(device)
     tensorf2 = TensorNeRF.load(ckpt).to(device)
+    # tensorf = TensorNeRF.load(ckpt).to(device)
     tensorf.bg_module = tensorf2.bg_module
+
     tensorf.rf.set_smoothing(0.5)
+    # tensorf.fea2denseAct = 'identity'
     tensorf.fea2denseAct = 'softplus_shift'
     tensorf.max_bounce_rays = 16000
     # tensorf.normal_module = render_modules.AppDimNormal(1, activation=torch.nn.Identity)
@@ -79,31 +82,39 @@ def main(cfg: DictConfig):
     ord = 2
     inner_r = 0.13
     outer_r = 0.5
-    eps = 0.0
+    eps = 0.00
 
     # train shape
-    optim = torch.optim.Adam(tensorf.parameters(), lr=5e-3)
+    # optim = torch.optim.Adam(tensorf.parameters(), lr=0.02, betas=(0.9,0.99))
+    optim = torch.optim.Adam(tensorf.parameters(), lr=0.02, betas=(0.9,0.99))
     with torch.enable_grad():
-        for _ in tqdm(range(500)):
-            ox, oy, oz = torch.rand(3, H, W, H, device=device)/H
+        pbar = tqdm(range(250))
+        for _ in pbar:
+            ox, oy, oz = (torch.rand(3, H, W, H, device=device)*2-1)/H
             y = (col+oy)
             x = (row+ox)
             z = (line+oz)
-            xyz = torch.stack([x, y, z, torch.zeros_like(x)], dim=-1).reshape(-1, 4)
+            xyz = torch.stack([x, y, z, torch.ones_like(x)], dim=-1).reshape(-1, 4)
+            inds = np.random.permutation(xyz.shape[0])[:xyz.shape[0]//8]
+            # xyz = xyz[inds]
             dist = torch.linalg.norm(xyz[:, :3], dim=1, ord=ord)
             mask = (dist < outer_r)
+            # mask2 = (dist > outer_r+eps)
             # mask = (dist < outer_r) & (dist > inner_r) & (y.reshape(-1) > 0)
             feat = tensorf.rf.compute_densityfeature(xyz)
             sigma_feat = tensorf.feature2density(feat)
 
-            sigma = 1-torch.exp(-sigma_feat * 0.025 * 25)
-            # sigma = 1-torch.exp(-sigma_feat)
+            # sigma = 1-torch.exp(-sigma_feat * 0.025 * 25)
+            sigma = 1-torch.exp(-sigma_feat)
             # sigma = sigma_feat
             loss = ((sigma[mask]-1).abs().mean() + sigma[~mask].abs().mean())
+            # loss = (-sigma[mask].clip(max=1).sum() + sigma[~mask].clip(min=1e-8).sum())
+            pbar.set_description(f"{loss.detach().item():.06f}")
             optim.zero_grad()
             loss.backward()
             optim.step()
 
+    """
     # train normals
     optim = torch.optim.Adam(tensorf.parameters(), lr=5e-2)
     with torch.enable_grad():
@@ -160,13 +171,7 @@ def main(cfg: DictConfig):
             optim.zero_grad()
             loss.backward()
             optim.step()
-
-    # tensorf.save('diffuse_sphere.pth', cfg)
-
-    # for i in range(len(tensorf.rf.app_plane)):
-    #     tensorf.rf.app_plane[i][:, :6] = 2
-    #     tensorf.rf.app_plane[i][:, 48:48+6] = 2
-    #     tensorf.rf.app_plane[i][:, 48*2:48*2+6] = 2
+    """
 
     # init dataset
     dataset = dataset_dict[cfg.dataset.dataset_name]

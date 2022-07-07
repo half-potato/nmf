@@ -18,7 +18,7 @@ roughness_rays: 10
 rf:
   _partial_: True
   _target_: models.tensoRF.TensorVMSplit
-  density_n_comp: 16
+  density_n_comp: 24
   appearance_n_comp: 24
   app_dim: 27
   # appearance_n_comp: 24

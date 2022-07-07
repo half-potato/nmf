@@ -5,6 +5,7 @@ from icecream import ic
 from .convolver import Convolver
 from .grid_sample_Cinf import grid_sample
 import random
+import math
 
 # here is original grid sample derivative for testing
 # def grid_sample(*args, smoothing, **kwargs):
@@ -23,6 +24,7 @@ class TensorVMSplit(TensorBase):
         # num_levels x num_outputs
         # self.interp_mode = 'bilinear'
         self.interp_mode = 'bicubic'
+        self.align_corners = False
 
     def set_smoothing(self, sm):
         self.smoothing = sm
@@ -32,23 +34,42 @@ class TensorVMSplit(TensorBase):
         self.density_plane, self.density_line = self.init_one_svd(self.density_n_comp, [int(self.density_res_multi*g) for g in self.grid_size], 0.1, -0)
         self.app_plane, self.app_line = self.init_one_svd(self.app_n_comp, self.grid_size, 0.1, 0)
         self.basis_mat = torch.nn.Linear(sum(self.app_n_comp), self.app_dim, bias=False)
-        # self.dbasis_mat = torch.nn.Linear(1, 1, bias=True)
+        self.dbasis_mat = torch.nn.Linear(sum(self.density_n_comp), 1, bias=False)
         # torch.nn.init.constant_(self.dbasis_mat.bias, -10)
         # torch.nn.init.constant_(self.dbasis_mat.weight, 1)
 
     def init_one_svd(self, n_component, grid_size, scale, shift):
         plane_coef, line_coef = [], []
+
+        # xyz = torch.meshgrid(torch.linspace(-1, 1, grid_size[0]), torch.linspace(-1, 1, grid_size[1]), torch.linspace(-1, 1, grid_size[2]), indexing='ij')
+        xyg = torch.meshgrid(torch.linspace(-1, 1, grid_size[0]), torch.linspace(-1, 1, grid_size[1]), indexing='ij')
+        xy = xyg[0] + xyg[1]
+
         for i in range(len(self.vecMode)):
             vec_id = self.vecMode[i]
             mat_id_0, mat_id_1 = self.matMode[i]
+            # pos_vals = (xyz[mat_id_0] + xyz[mat_id_1]).reshape(1, 1, grid_size[mat_id_0], grid_size[mat_id_1])
+            pos_vals = (xy).reshape(1, 1, grid_size[mat_id_0], grid_size[mat_id_1])
+            freqs = torch.arange(n_component[i]//2).reshape(1, -1, 1, 1)
+            line_pos_vals = torch.linspace(-1, 1, grid_size[vec_id]).reshape(1, 1, -1, 1)
             plane_coef.append(torch.nn.Parameter(
-                scale * torch.randn((1, n_component[i], grid_size[mat_id_1], grid_size[mat_id_0])).abs()
+                torch.cat([
+                    # scale * 1/(1+freqs) * (torch.sin(freqs * pos_vals * math.pi)),
+                    # scale * 1/(1+freqs) * (torch.cos(freqs * pos_vals * math.pi)),
+                    scale * 1/(1+freqs) * (torch.sin(freqs * pos_vals * math.pi)),
+                    scale * 1/(1+freqs) * (torch.cos(freqs * pos_vals * math.pi)),
+                ], dim=1)
+                # scale * torch.randn((1, n_component[i], grid_size[mat_id_1], grid_size[mat_id_0]))
                 # scale * torch.rand((1, n_component[i], grid_size[mat_id_1], grid_size[mat_id_0])) + shift/sum(n_component)
                 # scale * torch.ones((1, n_component[i], grid_size[mat_id_1], grid_size[mat_id_0]))
                 # scale * torch.ones((1, n_component[i], grid_size[mat_id_1], grid_size[mat_id_0])) * torch.linspace(0.1, 1, n_component[i]).reshape(1, -1, 1, 1)
             ))
             line_coef.append(torch.nn.Parameter(
-                scale * torch.randn((1, n_component[i], grid_size[vec_id], 1)).abs()
+                torch.cat([
+                    scale * 1/(1+freqs) * (torch.sin(freqs * line_pos_vals * math.pi)),
+                    scale * 1/(1+freqs) * (torch.cos(freqs * line_pos_vals * math.pi)),
+                ], dim=1)
+                # scale * torch.randn((1, n_component[i], grid_size[vec_id], 1))
                 # scale * torch.rand((1, n_component[i], grid_size[vec_id], 1))
                 # scale * torch.ones((1, n_component[i], grid_size[vec_id], 1)) * torch.linspace(0.1, 1, n_component[i]).reshape(1, -1, 1, 1)
                 # scale * torch.ones((1, n_component[i], grid_size[vec_id], 1))
@@ -104,18 +125,20 @@ class TensorVMSplit(TensorBase):
     def compute_densityfeature(self, xyz_sampled):
         coordinate_plane, coordinate_line = self.coordinates(xyz_sampled)
         sigma_feature = torch.zeros((xyz_sampled.shape[0],), device=xyz_sampled.device)
-        # size_weights = self.convolver.compute_size_weights(xyz_sampled, self.units/self.density_res_multi)
-        size_weights = 1
-        plane_kerns, line_kerns = [[None]], [[None]]
+        sigma_feature = []
 
         for idx_plane in range(len(self.density_plane)):
             plane_coef_point = grid_sample(self.density_plane[idx_plane], coordinate_plane[[idx_plane]],
-                                                align_corners=True, smoothing=self.smoothing).view(-1, *xyz_sampled.shape[:1])
+                                                align_corners=self.align_corners, smoothing=self.smoothing).view(-1, *xyz_sampled.shape[:1])
             line_coef_point = grid_sample(self.density_line[idx_plane], coordinate_line[[idx_plane]],
-                                            align_corners=True, smoothing=self.smoothing).view(-1, *xyz_sampled.shape[:1])
-            sigma_feature = sigma_feature + torch.sum(plane_coef_point * line_coef_point, dim=0)
+                                            align_corners=self.align_corners, smoothing=self.smoothing).view(-1, *xyz_sampled.shape[:1])
+            sigma_feature.append(plane_coef_point * line_coef_point)
+
         # return self.dbasis_mat(sigma_feature.reshape(-1, 1)).reshape(-1)
-        mul = 24*3 / sum(self.density_n_comp)
+        sigma_feature = torch.cat(sigma_feature, dim=0).T
+        # ic(sigma_feature[0], sigma_feature[0].sum())
+        sigma_feature = self.dbasis_mat(sigma_feature).squeeze(-1)
+        # sigma_feature = sigma_feature.sum(dim=-1)
         return sigma_feature
 
     def compute_density_norm(self, xyz_sampled, activation_fn):
@@ -165,9 +188,9 @@ class TensorVMSplit(TensorBase):
             mat_id_0, mat_id_1 = self.matMode[i]
             plane_coef[i] = torch.nn.Parameter(
                 F.interpolate(plane_coef[i].data, size=(res_target[mat_id_1], res_target[mat_id_0]), mode='bilinear',
-                              align_corners=True))
+                              align_corners=self.align_corners))
             line_coef[i] = torch.nn.Parameter(
-                F.interpolate(line_coef[i].data, size=(res_target[vec_id], 1), mode='bilinear', align_corners=True))
+                F.interpolate(line_coef[i].data, size=(res_target[vec_id], 1), mode='bilinear', align_corners=self.align_corners))
 
         return plane_coef, line_coef
 
@@ -259,11 +282,11 @@ class TensorCP(TensorBase):
 
 
         line_coef_point = F.grid_sample(self.density_line[0], coordinate_line[[0]],
-                                            align_corners=True).view(-1, *xyz_sampled.shape[:1])
+                                            align_corners=self.align_corners).view(-1, *xyz_sampled.shape[:1])
         line_coef_point = line_coef_point * F.grid_sample(self.density_line[1], coordinate_line[[1]],
-                                        align_corners=True).view(-1, *xyz_sampled.shape[:1])
+                                        align_corners=self.align_corners).view(-1, *xyz_sampled.shape[:1])
         line_coef_point = line_coef_point * F.grid_sample(self.density_line[2], coordinate_line[[2]],
-                                        align_corners=True).view(-1, *xyz_sampled.shape[:1])
+                                        align_corners=self.align_corners).view(-1, *xyz_sampled.shape[:1])
         sigma_feature = torch.sum(line_coef_point, dim=0)
         
         
@@ -277,11 +300,11 @@ class TensorCP(TensorBase):
 
 
         line_coef_point = F.grid_sample(self.app_line[0], coordinate_line[[0]],
-                                            align_corners=True).view(-1, *xyz_sampled.shape[:1])
+                                            align_corners=self.align_corners).view(-1, *xyz_sampled.shape[:1])
         line_coef_point = line_coef_point * F.grid_sample(self.app_line[1], coordinate_line[[1]],
-                                                          align_corners=True).view(-1, *xyz_sampled.shape[:1])
+                                                          align_corners=self.align_corners).view(-1, *xyz_sampled.shape[:1])
         line_coef_point = line_coef_point * F.grid_sample(self.app_line[2], coordinate_line[[2]],
-                                                          align_corners=True).view(-1, *xyz_sampled.shape[:1])
+                                                          align_corners=self.align_corners).view(-1, *xyz_sampled.shape[:1])
 
         return self.basis_mat(line_coef_point.T)
     
@@ -292,9 +315,9 @@ class TensorCP(TensorBase):
         for i in range(len(self.vecMode)):
             vec_id = self.vecMode[i]
             density_line_coef[i] = torch.nn.Parameter(
-                F.interpolate(density_line_coef[i].data, size=(res_target[vec_id], 1), mode='bilinear', align_corners=True))
+                F.interpolate(density_line_coef[i].data, size=(res_target[vec_id], 1), mode='bilinear', align_corners=self.align_corners))
             app_line_coef[i] = torch.nn.Parameter(
-                F.interpolate(app_line_coef[i].data, size=(res_target[vec_id], 1), mode='bilinear', align_corners=True))
+                F.interpolate(app_line_coef[i].data, size=(res_target[vec_id], 1), mode='bilinear', align_corners=self.align_corners))
 
         return density_line_coef, app_line_coef
 
@@ -378,16 +401,16 @@ class TensorVM(TensorBase):
         coordinate_line = torch.stack((xyz_sampled[..., self.vecMode[0]], xyz_sampled[..., self.vecMode[1]], xyz_sampled[..., self.vecMode[2]]))
         coordinate_line = torch.stack((torch.zeros_like(coordinate_line), coordinate_line), dim=-1).detach()
 
-        plane_feats = F.grid_sample(self.plane_coef[:, -self.density_n_comp:], coordinate_plane, align_corners=True).view(
+        plane_feats = F.grid_sample(self.plane_coef[:, -self.density_n_comp:], coordinate_plane, align_corners=self.align_corners).view(
                                         -1, *xyz_sampled.shape[:1])
-        line_feats = F.grid_sample(self.line_coef[:, -self.density_n_comp:], coordinate_line, align_corners=True).view(
+        line_feats = F.grid_sample(self.line_coef[:, -self.density_n_comp:], coordinate_line, align_corners=self.align_corners).view(
                                         -1, *xyz_sampled.shape[:1])
         
         sigma_feature = torch.sum(plane_feats * line_feats, dim=0)
         
         
-        plane_feats = F.grid_sample(self.plane_coef[:, :self.app_n_comp], coordinate_plane, align_corners=True).view(3 * self.app_n_comp, -1)
-        line_feats = F.grid_sample(self.line_coef[:, :self.app_n_comp], coordinate_line, align_corners=True).view(3 * self.app_n_comp, -1)
+        plane_feats = F.grid_sample(self.plane_coef[:, :self.app_n_comp], coordinate_plane, align_corners=self.align_corners).view(3 * self.app_n_comp, -1)
+        line_feats = F.grid_sample(self.line_coef[:, :self.app_n_comp], coordinate_line, align_corners=self.align_corners).view(3 * self.app_n_comp, -1)
         
         
         app_features = self.basis_mat((plane_feats * line_feats).T)
@@ -399,9 +422,9 @@ class TensorVM(TensorBase):
         coordinate_line = torch.stack((xyz_sampled[..., self.vecMode[0]], xyz_sampled[..., self.vecMode[1]], xyz_sampled[..., self.vecMode[2]]))
         coordinate_line = torch.stack((torch.zeros_like(coordinate_line), coordinate_line), dim=-1).detach().view(3, -1, 1, 2)
 
-        plane_feats = F.grid_sample(self.plane_coef[:, -self.density_n_comp:], coordinate_plane, align_corners=True).view(
+        plane_feats = F.grid_sample(self.plane_coef[:, -self.density_n_comp:], coordinate_plane, align_corners=self.align_corners).view(
                                         -1, *xyz_sampled.shape[:1])
-        line_feats = F.grid_sample(self.line_coef[:, -self.density_n_comp:], coordinate_line, align_corners=True).view(
+        line_feats = F.grid_sample(self.line_coef[:, -self.density_n_comp:], coordinate_line, align_corners=self.align_corners).view(
                                         -1, *xyz_sampled.shape[:1])
         
         sigma_feature = torch.sum(plane_feats * line_feats, dim=0)
@@ -414,8 +437,8 @@ class TensorVM(TensorBase):
         coordinate_line = torch.stack((xyz_sampled[..., self.vecMode[0]], xyz_sampled[..., self.vecMode[1]], xyz_sampled[..., self.vecMode[2]]))
         coordinate_line = torch.stack((torch.zeros_like(coordinate_line), coordinate_line), dim=-1).detach().view(3, -1, 1, 2)
         
-        plane_feats = F.grid_sample(self.plane_coef[:, :self.app_n_comp], coordinate_plane, align_corners=True).view(3 * self.app_n_comp, -1)
-        line_feats = F.grid_sample(self.line_coef[:, :self.app_n_comp], coordinate_line, align_corners=True).view(3 * self.app_n_comp, -1)
+        plane_feats = F.grid_sample(self.plane_coef[:, :self.app_n_comp], coordinate_plane, align_corners=self.align_corners).view(3 * self.app_n_comp, -1)
+        line_feats = F.grid_sample(self.line_coef[:, :self.app_n_comp], coordinate_line, align_corners=self.align_corners).view(3 * self.app_n_comp, -1)
         
         
         app_features = self.basis_mat((plane_feats * line_feats).T)
@@ -451,9 +474,9 @@ class TensorVM(TensorBase):
 
             plane_coef[i] = torch.nn.Parameter(
                 F.interpolate(plane_coef[i].data, size=(res_target[mat_id_1], res_target[mat_id_0]), mode='bilinear',
-                              align_corners=True))
+                              align_corners=self.align_corners))
             line_coef[i] = torch.nn.Parameter(
-                F.interpolate(line_coef[i].data, size=(res_target[vec_id], 1), mode='bilinear', align_corners=True))
+                F.interpolate(line_coef[i].data, size=(res_target[vec_id], 1), mode='bilinear', align_corners=self.align_corners))
 
         return plane_coef, line_coef
 
@@ -463,8 +486,8 @@ class TensorVM(TensorBase):
         # self.density_plane, self.density_line = self.up_sampling_VM(self.density_plane, self.density_line, res_target)
 
         scale = res_target[0]/self.line_coef.shape[2] #assuming xyz have the same scale
-        plane_coef = F.interpolate(self.plane_coef.detach().data, scale_factor=scale, mode='bilinear',align_corners=True)
-        line_coef  = F.interpolate(self.line_coef.detach().data, size=(res_target[0],1), mode='bilinear',align_corners=True)
+        plane_coef = F.interpolate(self.plane_coef.detach().data, scale_factor=scale, mode='bilinear',align_corners=self.align_corners)
+        line_coef  = F.interpolate(self.line_coef.detach().data, size=(res_target[0],1), mode='bilinear',align_corners=self.align_corners)
         self.plane_coef, self.line_coef = torch.nn.Parameter(plane_coef), torch.nn.Parameter(line_coef)
         self.compute_stepSize(res_target)
         print(f'upsampling to {res_target}')

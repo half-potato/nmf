@@ -135,7 +135,7 @@ def reconstruction(args):
     N_voxel_list = (torch.round(torch.exp(torch.linspace(np.log(args.params.N_voxel_init), np.log(args.params.N_voxel_final), len(upsamp_list)+1))).long()).tolist()[1:]
     # l_list = torch.linspace(0.7, 0.0, len(uplambda_list)+1).tolist()
     # TODO FIX
-    l_list = torch.linspace(0.9, 0.9, len(uplambda_list)+1).tolist()
+    l_list = torch.linspace(0.5, 0.5, len(uplambda_list)+1).tolist()
     tensorf.l = l_list.pop(0)
     tensorf.max_bounce_rays = bounce_n_list.pop(0)
 
@@ -303,7 +303,8 @@ def reconstruction(args):
                                         prtx=f'{iteration:06d}_', N_samples=nSamples, white_bg = white_bg, ndc_ray=ndc_ray,
                                         compute_extra_metrics=False, render_mode=args.render_mode)
                 summary_writer.add_scalar('test/psnr', np.mean(PSNRs_test), global_step=iteration)
-                tensorf.bg_module.save('test.png')
+                if tensorf.bg_module is not None:
+                    tensorf.bg_module.save('test.png')
 
 
             if upsamp_bg and iteration in args.params.bg_upsamp_list:
