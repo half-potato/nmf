@@ -61,7 +61,7 @@ def main(cfg: DictConfig):
     # tensorf.rf.basis_mat = AddBasis(48)
     tensorf.alphaMask = None
     tensorf.max_recurs = 3
-    tensorf.roughness_rays = 5
+    tensorf.roughness_rays = 20
 
     # tensorf.rf.init_svd_volume(16)
     # tensorf.to(device)
@@ -88,7 +88,7 @@ def main(cfg: DictConfig):
     # optim = torch.optim.Adam(tensorf.parameters(), lr=0.02, betas=(0.9,0.99))
     optim = torch.optim.Adam(tensorf.parameters(), lr=0.02, betas=(0.9,0.99))
     with torch.enable_grad():
-        pbar = tqdm(range(250))
+        pbar = tqdm(range(500))
         for _ in pbar:
             ox, oy, oz = (torch.rand(3, H, W, H, device=device)*2-1)/H
             y = (col+oy)
@@ -114,7 +114,6 @@ def main(cfg: DictConfig):
             loss.backward()
             optim.step()
 
-    """
     # train normals
     optim = torch.optim.Adam(tensorf.parameters(), lr=5e-2)
     with torch.enable_grad():
@@ -165,13 +164,12 @@ def main(cfg: DictConfig):
             # world_loss = -(p_norm * gt_norm).sum(dim=-1).sum()
             
             tint_loss = (tint[..., 0]-r)**2 + (tint[..., 1]-g)**2 + (tint[..., 2]-b)**2
-            diffuse_loss = (diffuse[..., 0]-r)**2 + (diffuse[..., 1]-g)**2 + (diffuse[..., 2]-b)**2
-            property_loss = (roughness - 0.05)**2 + (refraction_index - 1.5)**2 + (reflectivity - 1.00)**2 + (ratio_diffuse - 0.00)**2
+            diffuse_loss = (diffuse[..., 0]-1)**2 + (diffuse[..., 1]-1)**2 + (diffuse[..., 2]-1)**2
+            property_loss = (roughness - 0.55)**2 + (refraction_index - 1.5)**2 + (reflectivity - 1.00)**2 + (ratio_diffuse - 0.50)**2
             loss = tint_loss.mean() + diffuse_loss.mean() + property_loss.mean()
             optim.zero_grad()
             loss.backward()
             optim.step()
-    """
 
     # init dataset
     dataset = dataset_dict[cfg.dataset.dataset_name]

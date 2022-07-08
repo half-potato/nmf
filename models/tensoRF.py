@@ -52,7 +52,7 @@ class TensorVMSplit(TensorBase):
             pos_vals = (xy).reshape(1, 1, grid_size[mat_id_0], grid_size[mat_id_1])
             freqs = torch.arange(n_component[i]//2).reshape(1, -1, 1, 1)
             line_pos_vals = torch.linspace(-1, 1, grid_size[vec_id]).reshape(1, 1, -1, 1)
-            plane_coef.append(torch.nn.Parameter(
+            plane_coef_v = torch.nn.Parameter(
                 torch.cat([
                     # scale * 1/(1+freqs) * (torch.sin(freqs * pos_vals * math.pi)),
                     # scale * 1/(1+freqs) * (torch.cos(freqs * pos_vals * math.pi)),
@@ -63,8 +63,8 @@ class TensorVMSplit(TensorBase):
                 # scale * torch.rand((1, n_component[i], grid_size[mat_id_1], grid_size[mat_id_0])) + shift/sum(n_component)
                 # scale * torch.ones((1, n_component[i], grid_size[mat_id_1], grid_size[mat_id_0]))
                 # scale * torch.ones((1, n_component[i], grid_size[mat_id_1], grid_size[mat_id_0])) * torch.linspace(0.1, 1, n_component[i]).reshape(1, -1, 1, 1)
-            ))
-            line_coef.append(torch.nn.Parameter(
+            )
+            line_coef_v = torch.nn.Parameter(
                 torch.cat([
                     scale * 1/(1+freqs) * (torch.sin(freqs * line_pos_vals * math.pi)),
                     scale * 1/(1+freqs) * (torch.cos(freqs * line_pos_vals * math.pi)),
@@ -73,7 +73,10 @@ class TensorVMSplit(TensorBase):
                 # scale * torch.rand((1, n_component[i], grid_size[vec_id], 1))
                 # scale * torch.ones((1, n_component[i], grid_size[vec_id], 1)) * torch.linspace(0.1, 1, n_component[i]).reshape(1, -1, 1, 1)
                 # scale * torch.ones((1, n_component[i], grid_size[vec_id], 1))
-            ))
+            )
+            # adjust parameter so the density is always > 0
+            plane_coef.append(plane_coef_v)
+            line_coef.append(line_coef_v)
 
         return torch.nn.ParameterList(plane_coef), torch.nn.ParameterList(line_coef)
     

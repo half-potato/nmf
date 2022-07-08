@@ -13,7 +13,7 @@ max_recurs: 1
 enable_refraction: False
 infinity_border: False
 enable_alpha_mask: false
-roughness_rays: 10
+roughness_rays: 20
 
 rf:
   _partial_: True

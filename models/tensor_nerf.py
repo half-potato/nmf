@@ -717,9 +717,9 @@ class TensorNeRF(torch.nn.Module):
             ratio_reflected = ((1-ratio_diffuse) * (1 - r))
 
             # TODO figure out how to combine the transparent and reflective materials
-            ratio_refracted = torch.zeros_like(ratio_refracted)
-            ratio_reflected = schlick(tint, refdirs[app_mask], n).float().mean(dim=-1, keepdim=True)
-            ratio_diffuse = 1-ratio_reflected
+            # ratio_refracted = torch.zeros_like(ratio_refracted)
+            # ratio_reflected = schlick(tint, refdirs[app_mask], n).float().mean(dim=-1, keepdim=True)
+            # ratio_diffuse = 1-ratio_reflected
 
             refract_rgb = torch.zeros_like(diffuse)
             reflect_rgb = torch.zeros_like(diffuse)
@@ -805,16 +805,20 @@ class TensorNeRF(torch.nn.Module):
 
                     # add noise to simulate roughness
                     D = bounce_rays.shape[-1]
-                    ray_noise = torch.normal(0, 1.5, (bounce_rays.shape[0], num_roughness_rays, 3), device=device) * self.roughness2noisestd(roughness[bounce_mask].reshape(-1, 1, 1))
+                    ray_noise = torch.normal(0, 1, (bounce_rays.shape[0], num_roughness_rays, 3), device=device)
+                    # reflect_noise = ray_noise * self.roughness2noisestd(roughness[bounce_mask].reshape(-1, 1, 1))
+                    reflect_noise = 0
+                    diffuse_noise = ray_noise / (torch.linalg.norm(ray_noise, dim=-1, keepdim=True)+1e-8)
                     # ray_noise[:, 0] = 0
-                    bounce_rays = bounce_rays.reshape(-1, 1, D).repeat(1, num_roughness_rays, 1)
-                    noise_rays = bounce_rays[..., 3:6] + ray_noise
-                    perturbed = noise_rays / (torch.linalg.norm(noise_rays, dim=-1, keepdim=True)+1e-8)
-                    # project into 
                     outward = n[bounce_mask].reshape(-1, 1, 3)
-                    similarity = torch.sum(perturbed * outward, dim=-1, keepdim=True)
-                    ortho_component = perturbed - similarity * outward
-                    bounce_rays[..., 3:6] = ortho_component + similarity.abs() * outward
+                    bounce_rays = bounce_rays.reshape(-1, 1, D).repeat(1, num_roughness_rays, 1)
+
+                    # noise_rays = bounce_rays[..., 3:6] + ray_noise + outward * ratio_diffuse.reshape(-1, 1, 1)
+                    noise_rays = ratio_reflected[bounce_mask].reshape(-1, 1, 1) * (bounce_rays[..., 3:6] + reflect_noise) + ratio_diffuse[bounce_mask].reshape(-1, 1, 1) * (outward+diffuse_noise)
+                    noise_rays = noise_rays / (torch.linalg.norm(noise_rays, dim=-1, keepdim=True)+1e-8)
+                    # project into 
+                    bounce_rays[..., 3:6] = noise_rays
+                    outside = (outward * noise_rays).sum(dim=-1) > 0
 
                     # TODO REMOVE
                     """
@@ -824,19 +828,27 @@ class TensorNeRF(torch.nn.Module):
 
                     ref_rgb = reflect_data['rgb_map'].reshape(-1, num_roughness_rays, 3).mean(dim=1)
                     """
-                    ref_rgb = self.render_just_bg(bounce_rays.reshape(-1, D)).reshape(-1, num_roughness_rays, 3)
+                    etint = tint[bounce_mask].reshape(-1, 1, 3).expand(-1, num_roughness_rays, 3)
+                    ref_rgb = torch.zeros_like(etint)
+                    ref_rgb[outside] = self.render_just_bg(bounce_rays[outside])
+                    ref_rgb[~outside] = etint[~outside]
 
                     bn = n[bounce_mask].reshape(-1, 1, 3)
-                    numer = schlick(tint[bounce_mask].reshape(-1, 1, 3), bounce_rays[..., 3:6], bn)
-                    aden = (-bn*l[bounce_mask].reshape(-1, 1, 3)).sum(dim=-1, keepdim=True).clip(min=0)
-                    bden = (bn*bounce_rays[..., 3:6]).sum(dim=-1, keepdim=True).clip(min=0)
-                    denom = 1
-                    tinted_ref_rgb = (numer / (denom+1e-8) * ref_rgb).mean(dim=1).float()
+                    # numer = schlick(etint, bounce_rays[..., 3:6], bn)
+                    # tinted_ref_rgb = (numer * ref_rgb + (1-numer) * tint[bounce_mask].reshape(-1, 1, 3)).mean(dim=1).float()
+                    # tinted_ref_rgb = (numer * ref_rgb + (1-numer)).mean(dim=1).float()
+                    # tinted_ref_rgb = (numer * ref_rgb).mean(dim=1).float()
+                    tinted_ref_rgb = (ref_rgb).mean(dim=1).float()
+
+                    # aden = (-bn*l[bounce_mask].reshape(-1, 1, 3)).sum(dim=-1, keepdim=True).clip(min=0)
+                    # bden = (bn*bounce_rays[..., 3:6]).sum(dim=-1, keepdim=True).clip(min=0)
+                    # denom = 1
+                    # tinted_ref_rgb = (numer / (denom+1e-8) * ref_rgb).mean(dim=1).float()
                     # tinted_ref_rgb = (numer / (denom+1e-8)).mean(dim=1).float()
 
                     # tinted_ref_rgb = ref_rgb.mean(dim=1)
                     # debug[full_bounce_mask] += ratio_reflected[bounce_mask] * tinted_ref_rgb
-                    debug[full_bounce_mask] += ref_rgb.mean(dim=1)
+                    debug[full_bounce_mask] += tinted_ref_rgb
                     reflect_rgb[bounce_mask] = tinted_ref_rgb
                     # recur += reflect_data['recur']
 
@@ -852,7 +864,8 @@ class TensorNeRF(torch.nn.Module):
                 #         roughness=roughness[~bounce_mask])
                 #     tinted_ref_rgb = (1-roughness[~bounce_mask]) * tint[~bounce_mask] * reflect_data['rgb_map']
                 #     rgb[inv_full_bounce_mask] = tinted_ref_rgb
-            rgb[app_mask] = tint * (ratio_diffuse * diffuse + ratio_reflected * reflect_rgb + ratio_refracted * refract_rgb)
+            # rgb[app_mask] = tint * (ratio_diffuse * diffuse + ratio_reflected * reflect_rgb + ratio_refracted * refract_rgb)
+            rgb[app_mask] = tint * ((ratio_diffuse + ratio_reflected) * reflect_rgb + ratio_refracted * refract_rgb)
             # if recur == 1 and init_refraction_index.mean() > 1.1:
             #     bad_mask = (rgb.mean(dim=-1) > 0.5) & (rgb.mean(dim=-1) < 0.8)
             #     ic(torch.where(bad_mask))

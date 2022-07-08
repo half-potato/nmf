@@ -135,7 +135,7 @@ def reconstruction(args):
     N_voxel_list = (torch.round(torch.exp(torch.linspace(np.log(args.params.N_voxel_init), np.log(args.params.N_voxel_final), len(upsamp_list)+1))).long()).tolist()[1:]
     # l_list = torch.linspace(0.7, 0.0, len(uplambda_list)+1).tolist()
     # TODO FIX
-    l_list = torch.linspace(0.5, 0.5, len(uplambda_list)+1).tolist()
+    l_list = torch.linspace(0.8, 0.5, len(uplambda_list)+1).tolist()
     tensorf.l = l_list.pop(0)
     tensorf.max_bounce_rays = bounce_n_list.pop(0)
 
@@ -201,6 +201,23 @@ def reconstruction(args):
             photo_loss = loss.detach().item()
             pbar.set_description(f'psnr={-10.0 * np.log(photo_loss) / np.log(10.0):.04f}')
         tensorf.bg_module.save('test.png')
+
+    optim = torch.optim.Adam(tensorf.parameters(), lr=0.02, betas=(0.9,0.99))
+    pbar = tqdm(range(500))
+    for _ in pbar:
+        xyz = torch.rand(5000, 3, device=device)*2-1
+        feat = tensorf.rf.compute_densityfeature(xyz)
+        sigma_feat = tensorf.feature2density(feat)
+
+        # sigma = 1-torch.exp(-sigma_feat * 0.025 * 25)
+        sigma = 1-torch.exp(-sigma_feat)
+        # sigma = sigma_feat
+        loss = (sigma-torch.rand_like(sigma)*args.start_density).abs().mean()
+        # loss = (-sigma[mask].clip(max=1).sum() + sigma[~mask].clip(min=1e-8).sum())
+        pbar.set_description(f"{loss.detach().item():.06f}")
+        optim.zero_grad()
+        loss.backward()
+        optim.step()
 
     pbar = tqdm(range(args.n_iters), miniters=args.progress_refresh_rate, file=sys.stdout)
     if True:
