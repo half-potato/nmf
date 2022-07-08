@@ -165,7 +165,7 @@ def main(cfg: DictConfig):
             
             tint_loss = (tint[..., 0]-r)**2 + (tint[..., 1]-g)**2 + (tint[..., 2]-b)**2
             diffuse_loss = (diffuse[..., 0]-1)**2 + (diffuse[..., 1]-1)**2 + (diffuse[..., 2]-1)**2
-            property_loss = (roughness - 0.55)**2 + (refraction_index - 1.5)**2 + (reflectivity - 1.00)**2 + (ratio_diffuse - 0.50)**2
+            property_loss = (roughness - 0.55)**2 + (refraction_index - 1.5)**2 + (reflectivity - 0.20)**2 + (ratio_diffuse - 0.50)**2
             loss = tint_loss.mean() + diffuse_loss.mean() + property_loss.mean()
             optim.zero_grad()
             loss.backward()

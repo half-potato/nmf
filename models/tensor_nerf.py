@@ -702,6 +702,7 @@ class TensorNeRF(torch.nn.Module):
             refractdirs = refractdirs.float()
             refractdirs = refractdirs / (torch.linalg.norm(refractdirs, dim=1, keepdim=True)+1e-8)
 
+            """
             # compute fresnel_law
             sin_t = R * torch.sqrt((1-cos_i**2).clip(min=1e-5))
             cos_t = torch.sqrt((1-sin_t**2).clip(min=1e-5))
@@ -720,6 +721,9 @@ class TensorNeRF(torch.nn.Module):
             # ratio_refracted = torch.zeros_like(ratio_refracted)
             # ratio_reflected = schlick(tint, refdirs[app_mask], n).float().mean(dim=-1, keepdim=True)
             # ratio_diffuse = 1-ratio_reflected
+            """
+            ratio_reflected = 1 - ratio_diffuse
+            ratio_refracted = torch.zeros_like(ratio_reflected)
 
             refract_rgb = torch.zeros_like(diffuse)
             reflect_rgb = torch.zeros_like(diffuse)
@@ -865,7 +869,7 @@ class TensorNeRF(torch.nn.Module):
                 #     tinted_ref_rgb = (1-roughness[~bounce_mask]) * tint[~bounce_mask] * reflect_data['rgb_map']
                 #     rgb[inv_full_bounce_mask] = tinted_ref_rgb
             # rgb[app_mask] = tint * (ratio_diffuse * diffuse + ratio_reflected * reflect_rgb + ratio_refracted * refract_rgb)
-            rgb[app_mask] = tint * ((ratio_diffuse + ratio_reflected) * reflect_rgb + ratio_refracted * refract_rgb)
+            rgb[app_mask] = tint * ((1-reflectivity) + reflectivity * reflect_rgb)
             # if recur == 1 and init_refraction_index.mean() > 1.1:
             #     bad_mask = (rgb.mean(dim=-1) > 0.5) & (rgb.mean(dim=-1) < 0.8)
             #     ic(torch.where(bad_mask))
