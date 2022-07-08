@@ -43,7 +43,6 @@ def render_test(args):
         return
 
     ckpt = torch.load(args.ckpt)
-    ckpt['config']['bg_module']['bg_resolution'] = ckpt['state_dict']['bg_module.bg_mat'].shape[-1]
     tensorf = TensorNeRF.load(ckpt).to(device)
     tensorf.rf.set_smoothing(1)
 
@@ -136,6 +135,7 @@ def reconstruction(args):
     # l_list = torch.linspace(0.7, 0.0, len(uplambda_list)+1).tolist()
     # TODO FIX
     l_list = torch.linspace(0.8, 0.5, len(uplambda_list)+1).tolist()
+    # l_list = torch.linspace(1, 1, len(uplambda_list)+1).tolist()
     tensorf.l = l_list.pop(0)
     tensorf.max_bounce_rays = bounce_n_list.pop(0)
 
@@ -248,14 +248,14 @@ def reconstruction(args):
             #rgb_map, alphas_map, depth_map, weights, uncertainty
             with torch.cuda.amp.autocast(enabled=args.fp16):
                 data = renderer(rays_train, tensorf,
-                        keys = ['rgb_map', 'floater_loss', 'normal_loss', 'roughness', 'backwards_rays_loss', 'termination_xyz', 'normal_map'],
+                        keys = ['rgb_map', 'floater_loss', 'normal_loss', 'backwards_rays_loss', 'termination_xyz', 'normal_map', 'diffuse_reg'],
                         focal=focal, output_alpha=alpha_train, chunk=args.batch_size,
                         N_samples=nSamples, white_bg = white_bg, ndc_ray=ndc_ray, is_train=True)
 
                 # loss = torch.mean((rgb_map[:, 1, 1] - rgb_train[:, 1, 1]) ** 2)
                 normal_loss = data['normal_loss'].mean()
                 floater_loss = data['floater_loss'].mean()
-                roughness = data['roughness'].mean()
+                diffuse_reg = data['diffuse_reg'].mean()
                 # loss = torch.sqrt((data['rgb_map'] - rgb_train) ** 2 + args.params.charbonier_eps**2).mean()
                 loss = F.huber_loss(data['rgb_map'], rgb_train, delta=1)
                 photo_loss = ((data['rgb_map'] - rgb_train) ** 2).mean().detach()
@@ -266,7 +266,8 @@ def reconstruction(args):
                 total_loss = loss + \
                     args.params.normal_lambda*normal_loss + \
                     args.params.floater_lambda*floater_loss + \
-                    args.params.backwards_rays_lambda*backwards_rays_loss
+                    args.params.backwards_rays_lambda*backwards_rays_loss + \
+                    args.params.diffuse_lambda * diffuse_reg
 
                 if Ortho_reg_weight > 0:
                     loss_reg = tensorf.rf.vector_comp_diffs()
@@ -375,7 +376,7 @@ def reconstruction(args):
                     lr_scale = 1 #0.1 ** (iteration / args.n_iters)
                 else:
                     lr_scale = args.lr_decay_target_ratio ** (iteration / args.n_iters)
-                grad_vars = tensorf.get_optparam_groups(args.lr_init*lr_scale, args.lr_basis*lr_scale, lr_bg=lr_bg)
+                grad_vars = tensorf.get_optparam_groups(args.lr_init*lr_scale, args.lr_basis*lr_scale, lr_bg=lr_bg, lr_scale=lr_scale)
                 optimizer = torch.optim.Adam(grad_vars, betas=(0.9, 0.99))
     # prof.export_chrome_trace('trace.json')
         

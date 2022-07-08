@@ -47,7 +47,7 @@ def main(cfg: DictConfig):
     # ckpt['config']['bg_module']['bg_resolution'] = ckpt['state_dict']['bg_module.bg_mat'].shape[-1] // 6
     ckpt['config']['bg_module']['bg_resolution'] = 256
     tensorf = hydra.utils.instantiate(cfg.model)(aabb=torch.tensor([[-1.0, -1.0, -1.0], [1.0, 1.0, 1.0]]), grid_size=[128]*3).to(device)
-    tensorf2 = TensorNeRF.load(ckpt).to(device)
+    tensorf2 = TensorNeRF.load(ckpt, strict=False).to(device)
     # tensorf = TensorNeRF.load(ckpt).to(device)
     tensorf.bg_module = tensorf2.bg_module
 
@@ -141,7 +141,8 @@ def main(cfg: DictConfig):
             world_loss.backward()
             optim.step()
 
-    r, g, b = 0.955, 0.638, 0.538
+    # r, g, b = 0.955, 0.638, 0.538
+    r, g, b = 1, 1, 1
     # train appearance
     optim = torch.optim.Adam(tensorf.parameters(), lr=1e-3)
     with torch.enable_grad():
@@ -154,7 +155,7 @@ def main(cfg: DictConfig):
             dist = torch.linalg.norm(xyz[:, :3], dim=1, ord=ord)
             mask = (dist < outer_r + eps)
             app_features = tensorf.rf.compute_appfeature(xyz[mask])
-            diffuse, tint, roughness, refraction_index, reflectivity, ratio_diffuse = tensorf.diffuse_module(
+            diffuse, tint, ambient, refraction_index, reflectivity, ratio_diffuse = tensorf.diffuse_module(
                     xyz[mask], torch.rand_like(xyz[..., :3][mask]), app_features)
 
             # shell = (dist[mask] > inner_r - eps)
@@ -165,7 +166,7 @@ def main(cfg: DictConfig):
             
             tint_loss = (tint[..., 0]-r)**2 + (tint[..., 1]-g)**2 + (tint[..., 2]-b)**2
             diffuse_loss = (diffuse[..., 0]-1)**2 + (diffuse[..., 1]-1)**2 + (diffuse[..., 2]-1)**2
-            property_loss = (roughness - 0.55)**2 + (refraction_index - 1.5)**2 + (reflectivity - 0.20)**2 + (ratio_diffuse - 0.50)**2
+            property_loss = (refraction_index - 1.5)**2 + (reflectivity - 1.00)**2 + (ratio_diffuse - 0.10)**2 + (ambient + 0.1)**2
             loss = tint_loss.mean() + diffuse_loss.mean() + property_loss.mean()
             optim.zero_grad()
             loss.backward()
@@ -173,7 +174,7 @@ def main(cfg: DictConfig):
 
     # init dataset
     dataset = dataset_dict[cfg.dataset.dataset_name]
-    test_dataset = dataset(os.path.join(cfg.datadir, cfg.dataset.scenedir), split='test', downsample=cfg.dataset.downsample_train, is_stack=True)
+    test_dataset = dataset(os.path.join(cfg.datadir, cfg.dataset.scenedir), split='train', downsample=cfg.dataset.downsample_train, is_stack=True)
     white_bg = test_dataset.white_bg
     ndc_ray = cfg.dataset.ndc_ray
 

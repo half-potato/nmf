@@ -92,6 +92,7 @@ class CubeUnwrap(torch.nn.Module):
 class HierarchicalBG(torch.nn.Module):
     def __init__(self, bg_rank, unwrap_fn, bg_resolution=512, num_levels=2, featureC=128, num_layers=2):
         super().__init__()
+        self.bg_resolution = bg_resolution
         self.num_levels = num_levels
         self.bg_mats = nn.ParameterList([
             nn.Parameter(0.1 * torch.randn((1, bg_rank, 2**i * bg_resolution*unwrap_fn.H_mul, 2**i * bg_resolution*unwrap_fn.W_mul)))
@@ -121,7 +122,7 @@ class HierarchicalBG(torch.nn.Module):
             bg_mat = F.interpolate(self.bg_mats[i].data, size=(bg_resolution*self.unwrap_fn.H_mul, bg_resolution*self.unwrap_fn.W_mul), mode='bilinear', align_corners=self.align_corners)
             bg_mats.append(bg_mat)
         bg_mat = sum(bg_mats)
-        im = (255*self.bg_net(bg_mat).clamp(0, 1)).short().permute(0, 2, 3, 1).squeeze(0)
+        im = (255*(self.bg_net(bg_mat)*0.5).clamp(0, 1)).short().permute(0, 2, 3, 1).squeeze(0)
         im = im.cpu().numpy()
         im = im[::-1].astype(np.uint8)
         im = cv2.cvtColor(im, cv2.COLOR_RGB2BGR)
@@ -154,6 +155,7 @@ class BackgroundRender(torch.nn.Module):
     def __init__(self, bg_rank, unwrap_fn, bg_resolution=512, view_encoder=None, featureC=128, num_layers=2):
         super().__init__()
         self.bg_mat = nn.Parameter(0.1 * torch.randn((1, bg_rank, bg_resolution*unwrap_fn.H_mul, bg_resolution*unwrap_fn.W_mul))) # [1, R, H, W]
+        self.bg_resolution = bg_resolution
         self.view_encoder = view_encoder
         self.unwrap_fn = unwrap_fn
         self.bg_rank = bg_rank
@@ -183,6 +185,7 @@ class BackgroundRender(torch.nn.Module):
 
     @torch.no_grad()
     def upsample(self, bg_resolution):
+        self.bg_resolution = bg_resolution
         self.bg_mat = torch.nn.Parameter(
             F.interpolate(self.bg_mat.data, size=(bg_resolution*self.unwrap_fn.H_mul, bg_resolution*self.unwrap_fn.W_mul), mode='bilinear', align_corners=self.align_corners)
         )
@@ -313,16 +316,17 @@ class MLPDiffuse(torch.nn.Module):
         mlp_out = self.mlp(mlp_in)
         rgb = torch.sigmoid(mlp_out)
 
-        roughness = torch.sigmoid(mlp_out[..., 6:7]) * self.max_roughness
+        ambient = F.softplus(mlp_out[..., 6:7])
         refraction_index = F.softplus(mlp_out[..., 7:8]-1) + self.min_refraction_index
-        reflectivity = torch.sigmoid(mlp_out[..., 8:9]+2)
+        reflectivity = torch.sigmoid(mlp_out[..., 8:9])
+        # ambient = torch.sigmoid(mlp_out[..., 9:10])
         diffuse_ratio = rgb[..., 9:10]
-        # tint = rgb[..., 3:6] 
+        tint = rgb[..., 3:6]
         # diffuse = rgb[..., :3]
-        tint = F.softplus(mlp_out[..., 3:6])
+        # tint = F.softplus(mlp_out[..., 3:6])
         diffuse = F.softplus(mlp_out[..., :3])
 
-        return diffuse, tint, roughness, refraction_index, reflectivity, diffuse_ratio
+        return diffuse, tint, ambient, refraction_index, reflectivity, diffuse_ratio
 
 class DeepMLPNormal(torch.nn.Module):
     in_channels: int
