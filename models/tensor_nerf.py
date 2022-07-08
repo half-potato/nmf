@@ -674,17 +674,16 @@ class TensorNeRF(torch.nn.Module):
                 v_world_normal = world_normal
 
             # get base color of the point
-            diffuse, tint, ambient, refraction_index, reflectivity, ratio_diffuse = self.diffuse_module(
+            diffuse, tint, matprop = self.diffuse_module(
                 xyz_normed[app_mask], viewdirs[app_mask], app_features)
             # diffuse = diffuse.type(rgb.dtype)
 
             # calculate reflected ray direction
             refdirs = viewdirs - 2 * \
                 (viewdirs * -v_world_normal).sum(-1, keepdim=True) * -v_world_normal
-            cosref = torch.matmul(refdirs.reshape(-1, 1, 3), v_world_normal.reshape(-1, 3, 1)).reshape(*viewdirs.shape[:-1], 1)
 
             ior_i = ior_i_full[app_mask].reshape(-1, 1)
-            ior_t = refraction_index
+            ior_t = matprop['refraction_index']
 
             # calculated interpolated snell's law
             n = v_world_normal[app_mask].double()
@@ -722,14 +721,14 @@ class TensorNeRF(torch.nn.Module):
             # ratio_reflected = schlick(tint, refdirs[app_mask], n).float().mean(dim=-1, keepdim=True)
             # ratio_diffuse = 1-ratio_reflected
             """
-            ratio_diffuse = 0*torch.ones_like(ratio_diffuse)
-            ratio_reflected = 1 - ratio_diffuse
-            ratio_refracted = torch.zeros_like(ratio_reflected)
+            # ratio_diffuse = 0*torch.ones_like(ratio_diffuse)
+            # ratio_reflected = 1 - ratio_diffuse
+            # ratio_refracted = torch.zeros_like(ratio_reflected)
 
-            refract_rgb = torch.zeros_like(diffuse)
             reflect_rgb = torch.zeros_like(diffuse)
 
             M = diffuse.shape[0]
+            refract_rgb = torch.zeros_like(diffuse)
             if recur >= self.max_recurs and self.ref_module is None:
                 ratio_diffuse = 1
                 ratio_reflected = 0
@@ -743,6 +742,7 @@ class TensorNeRF(torch.nn.Module):
                 reflect_rgb = tint * ref_col
             else:
                 num_roughness_rays = 1 if recur > 0 else self.roughness_rays
+                """
                 # compute which rays to refract
                 rbounce_mask, rfull_bounce_mask, rinv_full_bounce_mask = select_top_n_app_mask(
                         app_mask, weight, ratio_refracted*(refraction_index > self.min_refraction), self.max_bounce_rays,
@@ -785,13 +785,15 @@ class TensorNeRF(torch.nn.Module):
 
                     refract_rgb[rbounce_mask] = (refract_col)
                     debug[rfull_bounce_mask] += ratio_refracted[rbounce_mask] * diffuse[rbounce_mask] * refract_col
-
+                """
 
                 # compute which rays to reflect
                 # TODO REMOVE
                 # bounce_mask, full_bounce_mask, inv_full_bounce_mask = select_top_n_app_mask(
                 #         app_mask, weight, ratio_reflected, self.max_bounce_rays,
                 #         self.specularity_threshold, self.bounce_min_weight)
+                ratio_diffuse = matprop['ratio_diffuse']
+                ratio_reflected = 1 - ratio_diffuse
                 bounce_mask, full_bounce_mask, inv_full_bounce_mask = select_top_n_app_mask(
                         app_mask, weight, ratio_reflected, 100000,
                         0, 0)
@@ -845,27 +847,38 @@ class TensorNeRF(torch.nn.Module):
                     # L_i, the incoming light
                     # omega_i = incoming light direction = bounce_rays[..., 3:6]
                     # outward = outward surface normal
-                    cos_lamb = (bounce_rays[..., 3:6] * outward).sum(dim=-1, keepdim=True).clip(min=0)
+                    half = (bounce_rays[..., 3:6] + viewdirs[full_bounce_mask].reshape(-1, 1, 3))/2
+                    half = half / torch.linalg.norm(half, dim=-1, keepdim=True)
+
+                    cos_lamb = (bounce_rays[..., 3:6] * outward).sum(dim=-1, keepdim=True).clip(min=1e-8)
+                    cos_view = (viewdirs[full_bounce_mask].reshape(-1, 1, 3) * outward).sum(dim=-1, keepdim=True).clip(min=1e-8)
+                    cos_half = (half * outward).sum(dim=-1, keepdim=True).clip(min=1e-8)
 
                     # compute the BRDF (bidirectional reflectance distribution function)
                     # k_d = ratio_diffuse[bounce_mask].reshape(-1, 1, 1)
-                    half = bounce_rays[..., 3:6] + viewdirs[full_bounce_mask].reshape(-1, 1, 3)
-                    half = half / torch.linalg.norm(half, dim=-1, keepdim=True)
                     # diffuse vs specular fraction
-                    k_s = schlick(f0, outward, half)
+                    k_s = schlick(matprop['f0'][bounce_mask].reshape(-1, 1, 1), outward, half)
                     k_d = 1-k_s
 
                     # diffuse vs specular intensity
                     f_d = 1/np.pi
-                    brdf = k_d*f_d + (1-k_d)
+
+                    alph = matprop['roughness'][bounce_mask].reshape(-1, 1, 1)
+                    k = alph / 2
+                    D_ggx = alph**2 / np.pi / (cos_half**2*(alph**2-1)+1)**2
+                    G_schlick_smith = cos_lamb / (cos_lamb*(1-k)+k) * cos_view / (cos_view*(1-k)+k)
+                    
+                    f_s = D_ggx * G_schlick_smith / 4 / cos_lamb / cos_view
+                    brdf = k_d*f_d + (1-k_d)*f_s
 
                     # cos_refl = (noise_rays * refdirs[full_bounce_mask].reshape(-1, 1, 3)).sum(dim=-1, keepdim=True).clip(min=0)
-                    cos_refl = (bounce_rays[..., 3:6] * refdirs[full_bounce_mask].reshape(-1, 1, 3)).sum(dim=-1, keepdim=True).clip(min=0)
+                    # cos_refl = (bounce_rays[..., 3:6] * refdirs[full_bounce_mask].reshape(-1, 1, 3)).sum(dim=-1, keepdim=True).clip(min=0)
                     # ref_rough = roughness[bounce_mask].reshape(-1, 1)
                     # phong shading?
-                    ref_weight = (1-ref_rough) * cos_refl + ref_rough * cos_lamb
-                    ref_weight = ref_weight / (ref_weight.sum(dim=-1, keepdim=True)+1e-8)
-                    tinted_ref_rgb = (ref_weight * incoming_light).mean(dim=1).float()
+                    # ref_weight = (1-ref_rough) * cos_refl + ref_rough * cos_lamb
+                    # ref_weight = ref_weight / (ref_weight.sum(dim=-1, keepdim=True)+1e-8)
+
+                    # tinted_ref_rgb = (ref_weight * incoming_light).mean(dim=1).float()
 
                     # aden = (-bn*l[bounce_mask].reshape(-1, 1, 3)).sum(dim=-1, keepdim=True).clip(min=0)
                     # bden = (bn*bounce_rays[..., 3:6]).sum(dim=-1, keepdim=True).clip(min=0)
@@ -873,7 +886,7 @@ class TensorNeRF(torch.nn.Module):
                     # tinted_ref_rgb = (numer / (denom+1e-8) * incoming_light).mean(dim=1).float()
                     # tinted_ref_rgb = (numer / (denom+1e-8)).mean(dim=1).float()
 
-                    tinted_ref_rgb = brdf * incoming_light * cos_lamb
+                    tinted_ref_rgb = (brdf * incoming_light * cos_lamb).sum(dim=1).float()
 
                     # tinted_ref_rgb = incoming_light.mean(dim=1)
                     # debug[full_bounce_mask] += reflectivity[bounce_mask] * tinted_ref_rgb
@@ -898,7 +911,8 @@ class TensorNeRF(torch.nn.Module):
 
             # this is a modified rendering equation where the emissive light and light under the integral is all multiplied by the base color
             # in addition, the light is interpolated between emissive and reflective
-            rgb[app_mask] = tint * ((1-reflectivity)*ambient + reflectivity * reflect_rgb)
+            reflectivity = matprop['reflectivity']
+            rgb[app_mask] = tint * ((1-reflectivity)*matprop['ambient'] + reflectivity * reflect_rgb)
             # rgb[app_mask] = tint * (ambient + reflectivity * reflect_rgb)
 
             align_world_loss = -(p_world_normal * world_normal).sum(dim=-1).clamp(max=self.max_normal_similarity)

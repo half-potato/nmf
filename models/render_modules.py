@@ -292,7 +292,7 @@ class MLPDiffuse(torch.nn.Module):
                         torch.nn.Linear(featureC, featureC),
                     ] for _ in range(num_layers)], []),
                 torch.nn.ReLU(inplace=True),
-                torch.nn.Linear(featureC, 10),
+                torch.nn.Linear(featureC, 20),
             )
             torch.nn.init.constant_(self.mlp[-1].bias, 0)
         else:
@@ -319,14 +319,23 @@ class MLPDiffuse(torch.nn.Module):
         ambient = F.softplus(mlp_out[..., 6:7])
         refraction_index = F.softplus(mlp_out[..., 7:8]-1) + self.min_refraction_index
         reflectivity = torch.sigmoid(mlp_out[..., 8:9])
+        roughness = torch.sigmoid(mlp_out[..., 10:11])
+        f0 = torch.sigmoid(mlp_out[..., 11:12])
         # ambient = torch.sigmoid(mlp_out[..., 9:10])
-        diffuse_ratio = rgb[..., 9:10]
+        ratio_diffuse = rgb[..., 9:10]
         tint = rgb[..., 3:6]
         # diffuse = rgb[..., :3]
         # tint = F.softplus(mlp_out[..., 3:6])
         diffuse = F.softplus(mlp_out[..., :3])
 
-        return diffuse, tint, ambient, refraction_index, reflectivity, diffuse_ratio
+        return diffuse, tint, dict(
+            refraction_index = refraction_index,
+            ratio_diffuse = ratio_diffuse,
+            reflectivity = reflectivity,
+            ambient = ambient,
+            roughness = roughness,
+            f0 = f0,
+        )
 
 class DeepMLPNormal(torch.nn.Module):
     in_channels: int
