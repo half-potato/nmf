@@ -59,7 +59,7 @@ def main(cfg: DictConfig):
     tensorf.max_bounce_rays = 16000
     # tensorf.normal_module = render_modules.AppDimNormal(1, activation=torch.nn.Identity)
     tensorf.normal_module = render_modules.DeepMLPNormal(pospe=16, num_layers=3).to(device)
-    tensorf.l = 1
+    tensorf.l = 0
     # tensorf.rf.basis_mat = AddBasis(48)
     tensorf.alphaMask = None
     tensorf.max_recurs = 3
@@ -85,11 +85,13 @@ def main(cfg: DictConfig):
     inner_r = 0.13
     outer_r = 0.5
     eps = 0.00
+    offset = torch.tensor([0.1, 0, 0]).to(device).reshape(1, 3)
 
     # train shape
     # optim = torch.optim.Adam(tensorf.parameters(), lr=0.02, betas=(0.9,0.99))
     optim = torch.optim.Adam(tensorf.parameters(), lr=0.02, betas=(0.9,0.99))
     with torch.enable_grad():
+        # TODO REMOVE
         pbar = tqdm(range(500))
         for _ in pbar:
             ox, oy, oz = (torch.rand(3, H, W, H, device=device)*2-1)/H
@@ -99,7 +101,7 @@ def main(cfg: DictConfig):
             xyz = torch.stack([x, y, z, torch.ones_like(x)], dim=-1).reshape(-1, 4)
             inds = np.random.permutation(xyz.shape[0])[:xyz.shape[0]//8]
             # xyz = xyz[inds]
-            dist = torch.linalg.norm(xyz[:, :3], dim=1, ord=ord)
+            dist = torch.linalg.norm(xyz[:, :3]-offset, dim=1, ord=ord)
             mask = (dist < outer_r)
             # mask2 = (dist > outer_r+eps)
             # mask = (dist < outer_r) & (dist > inner_r) & (y.reshape(-1) > 0)
@@ -117,15 +119,15 @@ def main(cfg: DictConfig):
             optim.step()
 
     # train normals
-    optim = torch.optim.Adam(tensorf.parameters(), lr=5e-2)
+    optim = torch.optim.Adam(tensorf.parameters(), lr=0.02)
     with torch.enable_grad():
-        for _ in tqdm(range(150)):
+        for _ in tqdm(range(200)):
             ox, oy, oz = torch.rand(3, H, W, H, device=device)/H
             y = (col+oy)
             x = (row+ox)
             z = (line+oz)
-            xyz = torch.stack([x, y, z, torch.zeros_like(x)], dim=-1).reshape(-1, 4)
-            dist = torch.linalg.norm(xyz[:, :3], dim=1, ord=ord)
+            xyz = torch.stack([x, y, z, torch.ones_like(x)], dim=-1).reshape(-1, 4)
+            dist = torch.linalg.norm(xyz[:, :3]-offset, dim=1, ord=ord)
             # full_shell = (dist < outer_r + eps) & (dist > inner_r - eps)
             full_shell = (dist < outer_r + eps)
 
@@ -138,7 +140,8 @@ def main(cfg: DictConfig):
                 gt_norm = torch.zeros_like(sxyz)
                 inds = torch.argmax(sxyz.abs(), dim=1)
                 gt_norm[range(sxyz.shape[0]), inds] = torch.sign(sxyz)[range(sxyz.shape[0]), inds]
-            world_loss = -(p_norm * gt_norm).sum(dim=-1).sum()
+            world_loss = -(p_norm * gt_norm).sum(dim=-1).mean()
+            print(f"{world_loss.item():.06f}")
             optim.zero_grad()
             world_loss.backward()
             optim.step()
@@ -153,8 +156,8 @@ def main(cfg: DictConfig):
             y = (col+oy)
             x = (row+ox)
             z = (line+oz)
-            xyz = torch.stack([x, y, z, torch.zeros_like(x)], dim=-1).reshape(-1, 4)
-            dist = torch.linalg.norm(xyz[:, :3], dim=1, ord=ord)
+            xyz = torch.stack([x, y, z, 0.1*torch.ones_like(x)], dim=-1).reshape(-1, 4)
+            dist = torch.linalg.norm(xyz[:, :3]-offset, dim=1, ord=ord)
             mask = (dist < outer_r + eps)
             app_features = tensorf.rf.compute_appfeature(xyz[mask])
             diffuse, tint, matprop = tensorf.diffuse_module(
@@ -168,7 +171,8 @@ def main(cfg: DictConfig):
             
             tint_loss = (tint[..., 0]-r)**2 + (tint[..., 1]-g)**2 + (tint[..., 2]-b)**2
             diffuse_loss = (diffuse[..., 0]-1)**2 + (diffuse[..., 1]-1)**2 + (diffuse[..., 2]-1)**2
-            property_loss = (matprop['refraction_index'] - 1.5)**2 + (matprop['reflectivity'] - 1.00)**2 + (matprop['ratio_diffuse'] - 0.10)**2 + (matprop['ambient'] + 0.1)**2
+            property_loss = (matprop['refraction_index'] - 1.5)**2 + (matprop['reflectivity'] - 1.00)**2 + (matprop['ratio_diffuse'] - 0.10)**2 + (matprop['ambient'] + 0.1)**2 + \
+                            (matprop['f0'] - 0.9)**2 + (matprop['roughness'] - 0.0)**2
             loss = tint_loss.mean() + diffuse_loss.mean() + property_loss.mean()
             optim.zero_grad()
             loss.backward()

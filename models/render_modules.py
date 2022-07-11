@@ -359,7 +359,6 @@ class DeepMLPNormal(torch.nn.Module):
                 ] for _ in range(num_layers)], []),
             torch.nn.ReLU(inplace=True),
             torch.nn.Linear(featureC, 3),
-            # torch.nn.ReLU(inplace=True),
         )
         self.mlp0.apply(self.init_weights)
 
@@ -369,12 +368,15 @@ class DeepMLPNormal(torch.nn.Module):
             # m.bias.data.fill_(0.01)
 
     def forward(self, pts, features, **kwargs):
+        size = pts[..., 3:4].expand(pts[..., :3].shape)
         pts = pts[..., :3]
         indata = [pts]
         if self.pospe > 0:
-            indata += [positional_encoding(pts, self.pospe)]
+            # indata += [positional_encoding(pts, self.pospe)]
+            indata += [safemath.integrated_pos_enc((pts, size), 0, self.pospe)]
         x0 = torch.cat(indata, dim=-1)
         x1 = self.mlp0(x0)
+
         # x2 = torch.cat([x0, x1], dim=-1)
         # x3 = self.mlp1(x2)
         # normals = torch.sin(x1)

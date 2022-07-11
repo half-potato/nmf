@@ -34,12 +34,12 @@ L1_weight_rest: 4e-5
 
 TV_weight_density: 0.0
 TV_weight_app: 0.0
-normal_lambda: 0.005
+normal_lambda: 4e-3
 diffuse_lambda: 1e-4
-backwards_rays_lambda: 1
+backwards_rays_lambda: 0.1
 floater_lambda: 0.01
 charbonier_eps: 0.001
-Ortho_weight: 0
+ortho_weight: 0
 
 envmap_train_start: 20
 # num_rays_per_envmap: 512

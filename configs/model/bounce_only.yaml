@@ -54,12 +54,22 @@ diffuse_module:
   featureC: 128
   num_layers: 2
 
+# normal_module:
+#   _partial_: True
+#   # _target_: models.render_modules.DeepMLPNormal
+#   _target_: models.render_modules.MLPNormal
+#   lr: 3e-4
+#   # pospe: 0
+#   pospe: 8
+#   featureC: 128
+#   num_layers: 3
+
 normal_module:
   _partial_: True
-  # _target_: models.render_modules.DeepMLPNormal
-  _target_: models.render_modules.MLPNormal
-  lr: 3e-4
+  _target_: models.render_modules.DeepMLPNormal
+  # _target_: models.render_modules.MLPNormal
+  lr: 3e-3
   # pospe: 0
-  pospe: 8
+  pospe: 12
   featureC: 128
-  num_layers: 3
+  num_layers: 5

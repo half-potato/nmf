@@ -134,8 +134,8 @@ def reconstruction(args):
     N_voxel_list = (torch.round(torch.exp(torch.linspace(np.log(args.params.N_voxel_init), np.log(args.params.N_voxel_final), len(upsamp_list)+1))).long()).tolist()[1:]
     # l_list = torch.linspace(0.7, 0.0, len(uplambda_list)+1).tolist()
     # TODO FIX
-    l_list = torch.linspace(0.8, 0.5, len(uplambda_list)+1).tolist()
-    # l_list = torch.linspace(1, 1, len(uplambda_list)+1).tolist()
+    # l_list = torch.linspace(0.8, 0.5, len(uplambda_list)+1).tolist()
+    l_list = torch.linspace(0, 0, len(uplambda_list)+1).tolist()
     tensorf.l = l_list.pop(0)
     tensorf.max_bounce_rays = bounce_n_list.pop(0)
 
@@ -166,8 +166,8 @@ def reconstruction(args):
     trainingSampler = SimpleSampler(allrays.shape[0], args.batch_size)
 
 
-    Ortho_reg_weight = args.params.Ortho_weight
-    print("initial Ortho_reg_weight", Ortho_reg_weight)
+    ortho_reg_weight = args.params.ortho_weight
+    print("initial ortho_reg_weight", ortho_reg_weight)
 
     L1_reg_weight = args.params.L1_weight_inital
     print("initial L1_reg_weight", L1_reg_weight)
@@ -269,9 +269,9 @@ def reconstruction(args):
                     args.params.backwards_rays_lambda*backwards_rays_loss + \
                     args.params.diffuse_lambda * diffuse_reg
 
-                if Ortho_reg_weight > 0:
+                if ortho_reg_weight > 0:
                     loss_reg = tensorf.rf.vector_comp_diffs()
-                    total_loss += Ortho_reg_weight*loss_reg
+                    total_loss += ortho_reg_weight*loss_reg
                     summary_writer.add_scalar('train/reg', loss_reg.detach().item(), global_step=iteration)
                 if L1_reg_weight > 0:
                     loss_reg_L1 = tensorf.rf.density_L1()
