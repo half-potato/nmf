@@ -52,6 +52,7 @@ def main(cfg: DictConfig):
     tensorf2 = TensorNeRF.load(ckpt, strict=False).to(device)
     # tensorf = TensorNeRF.load(ckpt).to(device)
     tensorf.bg_module = tensorf2.bg_module
+    ic(tensorf)
 
     tensorf.rf.set_smoothing(0.5)
     # tensorf.fea2denseAct = 'identity'
@@ -83,9 +84,20 @@ def main(cfg: DictConfig):
     ord = torch.inf
     ord = 2
     inner_r = 0.13
-    outer_r = 0.5
+    outer_r = 0.25
     eps = 0.00
-    offset = torch.tensor([0.1, 0, 0]).to(device).reshape(1, 3)
+    offset = torch.tensor([0.0, 0, 0.50]).to(device).reshape(1, 3)
+
+    def gen_mask(xyz, return_all=False):
+        dist = torch.linalg.norm(xyz[:, :3]-offset, dim=1, ord=ord)
+        dist2 = torch.linalg.norm(xyz[:, :3], dim=1, ord=torch.inf)
+        # full_shell = (dist < outer_r + eps) & (dist > inner_r - eps)
+        mask1 = (dist < outer_r)
+        mask2 = (dist2 < 0.3) 
+        if return_all:
+            return mask1, mask2
+        else:
+            return mask1 | mask2
 
     # train shape
     # optim = torch.optim.Adam(tensorf.parameters(), lr=0.02, betas=(0.9,0.99))
@@ -100,9 +112,7 @@ def main(cfg: DictConfig):
             z = (line+oz)
             xyz = torch.stack([x, y, z, torch.ones_like(x)], dim=-1).reshape(-1, 4)
             inds = np.random.permutation(xyz.shape[0])[:xyz.shape[0]//8]
-            # xyz = xyz[inds]
-            dist = torch.linalg.norm(xyz[:, :3]-offset, dim=1, ord=ord)
-            mask = (dist < outer_r)
+            mask = gen_mask(xyz[:, :3])
             # mask2 = (dist > outer_r+eps)
             # mask = (dist < outer_r) & (dist > inner_r) & (y.reshape(-1) > 0)
             feat = tensorf.rf.compute_densityfeature(xyz)
@@ -111,40 +121,48 @@ def main(cfg: DictConfig):
             # sigma = 1-torch.exp(-sigma_feat * 0.025 * 25)
             sigma = 1-torch.exp(-sigma_feat)
             # sigma = sigma_feat
-            loss = ((sigma[mask]-1).abs().mean() + sigma[~mask].abs().mean())
+            loss = (sigma[mask]-1).abs().mean() + sigma[~mask].abs().mean()
             # loss = (-sigma[mask].clip(max=1).sum() + sigma[~mask].clip(min=1e-8).sum())
-            pbar.set_description(f"{loss.detach().item():.06f}")
+            pbar.set_description(f"Shape loss: {loss.detach().item():.06f}")
             optim.zero_grad()
             loss.backward()
             optim.step()
 
     # train normals
-    optim = torch.optim.Adam(tensorf.parameters(), lr=0.02)
+    optim = torch.optim.Adam(tensorf.parameters(), lr=0.0500)
     with torch.enable_grad():
-        for _ in tqdm(range(200)):
+        pbar = tqdm(range(500))
+        for _ in pbar:
             ox, oy, oz = torch.rand(3, H, W, H, device=device)/H
             y = (col+oy)
             x = (row+ox)
             z = (line+oz)
             xyz = torch.stack([x, y, z, torch.ones_like(x)], dim=-1).reshape(-1, 4)
-            dist = torch.linalg.norm(xyz[:, :3]-offset, dim=1, ord=ord)
-            # full_shell = (dist < outer_r + eps) & (dist > inner_r - eps)
-            full_shell = (dist < outer_r + eps)
+            full_shell = gen_mask(xyz[:, :3])
+
+            sphere_mask, cube_mask = gen_mask(xyz[:, :3], return_all=True)
 
             app_features = tensorf.rf.compute_appfeature(xyz[full_shell])
             p_norm = tensorf.normal_module(xyz[full_shell], app_features)
-            sxyz = xyz[full_shell, :3]
-            if ord == 2:
-                gt_norm = sxyz / (torch.linalg.norm(sxyz, dim=1, keepdim=True)+1e-10)
-            else:
-                gt_norm = torch.zeros_like(sxyz)
-                inds = torch.argmax(sxyz.abs(), dim=1)
-                gt_norm[range(sxyz.shape[0]), inds] = torch.sign(sxyz)[range(sxyz.shape[0]), inds]
-            world_loss = -(p_norm * gt_norm).sum(dim=-1).mean()
-            print(f"{world_loss.item():.06f}")
+            sxyz = xyz[sphere_mask, :3]-offset
+            cxyz = xyz[cube_mask, :3]
+
+            sgt_norm = sxyz / (torch.linalg.norm(sxyz, dim=1, keepdim=True)+1e-10)
+
+            cgt_norm = torch.zeros_like(cxyz)
+            inds = torch.argmax(cxyz.abs(), dim=1)
+            cgt_norm[range(cxyz.shape[0]), inds] = torch.sign(cxyz)[range(cxyz.shape[0]), inds]
+
+            gt_norms = torch.zeros_like(xyz[:, :3])
+            gt_norms[sphere_mask] = sgt_norm
+            gt_norms[cube_mask] = cgt_norm
+
+            world_loss = ((1-(p_norm * gt_norms[full_shell]).sum(dim=-1))**2).mean()
+            # world_loss = torch.linalg.norm(p_norm - gt_norms[full_shell], dim=-1).mean()
             optim.zero_grad()
             world_loss.backward()
             optim.step()
+            pbar.set_description(f"World loss: {world_loss.item():.06f}")
 
     # r, g, b = 0.955, 0.638, 0.538
     r, g, b = 1, 1, 1
@@ -157,8 +175,7 @@ def main(cfg: DictConfig):
             x = (row+ox)
             z = (line+oz)
             xyz = torch.stack([x, y, z, 0.1*torch.ones_like(x)], dim=-1).reshape(-1, 4)
-            dist = torch.linalg.norm(xyz[:, :3]-offset, dim=1, ord=ord)
-            mask = (dist < outer_r + eps)
+            mask = gen_mask(xyz[:, :3])
             app_features = tensorf.rf.compute_appfeature(xyz[mask])
             diffuse, tint, matprop = tensorf.diffuse_module(
                     xyz[mask], torch.rand_like(xyz[..., :3][mask]), app_features)

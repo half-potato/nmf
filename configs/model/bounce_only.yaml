@@ -18,9 +18,9 @@ roughness_rays: 20
 rf:
   _partial_: True
   _target_: models.tensoRF.TensorVMSplit
-  density_n_comp: 24
+  density_n_comp: 16
   appearance_n_comp: 24
-  app_dim: 27
+  app_dim: 48
   # appearance_n_comp: 24
   # app_dim: 27
   step_ratio: 0.5
@@ -54,22 +54,27 @@ diffuse_module:
   featureC: 128
   num_layers: 2
 
-# normal_module:
-#   _partial_: True
-#   # _target_: models.render_modules.DeepMLPNormal
-#   _target_: models.render_modules.MLPNormal
-#   lr: 3e-4
-#   # pospe: 0
-#   pospe: 8
-#   featureC: 128
-#   num_layers: 3
-
 normal_module:
   _partial_: True
-  _target_: models.render_modules.DeepMLPNormal
-  # _target_: models.render_modules.MLPNormal
-  lr: 3e-3
+  # _target_: models.render_modules.DeepMLPNormal
+  _target_: models.render_modules.MLPNormal
+  lr: 3e-4
   # pospe: 0
-  pospe: 12
+  pospe: 16
+  feape: 0
   featureC: 128
-  num_layers: 5
+  num_layers: 3
+
+# normal_module:
+#   _partial_: True
+#   _target_: models.render_modules.AppDimNormal
+
+# normal_module:
+#   _partial_: True
+#   _target_: models.render_modules.DeepMLPNormal
+#   # _target_: models.render_modules.MLPNormal
+#   lr: 7e-5
+#   # pospe: 0
+#   pospe: 16
+#   featureC: 128
+#   num_layers: 5

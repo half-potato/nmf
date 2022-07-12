@@ -22,57 +22,50 @@ class TensorVMSplit(TensorBase):
         self.sizes = self.convolver.sizes
 
         # num_levels x num_outputs
-        # self.interp_mode = 'bilinear'
-        self.interp_mode = 'bicubic'
+        self.interp_mode = 'bilinear'
+        # self.interp_mode = 'bicubic'
         self.align_corners = False
+
+        self.density_plane, self.density_line = self.init_one_svd(self.density_n_comp, [int(self.density_res_multi*g) for g in self.grid_size], 0.1, -0)
+        self.app_plane, self.app_line = self.init_one_svd(self.app_n_comp, self.grid_size, 1.0, 0)
+        m = sum(self.app_n_comp)
+        self.basis_mat = torch.nn.Linear(m, self.app_dim, bias=False)
+        self.dbasis_mat = torch.nn.Linear(sum(self.density_n_comp), 1, bias=False)
 
     def set_smoothing(self, sm):
         self.smoothing = sm
         self.convolver.set_smoothing(sm)
 
-    def init_svd_volume(self, res):
-        self.density_plane, self.density_line = self.init_one_svd(self.density_n_comp, [int(self.density_res_multi*g) for g in self.grid_size], 0.1, -0)
-        self.app_plane, self.app_line = self.init_one_svd(self.app_n_comp, self.grid_size, 0.1, 0)
-        self.basis_mat = torch.nn.Linear(sum(self.app_n_comp), self.app_dim, bias=False)
-        self.dbasis_mat = torch.nn.Linear(sum(self.density_n_comp), 1, bias=False)
-        # torch.nn.init.constant_(self.dbasis_mat.bias, -10)
-        # torch.nn.init.constant_(self.dbasis_mat.weight, 1)
-
     def init_one_svd(self, n_component, grid_size, scale, shift):
         plane_coef, line_coef = [], []
 
-        # xyz = torch.meshgrid(torch.linspace(-1, 1, grid_size[0]), torch.linspace(-1, 1, grid_size[1]), torch.linspace(-1, 1, grid_size[2]), indexing='ij')
         xyg = torch.meshgrid(torch.linspace(-1, 1, grid_size[0]), torch.linspace(-1, 1, grid_size[1]), indexing='ij')
         xy = xyg[0] + xyg[1]
 
         for i in range(len(self.vecMode)):
             vec_id = self.vecMode[i]
             mat_id_0, mat_id_1 = self.matMode[i]
-            # pos_vals = (xyz[mat_id_0] + xyz[mat_id_1]).reshape(1, 1, grid_size[mat_id_0], grid_size[mat_id_1])
-            pos_vals = (xy).reshape(1, 1, grid_size[mat_id_0], grid_size[mat_id_1])
-            freqs = torch.arange(n_component[i]//2).reshape(1, -1, 1, 1)
+            pos_vals = xy.reshape(1, 1, grid_size[mat_id_0], grid_size[mat_id_1])
+            # freqs = torch.arange(n_component[i]//2).reshape(1, -1, 1, 1)
+            freqs = 2**torch.arange(n_component[i]//2).reshape(1, -1, 1, 1)
             line_pos_vals = torch.linspace(-1, 1, grid_size[vec_id]).reshape(1, 1, -1, 1)
+            scales = scale * 1/(freqs)
+            # scales[:, scales.shape[1]//2:] = 0
             plane_coef_v = torch.nn.Parameter(
                 torch.cat([
-                    # scale * 1/(1+freqs) * (torch.sin(freqs * pos_vals * math.pi)),
-                    # scale * 1/(1+freqs) * (torch.cos(freqs * pos_vals * math.pi)),
-                    scale * 1/(1+freqs) * (torch.sin(freqs * pos_vals * math.pi)),
-                    scale * 1/(1+freqs) * (torch.cos(freqs * pos_vals * math.pi)),
+                    scales * torch.sin(freqs * pos_vals * math.pi),
+                    scales * torch.cos(freqs * pos_vals * math.pi),
                 ], dim=1)
                 # scale * torch.randn((1, n_component[i], grid_size[mat_id_1], grid_size[mat_id_0]))
                 # scale * torch.rand((1, n_component[i], grid_size[mat_id_1], grid_size[mat_id_0])) + shift/sum(n_component)
-                # scale * torch.ones((1, n_component[i], grid_size[mat_id_1], grid_size[mat_id_0]))
-                # scale * torch.ones((1, n_component[i], grid_size[mat_id_1], grid_size[mat_id_0])) * torch.linspace(0.1, 1, n_component[i]).reshape(1, -1, 1, 1)
             )
             line_coef_v = torch.nn.Parameter(
                 torch.cat([
-                    scale * 1/(1+freqs) * (torch.sin(freqs * line_pos_vals * math.pi)),
-                    scale * 1/(1+freqs) * (torch.cos(freqs * line_pos_vals * math.pi)),
+                    scales * torch.sin(freqs * line_pos_vals * math.pi),
+                    scales * torch.cos(freqs * line_pos_vals * math.pi),
                 ], dim=1)
                 # scale * torch.randn((1, n_component[i], grid_size[vec_id], 1))
                 # scale * torch.rand((1, n_component[i], grid_size[vec_id], 1))
-                # scale * torch.ones((1, n_component[i], grid_size[vec_id], 1)) * torch.linspace(0.1, 1, n_component[i]).reshape(1, -1, 1, 1)
-                # scale * torch.ones((1, n_component[i], grid_size[vec_id], 1))
             )
             # adjust parameter so the density is always > 0
             plane_coef.append(plane_coef_v)
@@ -82,9 +75,12 @@ class TensorVMSplit(TensorBase):
     
     
     def get_optparam_groups(self, lr_init_spatialxyz = 0.02, lr_init_network = 0.001):
-        grad_vars = [{'params': self.density_line, 'lr': lr_init_spatialxyz}, {'params': self.density_plane, 'lr': lr_init_spatialxyz},
-                     {'params': self.app_line, 'lr': lr_init_spatialxyz}, {'params': self.app_plane, 'lr': lr_init_spatialxyz},
-                     {'params': self.basis_mat.parameters(), 'lr':lr_init_network}]
+        grad_vars = [
+            {'params': self.density_line, 'lr': lr_init_spatialxyz}, {'params': self.density_plane, 'lr': lr_init_spatialxyz},
+            {'params': self.app_line, 'lr': lr_init_spatialxyz}, {'params': self.app_plane, 'lr': lr_init_spatialxyz},
+            {'params': self.basis_mat.parameters(), 'lr':lr_init_network},
+            {'params': self.dbasis_mat.parameters(), 'lr':lr_init_network},
+        ]
         return grad_vars
 
     def vectorDiffs(self, vector_comps):

@@ -304,10 +304,11 @@ class MLPDiffuse(torch.nn.Module):
 
     def forward(self, pts, viewdirs, features, **kwargs):
         B = pts.shape[0]
+        size = pts[..., 3:4].expand(pts[..., :3].shape)
         pts = pts[..., :3]
         indata = [features, pts]
         if self.pospe > 0:
-            indata += [positional_encoding(pts, self.pospe)]
+            indata += [safemath.integrated_pos_enc((pts, size), 0, self.pospe)]
         if self.feape > 0:
             indata += [positional_encoding(features, self.feape)]
         if self.view_encoder is not None:
@@ -319,7 +320,7 @@ class MLPDiffuse(torch.nn.Module):
         ambient = F.softplus(mlp_out[..., 6:7])
         refraction_index = F.softplus(mlp_out[..., 7:8]-1) + self.min_refraction_index
         reflectivity = torch.sigmoid(mlp_out[..., 8:9])
-        roughness = torch.sigmoid(mlp_out[..., 10:11])
+        roughness = torch.sigmoid(mlp_out[..., 10:11])*0.9 + 0.01
         f0 = torch.sigmoid(mlp_out[..., 11:12])
         # ambient = torch.sigmoid(mlp_out[..., 9:10])
         ratio_diffuse = rgb[..., 9:10]
@@ -328,13 +329,14 @@ class MLPDiffuse(torch.nn.Module):
         # tint = F.softplus(mlp_out[..., 3:6])
         diffuse = F.softplus(mlp_out[..., :3])
 
+        # ic(f0)
         return diffuse, tint, dict(
             refraction_index = refraction_index,
             ratio_diffuse = ratio_diffuse,
             reflectivity = reflectivity,
             ambient = ambient,
             roughness = roughness,
-            f0 = f0,
+            f0 = f0*0+1,
         )
 
 class DeepMLPNormal(torch.nn.Module):
@@ -409,10 +411,11 @@ class MLPNormal(torch.nn.Module):
         )
 
     def forward(self, pts, features, **kwargs):
+        size = pts[..., 3:4].expand(pts[..., :3].shape)
         pts = pts[..., :3]
         indata = [features, pts]
         if self.pospe > 0:
-            indata += [positional_encoding(pts, self.pospe)]
+            indata += [safemath.integrated_pos_enc((pts, size), 0, self.pospe)]
         if self.feape > 0:
             indata += [positional_encoding(features, self.feape)]
         mlp_in = torch.cat(indata, dim=-1)
@@ -434,6 +437,7 @@ class AppDimNormal(torch.nn.Module):
     def __init__(self, in_channels=0, activation=torch.nn.Identity):                                                                                                                                                                             
         super().__init__()                                                                                                                                                                                         
         self.activation = activation()
+        self.lr = 1
                                                                                                                                                                                                                    
     def forward(self, pts, features, **kwargs):                                                                                                                                                                    
         start_ind = 10                                                                                                                                                                                              

@@ -29,7 +29,6 @@ class TensorBase(torch.nn.Module):
         self.comp_w = [1,1,1]
 
         self.update_stepSize(grid_size)
-        self.init_svd_volume(grid_size[0])
 
     def get_kwargs(self):
         return {
