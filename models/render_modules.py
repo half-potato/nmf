@@ -53,11 +53,8 @@ class IPE(torch.nn.Module):
         return 2 * self.in_dim * self.max_degree
 
     def forward(self, viewdirs, roughness, **kwargs):
-        B = viewdirs.shape[0]
-        size = roughness.reshape(B, -1).expand(viewdirs.shape)
-        out = safemath.integrated_pos_enc((viewdirs, size), 0, self.max_degree)
-        assert(out.shape[-1] == self.dim())
-        return out
+        size = roughness.reshape(-1, 1).expand(viewdirs.shape)
+        return safemath.integrated_pos_enc((viewdirs, size), 0, self.max_degree)
 
 class PE(torch.nn.Module):
     def __init__(self, max_degree=8, in_dim=3) -> None:
@@ -69,9 +66,7 @@ class PE(torch.nn.Module):
         return 2 * self.in_dim * self.max_degree
 
     def forward(self, x, roughness, **kwargs):
-        out = positional_encoding(x, self.max_degree)
-        assert(out.shape[-1] == self.dim())
-        return out
+        return positional_encoding(x, self.max_degree)
 
 
 class PanoUnwrap(torch.nn.Module):
@@ -234,27 +229,21 @@ class BackgroundRender(torch.nn.Module):
         return self.bg_net(emb)
 
 
-class MLPRGB(torch.nn.Module):
+class MLPRender_FP(torch.nn.Module):
     in_channels: int
     feape: int
     featureC: int
     num_layers: int
-    def __init__(self, in_channels, view_encoder=None, ref_encoder=None, pos_encoder=None, feape=6, featureC=128, num_layers=4, lr=2e-3):
+    def __init__(self, in_channels, view_encoder=None, ref_encoder=None, feape=6, featureC=128, num_layers=4):
         super().__init__()
 
-        self.lr = lr
         self.ref_encoder = ref_encoder
-        self.pos_encoder = pos_encoder
-        self.in_mlpC = 3 + 1 + (3 if pos_encoder is not None else 0)
-        if feape >= 0:
-            self.in_mlpC += 2*feape*in_channels + in_channels
+        self.in_mlpC = 2*feape*in_channels + 6 + in_channels + 1
         self.view_encoder = view_encoder
         if view_encoder is not None:
             self.in_mlpC += self.view_encoder.dim()
         if ref_encoder is not None:
             self.in_mlpC += self.ref_encoder.dim()
-        if self.pos_encoder is not None:
-            self.in_mlpC += self.pos_encoder.dim()
         self.feape = feape
 
         self.mlp = torch.nn.Sequential(
@@ -275,17 +264,12 @@ class MLPRGB(torch.nn.Module):
 
     def forward(self, pts, viewdirs, features, refdirs, roughness, viewdotnorm, **kwargs):
         B = pts.shape[0]
-        size = pts[..., 3:4].expand(pts[..., :3].shape)
         pts = pts[..., :3]
 
 
-        indata = [refdirs, viewdotnorm]
-        if self.feape >= 0:
-            indata.append(features)
-        if self.pos_encoder is not None:
-            indata.append(pts)
-        if self.pos_encoder is not None:
-            indata += [self.pos_encoder(pts, size)]
+        indata = [pts, features, refdirs, viewdotnorm]
+        # if self.pospe > 0:
+        #     indata += [positional_encoding(pts, self.pospe)]
         if self.feape > 0:
             indata += [positional_encoding(features, self.feape)]
         if self.view_encoder is not None:
@@ -586,6 +570,34 @@ class AppDimNormal(torch.nn.Module):
         raw_norms = self.activation(raw_norms)
         normals = raw_norms / (torch.norm(raw_norms, dim=-1, keepdim=True) + 1e-8)
         return normals
+
+class MLPRender_PE(torch.nn.Module):
+    def __init__(self, in_channels, viewpe=6, pospe=6, featureC=128):
+        super().__init__()
+
+        self.in_mlpC = (3+2*viewpe*3) + (3+2*pospe*3) + in_channels
+        self.viewpe = viewpe
+        self.pospe = pospe
+        layer1 = torch.nn.Linear(self.in_mlpC, featureC)
+        layer2 = torch.nn.Linear(featureC, featureC)
+        layer3 = torch.nn.Linear(featureC, 3)
+
+        self.mlp = torch.nn.Sequential(layer1, torch.nn.ReLU(
+            inplace=True), layer2, torch.nn.ReLU(inplace=True), layer3)
+        torch.nn.init.constant_(self.mlp[-1].bias, 0)
+
+    def forward(self, pts, viewdirs, features):
+        indata = [features, viewdirs]
+        if self.pospe > 0:
+            indata += [positional_encoding(pts, self.pospe)]
+        if self.viewpe > 0:
+            indata += [positional_encoding(viewdirs, self.viewpe)]
+        mlp_in = torch.cat(indata, dim=-1)
+        rgb = self.mlp(mlp_in)
+        rgb = torch.sigmoid(rgb)
+
+        return rgb
+
 
 class LearnableSphericalEncoding(torch.nn.Module):
     def __init__(self, out_channels, out_res):

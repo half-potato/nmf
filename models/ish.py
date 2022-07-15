@@ -37,6 +37,7 @@ class SHBasis(torch.nn.Module):
     def __init__(self, deg):
         super(SHBasis, self).__init__()
         self.deg = deg.item()
+        assert(self.deg < 7)
         l = deg
         coeffs = torch.tensor(legendrecoeffs(l).c[::-1].copy(), dtype=torch.float32)
         logcoeff = -2*math.log(l) - math.lgamma(l+1) + 0.5 * (math.lgamma(2*l+2) - math.log(4*math.pi))
