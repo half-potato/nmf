@@ -36,7 +36,6 @@ def main(cfg: DictConfig):
     np.random.seed(20211202)
     print(cfg.dataset)
     print(cfg.model)
-    print(cfg.params)
 
     if not os.path.exists(cfg.ckpt):
         print('the ckpt path does not exists!!')
@@ -48,121 +47,40 @@ def main(cfg: DictConfig):
     ckpt['config']['bg_module']['bg_resolution'] = 256
     del ckpt['state_dict']['diffuse_module.mlp.6.weight']
     del ckpt['state_dict']['diffuse_module.mlp.6.bias']
-    tensorf = hydra.utils.instantiate(cfg.model)(aabb=torch.tensor([[-1.0, -1.0, -1.0], [1.0, 1.0, 1.0]]), grid_size=[128]*3).to(device)
+    tensorf = hydra.utils.instantiate(cfg.model.arch)(aabb=torch.tensor([[-1.0, -1.0, -1.0], [1.0, 1.0, 1.0]]), grid_size=[128]*3).to(device)
     tensorf2 = TensorNeRF.load(ckpt, strict=False).to(device)
     # tensorf = TensorNeRF.load(ckpt).to(device)
     tensorf.bg_module = tensorf2.bg_module
+    tensorf.rf.set_smoothing(1.5)
     ic(tensorf)
 
-    tensorf.rf.set_smoothing(0.5)
-    # tensorf.fea2denseAct = 'identity'
-    tensorf.fea2denseAct = 'softplus_shift'
-    tensorf.max_bounce_rays = 16000
-    # tensorf.normal_module = render_modules.AppDimNormal(1, activation=torch.nn.Identity)
-    tensorf.normal_module = render_modules.DeepMLPNormal(pospe=16, num_layers=3).to(device)
-    tensorf.l = 0
-    # tensorf.rf.basis_mat = AddBasis(48)
-    tensorf.alphaMask = None
-    tensorf.max_recurs = 3
-    tensorf.roughness_rays = 20
 
-    # tensorf.rf.init_svd_volume(16)
-    # tensorf.to(device)
 
-    # tensorf.rf.density_plane[i][:, :, 40:100, 40:100] += 1
-    # tensorf.rf.density_line[i][:, :, ind:ind+8] += 100
     H, W = tensorf.rf.density_plane[0].shape[-2:]
     C = tensorf.rf.density_plane[0].shape[1]
-    # tensorf.bg_module.bg_mat[..., :, :, :] = -4
-    # tensorf.bg_module.bg_mat[..., 0, :, :] = 0
-    # tensorf.bg_module.bg_mat[..., 1, :, :] = 0
-    # tensorf.bg_module.bg_mat[..., 2, :, :] = 0
 
     d = 1
     row, col, line = torch.meshgrid(torch.linspace(-d, d, H, device=device), torch.linspace(-d, d, W, device=device), torch.linspace(-d, d, H, device=device), indexing='ij')
+    grid = torch.stack([row, col, line, torch.ones_like(row)], dim=-1).reshape(1, -1, 4)
+    N = grid.shape[1]
 
     ord = torch.inf
     ord = 2
     inner_r = 0.13
     outer_r = 0.25
     eps = 0.00
-    offset = torch.tensor([0.0, 0, 0.50]).to(device).reshape(1, 3)
+    offset = torch.tensor([0.0, 0, 0.70]).to(device).reshape(1, 3)
 
     def gen_mask(xyz, return_all=False):
-        dist = torch.linalg.norm(xyz[:, :3]-offset, dim=1, ord=ord)
-        dist2 = torch.linalg.norm(xyz[:, :3], dim=1, ord=torch.inf)
-        # full_shell = (dist < outer_r + eps) & (dist > inner_r - eps)
+        dist = torch.linalg.norm(xyz[:, :3]-offset, dim=1, ord=2)
+        dist2 = torch.linalg.norm(xyz[:, :3], dim=1, ord=ord)
         mask1 = (dist < outer_r)
-        mask2 = (dist2 < 0.3) 
+        mask2 = (dist2 < 0.25) 
         if return_all:
+            # return mask1 & ~mask2, mask2 & ~mask1
             return mask1, mask2
         else:
             return mask1 | mask2
-
-    # train shape
-    # optim = torch.optim.Adam(tensorf.parameters(), lr=0.02, betas=(0.9,0.99))
-    optim = torch.optim.Adam(tensorf.parameters(), lr=0.02, betas=(0.9,0.99))
-    with torch.enable_grad():
-        # TODO REMOVE
-        pbar = tqdm(range(500))
-        for _ in pbar:
-            ox, oy, oz = (torch.rand(3, H, W, H, device=device)*2-1)/H
-            y = (col+oy)
-            x = (row+ox)
-            z = (line+oz)
-            xyz = torch.stack([x, y, z, torch.ones_like(x)], dim=-1).reshape(-1, 4)
-            inds = np.random.permutation(xyz.shape[0])[:xyz.shape[0]//8]
-            mask = gen_mask(xyz[:, :3])
-            # mask2 = (dist > outer_r+eps)
-            # mask = (dist < outer_r) & (dist > inner_r) & (y.reshape(-1) > 0)
-            feat = tensorf.rf.compute_densityfeature(xyz)
-            sigma_feat = tensorf.feature2density(feat)
-
-            # sigma = 1-torch.exp(-sigma_feat * 0.025 * 25)
-            sigma = 1-torch.exp(-sigma_feat)
-            # sigma = sigma_feat
-            loss = (sigma[mask]-1).abs().mean() + sigma[~mask].abs().mean()
-            # loss = (-sigma[mask].clip(max=1).sum() + sigma[~mask].clip(min=1e-8).sum())
-            pbar.set_description(f"Shape loss: {loss.detach().item():.06f}")
-            optim.zero_grad()
-            loss.backward()
-            optim.step()
-
-    # train normals
-    optim = torch.optim.Adam(tensorf.parameters(), lr=0.0500)
-    with torch.enable_grad():
-        pbar = tqdm(range(500))
-        for _ in pbar:
-            ox, oy, oz = torch.rand(3, H, W, H, device=device)/H
-            y = (col+oy)
-            x = (row+ox)
-            z = (line+oz)
-            xyz = torch.stack([x, y, z, torch.ones_like(x)], dim=-1).reshape(-1, 4)
-            full_shell = gen_mask(xyz[:, :3])
-
-            sphere_mask, cube_mask = gen_mask(xyz[:, :3], return_all=True)
-
-            app_features = tensorf.rf.compute_appfeature(xyz[full_shell])
-            p_norm = tensorf.normal_module(xyz[full_shell], app_features)
-            sxyz = xyz[sphere_mask, :3]-offset
-            cxyz = xyz[cube_mask, :3]
-
-            sgt_norm = sxyz / (torch.linalg.norm(sxyz, dim=1, keepdim=True)+1e-10)
-
-            cgt_norm = torch.zeros_like(cxyz)
-            inds = torch.argmax(cxyz.abs(), dim=1)
-            cgt_norm[range(cxyz.shape[0]), inds] = torch.sign(cxyz)[range(cxyz.shape[0]), inds]
-
-            gt_norms = torch.zeros_like(xyz[:, :3])
-            gt_norms[sphere_mask] = sgt_norm
-            gt_norms[cube_mask] = cgt_norm
-
-            world_loss = ((1-(p_norm * gt_norms[full_shell]).sum(dim=-1))**2).mean()
-            # world_loss = torch.linalg.norm(p_norm - gt_norms[full_shell], dim=-1).mean()
-            optim.zero_grad()
-            world_loss.backward()
-            optim.step()
-            pbar.set_description(f"World loss: {world_loss.item():.06f}")
 
     # r, g, b = 0.955, 0.638, 0.538
     r, g, b = 1, 1, 1
@@ -170,11 +88,9 @@ def main(cfg: DictConfig):
     optim = torch.optim.Adam(tensorf.parameters(), lr=1e-3)
     with torch.enable_grad():
         for _ in tqdm(range(200)):
-            ox, oy, oz = torch.rand(3, H, W, H, device=device)/H
-            y = (col+oy)
-            x = (row+ox)
-            z = (line+oz)
-            xyz = torch.stack([x, y, z, 0.1*torch.ones_like(x)], dim=-1).reshape(-1, 4)
+            noise = torch.rand(1, N, 4, device=device)/H
+            noise[..., -1] = 0
+            xyz = (grid + noise).reshape(-1, 4)
             mask = gen_mask(xyz[:, :3])
             app_features = tensorf.rf.compute_appfeature(xyz[mask])
             diffuse, tint, matprop = tensorf.diffuse_module(
@@ -194,6 +110,101 @@ def main(cfg: DictConfig):
             optim.zero_grad()
             loss.backward()
             optim.step()
+
+    # train shape
+    optim = torch.optim.Adam(tensorf.parameters(), lr=0.02, betas=(0.9,0.99))
+    with torch.enable_grad():
+        # TODO REMOVE
+        pbar = tqdm(range(300))
+        for _ in pbar:
+            noise = torch.rand(1, N, 4, device=device)/H
+            noise[..., -1] = 0
+            xyz = (grid + noise).reshape(-1, 4)
+            # inds = np.random.permutation(xyz.shape[0])[:xyz.shape[0]//2]
+            mask = gen_mask(xyz[:, :3])
+            # mask2 = (dist > outer_r+eps)
+            # mask = (dist < outer_r) & (dist > inner_r) & (y.reshape(-1) > 0)
+            feat = tensorf.rf.compute_densityfeature(xyz)
+            sigma_feat = tensorf.feature2density(feat)
+
+            # sigma = 1-torch.exp(-sigma_feat * 0.025 * 25)
+            sigma = 1-torch.exp(-sigma_feat)
+            # sigma = sigma_feat
+            loss = (sigma[mask]-1).abs().mean() + sigma[~mask].abs().mean()
+            # loss = (-sigma[mask].clip(max=1).sum() + sigma[~mask].clip(min=1e-8).sum())
+            pbar.set_description(f"Shape loss: {loss.detach().item():.06f}")
+            optim.zero_grad()
+            loss.backward()
+            optim.step()
+
+
+    # train normals
+    # first calculate normals
+    # optim = torch.optim.Adam(tensorf.parameters(), lr=0.0100)
+    optim = torch.optim.Adam(tensorf.parameters(), lr=0.0025)
+    # optim = torch.optim.Adam(tensorf.parameters(), lr=0.0010)
+    # optim = torch.optim.RMSprop(tensorf.parameters(), lr=0.0500)
+    with torch.enable_grad():
+        pbar = tqdm(range(3000))
+        for _ in pbar:
+            noise = torch.rand(1, N, 4, device=device)/H
+            noise[..., -1] = 0
+            xyz = (grid + noise).reshape(-1, 4)
+
+            full_shell = gen_mask(xyz[:, :3])
+            xyz = xyz[full_shell]
+            # inds = np.random.permutation(xyz.shape[0])[:xyz.shape[0]//2]
+            # xyz = xyz[inds]
+
+            """
+            with torch.no_grad():
+                gt_norms = tensorf.calculate_normals(xyz).detach()
+
+            zero_mask = torch.linalg.norm(gt_norms, dim=-1) > 0.1
+            xyz = xyz[zero_mask]
+            gt_norms = gt_norms[zero_mask]
+            """
+            full_shell = gen_mask(xyz[:, :3])
+            sphere_mask, cube_mask = gen_mask(xyz[:, :3], return_all=True)
+            sxyz = xyz[sphere_mask, :3]-offset
+            cxyz = xyz[cube_mask, :3]
+
+            sgt_norm = sxyz / (torch.linalg.norm(sxyz, dim=1, keepdim=True)+1e-10)
+
+            if ord == 2:
+                cgt_norm = cxyz / (torch.linalg.norm(cxyz, dim=1, keepdim=True)+1e-10)
+            else:
+                cgt_norm = torch.zeros_like(cxyz)
+                inds = torch.argmax(cxyz.abs(), dim=1)
+                cgt_norm[range(cxyz.shape[0]), inds] = torch.sign(cxyz)[range(cxyz.shape[0]), inds]
+
+            gt_norms = torch.zeros_like(xyz[:, :3])
+            gt_norms[sphere_mask] = sgt_norm
+            gt_norms[cube_mask] = cgt_norm
+            gt_norms = gt_norms[full_shell]
+            # """
+            app_features = tensorf.rf.compute_appfeature(xyz)
+
+            app_features = (app_features + torch.randn_like(app_features) * tensorf.appdim_noise_std)
+
+            p_norm = tensorf.normal_module(xyz, app_features)
+
+            norm_diff = (1-(p_norm * gt_norms).sum(dim=-1))
+            norm_diff_l2 = torch.linalg.norm(p_norm - gt_norms, dim=-1)
+            # ic(p_norm[0], gt_norms[0], norm_diff.max(), norm_diff.mean(), norm_diff_l2[0], norm_diff[0])
+            # ic(norm_diff)
+            # world_loss = (norm_diff + norm_diff**2).mean()
+            # world_loss = (norm_diff**2).mean()
+            # world_loss = (norm_diff).mean()
+            # world_loss = (norm_diff + 0.01*norm_diff_l2).mean()
+            world_loss = (norm_diff_l2).mean()
+            # world_loss = ((1-(p_norm * gt_norms[full_shell]).sum(dim=-1))**2).mean()
+            # world_loss = ((1-(p_norm * gt_norms[full_shell]).sum(dim=-1))).mean()
+            optim.zero_grad()
+            world_loss.backward()
+            optim.step()
+            pbar.set_description(f"World loss: {world_loss.item():.07f}")
+
 
     # init dataset
     dataset = dataset_dict[cfg.dataset.dataset_name]

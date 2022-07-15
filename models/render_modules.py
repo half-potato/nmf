@@ -43,6 +43,37 @@ def RGBRender(xyz_sampled, viewdirs, features):
     rgb = features
     return rgb
 
+class IPE(torch.nn.Module):
+    def __init__(self, max_degree=8, in_dim=3) -> None:
+        super().__init__()
+        self.max_degree = max_degree
+        self.in_dim = in_dim
+
+    def dim(self):
+        return 2 * self.in_dim * self.max_degree
+
+    def forward(self, viewdirs, roughness, **kwargs):
+        B = viewdirs.shape[0]
+        size = roughness.reshape(B, -1).expand(viewdirs.shape)
+        out = safemath.integrated_pos_enc((viewdirs, size), 0, self.max_degree)
+        assert(out.shape[-1] == self.dim())
+        return out
+
+class PE(torch.nn.Module):
+    def __init__(self, max_degree=8, in_dim=3) -> None:
+        super().__init__()
+        self.max_degree = max_degree
+        self.in_dim = in_dim
+
+    def dim(self):
+        return 2 * self.in_dim * self.max_degree
+
+    def forward(self, x, roughness, **kwargs):
+        out = positional_encoding(x, self.max_degree)
+        assert(out.shape[-1] == self.dim())
+        return out
+
+
 class PanoUnwrap(torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
@@ -203,21 +234,27 @@ class BackgroundRender(torch.nn.Module):
         return self.bg_net(emb)
 
 
-class MLPRender_FP(torch.nn.Module):
+class MLPRGB(torch.nn.Module):
     in_channels: int
     feape: int
     featureC: int
     num_layers: int
-    def __init__(self, in_channels, view_encoder=None, ref_encoder=None, feape=6, featureC=128, num_layers=4):
+    def __init__(self, in_channels, view_encoder=None, ref_encoder=None, pos_encoder=None, feape=6, featureC=128, num_layers=4, lr=2e-3):
         super().__init__()
 
+        self.lr = lr
         self.ref_encoder = ref_encoder
-        self.in_mlpC = 2*feape*in_channels + 6 + in_channels
+        self.pos_encoder = pos_encoder
+        self.in_mlpC = 3 + 1 + (3 if pos_encoder is not None else 0)
+        if feape >= 0:
+            self.in_mlpC += 2*feape*in_channels + in_channels
         self.view_encoder = view_encoder
         if view_encoder is not None:
             self.in_mlpC += self.view_encoder.dim()
         if ref_encoder is not None:
             self.in_mlpC += self.ref_encoder.dim()
+        if self.pos_encoder is not None:
+            self.in_mlpC += self.pos_encoder.dim()
         self.feape = feape
 
         self.mlp = torch.nn.Sequential(
@@ -236,14 +273,19 @@ class MLPRender_FP(torch.nn.Module):
         if isinstance(m, torch.nn.Linear):
             torch.nn.init.xavier_uniform_(m.weight, gain=np.sqrt(2))
 
-    def forward(self, pts, viewdirs, features, refdirs, roughness, **kwargs):
+    def forward(self, pts, viewdirs, features, refdirs, roughness, viewdotnorm, **kwargs):
         B = pts.shape[0]
+        size = pts[..., 3:4].expand(pts[..., :3].shape)
         pts = pts[..., :3]
 
 
-        indata = [pts, features, refdirs]
-        # if self.pospe > 0:
-        #     indata += [positional_encoding(pts, self.pospe)]
+        indata = [refdirs, viewdotnorm]
+        if self.feape >= 0:
+            indata.append(features)
+        if self.pos_encoder is not None:
+            indata.append(pts)
+        if self.pos_encoder is not None:
+            indata += [self.pos_encoder(pts, size)]
         if self.feape > 0:
             indata += [positional_encoding(features, self.feape)]
         if self.view_encoder is not None:
@@ -261,7 +303,8 @@ class MLPRender_FP(torch.nn.Module):
 
         mlp_in = torch.cat(indata, dim=-1)
         rgb = self.mlp(mlp_in)
-        rgb = torch.sigmoid(rgb)
+        # rgb = torch.sigmoid(rgb)
+        rgb = F.softplus(rgb)
 
         return rgb
 
@@ -272,10 +315,11 @@ class MLPDiffuse(torch.nn.Module):
     refpe: int
     featureC: int
     num_layers: int
-    def __init__(self, in_channels, pospe=12, view_encoder=None, feape=6, featureC=128, num_layers=0):
+    def __init__(self, in_channels, pospe=12, view_encoder=None, feape=6, featureC=128, num_layers=0, unlit_tint=False):
         super().__init__()
 
         self.in_mlpC = 2*pospe*3 + 3 + 2*feape*in_channels + in_channels
+        self.unlit_tint = unlit_tint
 
         self.view_encoder = view_encoder
         if view_encoder is not None:
@@ -295,12 +339,17 @@ class MLPDiffuse(torch.nn.Module):
                 torch.nn.Linear(featureC, 20),
             )
             torch.nn.init.constant_(self.mlp[-1].bias, 0)
+            self.mlp.apply(self.init_weights)
         else:
             self.mlp = torch.nn.Identity()
         # to the neural network, roughness is unitless
         self.max_roughness = 1
         self.max_refraction_index = 2
         self.min_refraction_index = 1
+
+    def init_weights(self, m):
+        if isinstance(m, nn.Linear):
+            torch.nn.init.xavier_uniform_(m.weight, gain=torch.nn.init.calculate_gain('relu'))
 
     def forward(self, pts, viewdirs, features, **kwargs):
         B = pts.shape[0]
@@ -320,11 +369,21 @@ class MLPDiffuse(torch.nn.Module):
         ambient = F.softplus(mlp_out[..., 6:7])
         refraction_index = F.softplus(mlp_out[..., 7:8]-1) + self.min_refraction_index
         reflectivity = torch.sigmoid(mlp_out[..., 8:9])
-        roughness = torch.sigmoid(mlp_out[..., 10:11])*0.9 + 0.01
+        roughness = F.softplus(mlp_out[..., 10:11])
         f0 = torch.sigmoid(mlp_out[..., 11:12])
         # ambient = torch.sigmoid(mlp_out[..., 9:10])
         ratio_diffuse = rgb[..., 9:10]
-        tint = rgb[..., 3:6]
+        if self.unlit_tint:
+            h = mlp_out[..., 3]
+            t = mlp_out[..., 4]
+            sphere = torch.stack([
+                torch.cos(h)*torch.cos(t),
+                torch.sin(h)*torch.cos(t),
+                torch.sin(t),
+            ], dim=-1)
+            tint = sphere/2 - 0.5
+        else:
+            tint = rgb[..., 3:6]
         # diffuse = rgb[..., :3]
         # tint = F.softplus(mlp_out[..., 3:6])
         diffuse = F.softplus(mlp_out[..., :3])
@@ -359,14 +418,14 @@ class DeepMLPNormal(torch.nn.Module):
                     torch.nn.ReLU(inplace=True),
                     torch.nn.Linear(featureC, featureC),
                 ] for _ in range(num_layers)], []),
-            torch.nn.ReLU(inplace=True),
+            torch.nn.Tanh(),
             torch.nn.Linear(featureC, 3),
         )
         self.mlp0.apply(self.init_weights)
 
     def init_weights(self, m):
         if isinstance(m, nn.Linear):
-            torch.nn.init.xavier_uniform(m.weight)
+            torch.nn.init.xavier_uniform_(m.weight, gain=torch.nn.init.calculate_gain('relu'))
             # m.bias.data.fill_(0.01)
 
     def forward(self, pts, features, **kwargs):
@@ -387,6 +446,77 @@ class DeepMLPNormal(torch.nn.Module):
 
         return normals
 
+class BasisMLPNormal(torch.nn.Module):
+    in_channels: int
+    feape: int
+    featureC: int
+    num_layers: int
+    def __init__(self, in_channels, num_basis=32, pospe=6, feape=6, featureC=128, num_layers=2, lr=1e-4):
+        super().__init__()
+
+        self.in_mlpC = 2*pospe*3 + 2*max(feape, 0)*in_channels + 3 + (in_channels if feape >= 0 else 0)
+        self.pospe = pospe
+        self.feape = feape
+        self.lr = lr
+
+        basis = torch.rand(num_basis, 3)*2-1
+        basis = basis / torch.norm(basis, dim=-1, keepdim=True)
+        # basis /= num_basis
+        self.num_basis = num_basis
+        # l = self.num_basis//4
+        # basis[1*l:2*l] /= 32
+        # basis[2*l:3*l] /= 512
+        # basis[3*l:4*l] /= 2048
+        self.register_parameter('basis', torch.nn.Parameter(basis))
+        # self.register_buffer('basis', basis)
+
+        self.mlp = torch.nn.Sequential(
+            torch.nn.Linear(self.in_mlpC, featureC),
+            *sum([[
+                    torch.nn.ReLU(inplace=True),
+                    torch.nn.Linear(featureC, featureC),
+                ] for _ in range(num_layers)], []),
+            torch.nn.ReLU(inplace=True),
+            torch.nn.Linear(featureC, num_basis),
+            torch.nn.Tanh(),
+            # torch.nn.Softmax(dim=-1)
+            # torch.nn.Sigmoid()
+        )
+
+        self.mlp.apply(self.init_weights)
+
+    def init_weights(self, m):
+        if isinstance(m, nn.Linear):
+            torch.nn.init.xavier_uniform_(m.weight, gain=torch.nn.init.calculate_gain('relu'))
+
+    def forward(self, pts, features, **kwargs):
+        size = pts[..., 3:4].expand(pts[..., :3].shape)
+        pts = pts[..., :3]
+        indata = [pts]
+        if self.feape >= 0:
+            indata.append(features)
+
+        if self.pospe > 0:
+            indata += [safemath.integrated_pos_enc((pts, size), 0, self.pospe)]
+        if self.feape > 0:
+            indata += [positional_encoding(features, self.feape)]
+        mlp_in = torch.cat(indata, dim=-1)
+        # angles = self.mlp(mlp_in)
+        # azi = angles[:, 0]
+        # ele = angles[:, 1]
+        # normals = torch.stack([
+        #     torch.cos(ele) * torch.cos(azi),
+        #     torch.cos(ele) * torch.sin(azi),
+        #     -torch.sin(ele),
+        # ], dim=1)
+
+        coeffs = self.mlp(mlp_in)
+        normals = coeffs @ self.basis
+
+        normals = normals / torch.norm(normals, dim=-1, keepdim=True)
+
+        return normals
+
 class MLPNormal(torch.nn.Module):
     in_channels: int
     feape: int
@@ -395,7 +525,7 @@ class MLPNormal(torch.nn.Module):
     def __init__(self, in_channels, pospe=6, feape=6, featureC=128, num_layers=2, lr=1e-4):
         super().__init__()
 
-        self.in_mlpC = 2*pospe*3 + 2*feape*in_channels + 3 + in_channels
+        self.in_mlpC = 2*pospe*3 + 2*max(feape, 0)*in_channels + 3 + in_channels
         self.pospe = pospe
         self.feape = feape
         self.lr = lr
@@ -410,10 +540,19 @@ class MLPNormal(torch.nn.Module):
             torch.nn.Linear(featureC, 3)
         )
 
+        self.mlp.apply(self.init_weights)
+
+    def init_weights(self, m):
+        if isinstance(m, nn.Linear):
+            torch.nn.init.xavier_uniform(m.weight, gain=torch.nn.init.calculate_gain('relu'))
+
     def forward(self, pts, features, **kwargs):
         size = pts[..., 3:4].expand(pts[..., :3].shape)
         pts = pts[..., :3]
-        indata = [features, pts]
+        indata = [pts]
+        if self.feape >= 0:
+            indata.append(features)
+
         if self.pospe > 0:
             indata += [safemath.integrated_pos_enc((pts, size), 0, self.pospe)]
         if self.feape > 0:
@@ -447,98 +586,6 @@ class AppDimNormal(torch.nn.Module):
         raw_norms = self.activation(raw_norms)
         normals = raw_norms / (torch.norm(raw_norms, dim=-1, keepdim=True) + 1e-8)
         return normals
-
-class MLPRender_PE(torch.nn.Module):
-    def __init__(self, in_channels, viewpe=6, pospe=6, featureC=128):
-        super().__init__()
-
-        self.in_mlpC = (3+2*viewpe*3) + (3+2*pospe*3) + in_channels
-        self.viewpe = viewpe
-        self.pospe = pospe
-        layer1 = torch.nn.Linear(self.in_mlpC, featureC)
-        layer2 = torch.nn.Linear(featureC, featureC)
-        layer3 = torch.nn.Linear(featureC, 3)
-
-        self.mlp = torch.nn.Sequential(layer1, torch.nn.ReLU(
-            inplace=True), layer2, torch.nn.ReLU(inplace=True), layer3)
-        torch.nn.init.constant_(self.mlp[-1].bias, 0)
-
-    def forward(self, pts, viewdirs, features):
-        indata = [features, viewdirs]
-        if self.pospe > 0:
-            indata += [positional_encoding(pts, self.pospe)]
-        if self.viewpe > 0:
-            indata += [positional_encoding(viewdirs, self.viewpe)]
-        mlp_in = torch.cat(indata, dim=-1)
-        rgb = self.mlp(mlp_in)
-        rgb = torch.sigmoid(rgb)
-
-        return rgb
-
-
-class MLPRender_Fea(torch.nn.Module):
-    in_channels: int
-    viewpe: int
-    feape: int
-    refpe: int
-    featureC: int
-    num_layers: int
-    def __init__(self, in_channels, viewpe=6, feape=6, refpe=6, featureC=128):
-        super().__init__()
-
-        self.in_mlpC = 2*refpe*3 + 2*viewpe*3 + 2*feape*in_channels + 3 + in_channels
-        self.in_mlpC += 3 if refpe > 0 else 0
-        self.viewpe = viewpe
-        self.refpe = refpe
-        self.feape = feape
-        layer1 = torch.nn.Linear(self.in_mlpC, featureC)
-        layer2 = torch.nn.Linear(featureC, featureC)
-        layer3 = torch.nn.Linear(featureC, 3)
-
-        self.mlp = torch.nn.Sequential(layer1, torch.nn.ReLU(
-            inplace=True), layer2, torch.nn.ReLU(inplace=True), layer3)
-        torch.nn.init.constant_(self.mlp[-1].bias, 0)
-
-    def forward(self, pts, viewdirs, features, refdirs=None, **kwargs):
-        indata = [features, viewdirs]
-        if self.feape > 0:
-            indata += [positional_encoding(features, self.feape)]
-        if self.viewpe > 0:
-            indata += [positional_encoding(viewdirs, self.viewpe)]
-        if self.refpe > 0:
-            indata += [positional_encoding(refdirs, self.refpe), refdirs]
-        mlp_in = torch.cat(indata, dim=-1)
-        rgb = self.mlp(mlp_in)
-        rgb = torch.sigmoid(rgb)
-
-        return rgb
-
-class MLPRender(torch.nn.Module):
-    def __init__(self, in_channels, viewpe=6, featureC=128):
-        super().__init__()
-
-        self.in_mlpC = (3+2*viewpe*3) + in_channels
-        self.viewpe = viewpe
-
-        layer1 = torch.nn.Linear(self.in_mlpC, featureC)
-        layer2 = torch.nn.Linear(featureC, featureC)
-        layer3 = torch.nn.Linear(featureC, 3)
-
-        self.mlp = torch.nn.Sequential(layer1, torch.nn.ReLU(
-            inplace=True), layer2, torch.nn.ReLU(inplace=True), layer3)
-        torch.nn.init.constant_(self.mlp[-1].bias, 0)
-
-    def forward(self, pts, viewdirs, features):
-        indata = [features, viewdirs]
-        if self.viewpe > 0:
-            indata += [positional_encoding(viewdirs, self.viewpe)]
-        mlp_in = torch.cat(indata, dim=-1)
-        rgb = self.mlp(mlp_in)
-        rgb = torch.sigmoid(rgb)
-
-        return rgb
-
-
 
 class LearnableSphericalEncoding(torch.nn.Module):
     def __init__(self, out_channels, out_res):

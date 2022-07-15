@@ -29,7 +29,6 @@ class BlenderDataset(Dataset):
         self.read_meta()
         self.define_proj_mat()
 
-        self.white_bg = True
         
 
     def read_depth(self, filename):
@@ -49,6 +48,10 @@ class BlenderDataset(Dataset):
             self.near_far = self.meta['near_far']
         else:
             self.near_far = [2.0,6.0]
+        if 'white_bg' in self.meta:
+            self.white_bg = self.meta['white_bg']
+        else:
+            self.white_bg = True
         w, h = int(self.meta['w']/self.downsample), int(self.meta['h']/self.downsample)
         self.img_wh = [w,h]
         print(f"Original Image size: {self.meta['w']} x {self.meta['h']}")

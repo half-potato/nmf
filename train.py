@@ -38,6 +38,7 @@ class SimpleSampler:
 
 @torch.no_grad()
 def render_test(args):
+    params = args.model.params
     if not os.path.exists(args.ckpt):
         print('the ckpt path does not exists!!')
         return
@@ -77,7 +78,8 @@ def render_test(args):
     #                      bundle_size=args.bundle_size, render_mode=args.render_mode)
 
 def reconstruction(args):
-    assert(args.batch_size % args.params.num_rays_per_envmap == 0)
+    params = args.model.params
+    assert(args.batch_size % params.num_rays_per_envmap == 0)
 
     # init dataset
     dataset = dataset_dict[args.dataset.dataset_name]
@@ -103,14 +105,14 @@ def reconstruction(args):
     summary_writer = SummaryWriter(logfolder)
 
     aabb = train_dataset.scene_bbox.to(device)
-    reso_cur = N_to_reso(args.params.N_voxel_init, aabb)
+    reso_cur = N_to_reso(params.N_voxel_init, aabb)
     nSamples = min(args.nSamples, cal_n_samples(reso_cur,args.step_ratio))
 
     if args.ckpt is not None:
         ckpt = torch.load(args.ckpt)
-        tensorf = TensorNeRF.load(ckpt, aabb).to(device)
+        tensorf = TensorNeRF.load(ckpt).to(device)
     else:
-        tensorf = hydra.utils.instantiate(args.model)(aabb=aabb, grid_size=reso_cur).to(device)
+        tensorf = hydra.utils.instantiate(args.model.arch)(aabb=aabb, grid_size=reso_cur).to(device)
 
 
     lr_bg = 0.03
@@ -126,26 +128,26 @@ def reconstruction(args):
     optimizer = torch.optim.Adam(grad_vars, betas=(0.9,0.99))
 
     # Set up schedule
-    upsamp_list = args.params.upsamp_list
-    uplambda_list = args.params.uplambda_list
-    update_AlphaMask_list = args.params.update_AlphaMask_list
-    bounce_n_list = args.params.bounce_n_list
+    upsamp_list = params.upsamp_list
+    uplambda_list = params.uplambda_list
+    update_AlphaMask_list = params.update_AlphaMask_list
+    bounce_n_list = params.bounce_n_list
     #linear in logrithmic space
-    N_voxel_list = (torch.round(torch.exp(torch.linspace(np.log(args.params.N_voxel_init), np.log(args.params.N_voxel_final), len(upsamp_list)+1))).long()).tolist()[1:]
+    N_voxel_list = (torch.round(torch.exp(torch.linspace(np.log(params.N_voxel_init), np.log(params.N_voxel_final), len(upsamp_list)+1))).long()).tolist()[1:]
     # l_list = torch.linspace(0.7, 0.0, len(uplambda_list)+1).tolist()
     # TODO FIX
     # l_list = torch.linspace(0.8, 0.5, len(uplambda_list)+1).tolist()
-    l_list = torch.linspace(0, 0, len(uplambda_list)+1).tolist()
+    l_list = torch.linspace(params.lambda_start, params.lambda_end, len(uplambda_list)+1).tolist()
     tensorf.l = l_list.pop(0)
     tensorf.max_bounce_rays = bounce_n_list.pop(0)
 
     # smoothing_vals = [0.6, 0.7, 0.8, 0.7, 0.5]
-    smoothing_vals = torch.linspace(args.params.smoothing_start, args.params.smoothing_end, len(upsamp_list)+1).tolist()
+    smoothing_vals = torch.linspace(params.smoothing_start, params.smoothing_end, len(upsamp_list)+1).tolist()
     tensorf.rf.set_smoothing(smoothing_vals.pop(0))
-    upsamp_bg = hasattr(args.params, 'bg_upsamp_res') and tensorf.bg_module is not None
+    upsamp_bg = hasattr(params, 'bg_upsamp_res') and tensorf.bg_module is not None
     if upsamp_bg:
-        res = args.params.bg_upsamp_res.pop(0)
-        lr_bg = args.params.bg_upsamp_lr.pop(0)
+        res = params.bg_upsamp_res.pop(0)
+        lr_bg = params.bg_upsamp_lr.pop(0)
         print(f"Upsampling bg to {res}")
         tensorf.bg_module.upsample(res)
         ind = [i for i, d in enumerate(grad_vars) if 'name' in d and d['name'] == 'bg'][0]
@@ -166,12 +168,12 @@ def reconstruction(args):
     trainingSampler = SimpleSampler(allrays.shape[0], args.batch_size)
 
 
-    ortho_reg_weight = args.params.ortho_weight
+    ortho_reg_weight = params.ortho_weight
     print("initial ortho_reg_weight", ortho_reg_weight)
 
-    L1_reg_weight = args.params.L1_weight_inital
+    L1_reg_weight = params.L1_weight_inital
     print("initial L1_reg_weight", L1_reg_weight)
-    TV_weight_density, TV_weight_app = args.params.TV_weight_density, args.params.TV_weight_app
+    TV_weight_density, TV_weight_app = params.TV_weight_density, params.TV_weight_app
     tvreg = TVLoss()
     print(f"initial TV_weight density: {TV_weight_density} appearance: {TV_weight_app}")
 
@@ -182,7 +184,7 @@ def reconstruction(args):
     # / train_dataset.img_wh[0]
     # with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], with_stack=True, record_shapes=True) as prof:
     print(tensorf)
-    if tensorf.bg_module is not None:
+    if tensorf.bg_module is not None and not train_dataset.white_bg:
         pbar = tqdm(range(args.n_bg_iters), miniters=args.progress_refresh_rate, file=sys.stdout)
         # warm up by training bg
         for _ in pbar:
@@ -194,7 +196,7 @@ def reconstruction(args):
             else:
                 alpha_train = None
             rgb = tensorf.render_just_bg(rays_train)
-            loss = torch.sqrt((rgb - rgb_train) ** 2 + args.params.charbonier_eps**2).mean()
+            loss = torch.sqrt((rgb - rgb_train) ** 2 + params.charbonier_eps**2).mean()
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
@@ -202,7 +204,7 @@ def reconstruction(args):
             pbar.set_description(f'psnr={-10.0 * np.log(photo_loss) / np.log(10.0):.04f}')
         tensorf.bg_module.save('test.png')
 
-    optim = torch.optim.Adam(tensorf.parameters(), lr=0.02, betas=(0.9,0.99))
+    optim = torch.optim.Adam(tensorf.parameters(), lr=0.02, betas=(0.9,0.999), eps=1e-6)
     pbar = tqdm(range(500))
     for _ in pbar:
         xyz = torch.rand(5000, 3, device=device)*2-1
@@ -212,16 +214,17 @@ def reconstruction(args):
         # sigma = 1-torch.exp(-sigma_feat * 0.025 * 25)
         sigma = 1-torch.exp(-sigma_feat)
         # sigma = sigma_feat
-        loss = (sigma-torch.rand_like(sigma)*args.start_density).abs().mean()
+        # loss = (sigma-torch.rand_like(sigma)*args.start_density).abs().mean()
+        loss = (sigma-args.start_density).abs().mean()
         # loss = (-sigma[mask].clip(max=1).sum() + sigma[~mask].clip(min=1e-8).sum())
-        pbar.set_description(f"{loss.detach().item():.06f}")
+        pbar.set_description(f"Mean sigma: {sigma.detach().mean().item():.06f}")
         optim.zero_grad()
         loss.backward()
         optim.step()
 
     pbar = tqdm(range(args.n_iters), miniters=args.progress_refresh_rate, file=sys.stdout)
-    if True:
-    # with torch.autograd.detect_anomaly():
+    # if True:
+    with torch.autograd.detect_anomaly():
         for iteration in pbar:
 
             if iteration < 100:
@@ -241,7 +244,7 @@ def reconstruction(args):
             else:
                 alpha_train = None
                 
-            if iteration <= args.params.num_bw_iters:
+            if iteration <= params.num_bw_iters:
                 # convert rgb to bw
                 rgb_train = rgb_train[..., :1].expand(rgb_train.shape)
 
@@ -256,7 +259,7 @@ def reconstruction(args):
                 normal_loss = data['normal_loss'].mean()
                 floater_loss = data['floater_loss'].mean()
                 diffuse_reg = data['diffuse_reg'].mean()
-                # loss = torch.sqrt((data['rgb_map'] - rgb_train) ** 2 + args.params.charbonier_eps**2).mean()
+                # loss = torch.sqrt((data['rgb_map'] - rgb_train) ** 2 + params.charbonier_eps**2).mean()
                 loss = F.huber_loss(data['rgb_map'], rgb_train, delta=1)
                 photo_loss = ((data['rgb_map'] - rgb_train) ** 2).mean().detach()
                 backwards_rays_loss = data['backwards_rays_loss']
@@ -264,10 +267,10 @@ def reconstruction(args):
 
                 # loss
                 total_loss = loss + \
-                    args.params.normal_lambda*normal_loss + \
-                    args.params.floater_lambda*floater_loss + \
-                    args.params.backwards_rays_lambda*backwards_rays_loss + \
-                    args.params.diffuse_lambda * diffuse_reg
+                    params.normal_lambda*normal_loss + \
+                    params.floater_lambda*floater_loss + \
+                    params.backwards_rays_lambda*backwards_rays_loss + \
+                    params.diffuse_lambda * diffuse_reg
 
                 if ortho_reg_weight > 0:
                     loss_reg = tensorf.rf.vector_comp_diffs()
@@ -291,6 +294,8 @@ def reconstruction(args):
 
             optimizer.zero_grad()
             total_loss.backward()
+            if tensorf.ref_module is not None:
+                torch.nn.utils.clip_grad_norm(tensorf.ref_module.parameters(), params.gradient_clip)
             optimizer.step()
 
             photo_loss = photo_loss.detach().item()
@@ -316,7 +321,7 @@ def reconstruction(args):
                 
 
             if iteration % args.vis_every == args.vis_every - 1 and args.N_vis!=0:
-                tensorf.save(f'{logfolder}/{args.expname}_{iteration}.th', args.model)
+                tensorf.save(f'{logfolder}/{args.expname}_{iteration}.th', args.model.arch)
                 PSNRs_test = evaluation(test_dataset,tensorf, args, renderer, f'{logfolder}/imgs_vis/', N_vis=args.N_vis,
                                         prtx=f'{iteration:06d}_', N_samples=nSamples, white_bg = white_bg, ndc_ray=ndc_ray,
                                         compute_extra_metrics=False, render_mode=args.render_mode)
@@ -325,9 +330,9 @@ def reconstruction(args):
                     tensorf.bg_module.save('test.png')
 
 
-            if upsamp_bg and iteration in args.params.bg_upsamp_list:
-                res = args.params.bg_upsamp_res.pop(0)
-                lr_bg = args.params.bg_upsamp_lr.pop(0)
+            if upsamp_bg and iteration in params.bg_upsamp_list:
+                res = params.bg_upsamp_res.pop(0)
+                lr_bg = params.bg_upsamp_lr.pop(0)
                 print(f"Upsampling bg to {res}")
                 tensorf.bg_module.upsample(res)
                 ind = [i for i, d in enumerate(grad_vars) if 'name' in d and d['name'] == 'bg'][0]
@@ -335,7 +340,7 @@ def reconstruction(args):
                 grad_vars[ind]['lr'] = lr_bg
                 optimizer = torch.optim.Adam(grad_vars, betas=(0.9, 0.99))
 
-            if iteration in args.params.bounce_iter_list:
+            if iteration in params.bounce_iter_list:
                 print(f"Max bounces {tensorf.max_bounce_rays} -> {bounce_n_list[0]}")
                 tensorf.max_bounce_rays = bounce_n_list.pop(0)
             if iteration in update_AlphaMask_list:
@@ -347,7 +352,7 @@ def reconstruction(args):
                     apply_correction = not torch.all(tensorf.alphaMask.grid_size == tensorf.rf.grid_size)
                     tensorf.shrink(new_aabb, apply_correction)
                     # tensorVM.alphaMask = None
-                    L1_reg_weight = args.params.L1_weight_rest
+                    L1_reg_weight = params.L1_weight_rest
                     print("continuing L1_reg_weight", L1_reg_weight)
 
 
@@ -356,7 +361,7 @@ def reconstruction(args):
                     allrays,allrgbs,mask = tensorf.filtering_rays(allrays, allrgbs, focal)
                     trainingSampler = SimpleSampler(allrays.shape[0], args.batch_size)
 
-            if iteration in args.params.smoothing_list:
+            if iteration in params.smoothing_list:
                 sval = smoothing_vals.pop(0)
                 tensorf.rf.set_smoothing(sval)
 
@@ -381,7 +386,7 @@ def reconstruction(args):
     # prof.export_chrome_trace('trace.json')
         
 
-    tensorf.save(f'{logfolder}/{args.expname}.th', args.model)
+    tensorf.save(f'{logfolder}/{args.expname}.th', args.model.arch)
 
 
     if args.render_train:
@@ -415,7 +420,6 @@ def train(cfg: DictConfig):
     np.random.seed(20211202)
     print(cfg.dataset)
     print(cfg.model)
-    print(cfg.params)
 
     if cfg.render_only:
         render_test(cfg)

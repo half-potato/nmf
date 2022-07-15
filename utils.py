@@ -7,16 +7,6 @@ import scipy.signal
 
 mse2psnr = lambda x : -10. * torch.log(x) / torch.log(torch.Tensor([10.]))
 
-def srgb_to_linear(img):
-	# img from 0 to 1
-	limit = 0.04045
-	return torch.where(img > limit, torch.power((img + 0.055) / 1.055, 2.4), img / 12.92)
-
-def linear_to_srgb(img):
-	# img from 0 to 1
-	limit = 0.0031308
-	return torch.where(img > limit, 1.055 * (img ** (1.0 / 2.4)) - 0.055, 12.92 * img)
-
 def visualize_depth_numpy(depth, minmax=None, cmap=cv2.COLORMAP_JET):
     """
     depth: (H, W)
