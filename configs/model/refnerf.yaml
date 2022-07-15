@@ -57,10 +57,10 @@ arch:
   ref_module:
     _partial_: True
     _target_: models.render_modules.MLPRGB
-    feape: -1
-    pos_encoder:
-      _target_: models.render_modules.IPE
-      max_degree: 16
+    feape: 2
+    # pos_encoder:
+    #   _target_: models.render_modules.IPE
+    #   max_degree: 16
     lr: 2e-3
     # view_encoder:
     #   _target_: models.ish.FullISH
@@ -68,19 +68,21 @@ arch:
     # ref_encoder:
     #   _target_: models.ish.FullISH
     #   max_degree: 4
-    ref_encoder:
-      _target_: models.ish.ISH
-      max_degree: 8
     # ref_encoder:
-    #   _target_: models.render_modules.PE
-    #   max_degree: 4
+    #   _target_: models.ish.ISH
+    #   max_degree: 8
+    ref_encoder:
+      _target_: models.render_modules.PE
+      max_degree: 4
     # ref_encoder:
     #   _target_: models.ish.RandISH
     #   # rand_n: 8
     #   rand_n: 16
     #   std: 5
-    featureC: 256
-    num_layers: 6
+    # featureC: 256
+    # num_layers: 6
+    featureC: 128
+    num_layers: 4
 
   normal_module:
     _partial_: True

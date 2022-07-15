@@ -588,11 +588,6 @@ class TensorNeRF(torch.nn.Module):
         if self.alphaMask is not None and self.enable_alpha_mask and not flip.any():
             alphas[ray_valid] = self.alphaMask.sample_alpha(
                 xyz_sampled[ray_valid], contract_space=self.rf.contract_space)
-
-            # T = torch.cumprod(torch.cat([
-            #     torch.ones(alphas.shape[0], 1, device=alphas.device),
-            #     1. - alphas + 1e-10
-            # ], dim=-1), dim=-1)[:, :-1]
             
             alpha_mask = (alphas > self.alphaMask_thres)# & (T > 0)
             # ray_invalid = ~ray_valid

@@ -124,8 +124,6 @@ def reconstruction(args):
         lr_factor = args.lr_decay_target_ratio**(1/args.n_iters)
 
     print("lr decay", args.lr_decay_target_ratio, args.lr_decay_iters)
-    
-    optimizer = torch.optim.Adam(grad_vars, betas=(0.9,0.99))
 
     # Set up schedule
     upsamp_list = params.upsamp_list
@@ -153,7 +151,7 @@ def reconstruction(args):
         ind = [i for i, d in enumerate(grad_vars) if 'name' in d and d['name'] == 'bg'][0]
         grad_vars[ind]['params'] = tensorf.bg_module.parameters()
         grad_vars[ind]['lr'] = lr_bg
-        optimizer = torch.optim.Adam(grad_vars, betas=(0.9, 0.99))
+    optimizer = torch.optim.Adam(grad_vars, betas=(0.9, 0.999), eps=1e-6)
     # smoothing_vals = torch.linspace(0.5, 0.5, len(upsamp_list)+1).tolist()[1:]
 
 
@@ -204,10 +202,10 @@ def reconstruction(args):
             pbar.set_description(f'psnr={-10.0 * np.log(photo_loss) / np.log(10.0):.04f}')
         tensorf.bg_module.save('test.png')
 
-    optim = torch.optim.Adam(tensorf.parameters(), lr=0.02, betas=(0.9,0.999), eps=1e-6)
+    space_optim = torch.optim.Adam(tensorf.parameters(), lr=0.02, betas=(0.9,0.99))
     pbar = tqdm(range(500))
+    xyz = torch.rand(5000, 3, device=device)*2-1
     for _ in pbar:
-        xyz = torch.rand(5000, 3, device=device)*2-1
         feat = tensorf.rf.compute_densityfeature(xyz)
         sigma_feat = tensorf.feature2density(feat)
 
@@ -217,14 +215,14 @@ def reconstruction(args):
         # loss = (sigma-torch.rand_like(sigma)*args.start_density).abs().mean()
         loss = (sigma-args.start_density).abs().mean()
         # loss = (-sigma[mask].clip(max=1).sum() + sigma[~mask].clip(min=1e-8).sum())
-        pbar.set_description(f"Mean sigma: {sigma.detach().mean().item():.06f}")
-        optim.zero_grad()
+        pbar.set_description(f"Mean sigma: {sigma.detach().mean().item():.06f}. Loss: {loss.detach().item()}")
+        space_optim.zero_grad()
         loss.backward()
-        optim.step()
+        space_optim.step()
 
     pbar = tqdm(range(args.n_iters), miniters=args.progress_refresh_rate, file=sys.stdout)
-    # if True:
-    with torch.autograd.detect_anomaly():
+    if True:
+    # with torch.autograd.detect_anomaly():
         for iteration in pbar:
 
             if iteration < 100:
@@ -294,8 +292,8 @@ def reconstruction(args):
 
             optimizer.zero_grad()
             total_loss.backward()
-            if tensorf.ref_module is not None:
-                torch.nn.utils.clip_grad_norm(tensorf.ref_module.parameters(), params.gradient_clip)
+            # if tensorf.ref_module is not None:
+            #     torch.nn.utils.clip_grad_norm_(tensorf.ref_module.parameters(), params.gradient_clip)
             optimizer.step()
 
             photo_loss = photo_loss.detach().item()
