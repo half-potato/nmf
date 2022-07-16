@@ -234,9 +234,10 @@ class MLPRender_FP(torch.nn.Module):
     feape: int
     featureC: int
     num_layers: int
-    def __init__(self, in_channels, view_encoder=None, ref_encoder=None, feape=6, featureC=128, num_layers=4):
+    def __init__(self, in_channels, view_encoder=None, ref_encoder=None, feape=6, featureC=128, num_layers=4, lr=1e-3):
         super().__init__()
 
+        self.lr = lr
         self.ref_encoder = ref_encoder
         self.in_mlpC = 2*feape*in_channels + 6 + in_channels + 1
         self.view_encoder = view_encoder
@@ -370,7 +371,7 @@ class MLPDiffuse(torch.nn.Module):
             tint = rgb[..., 3:6]
         # diffuse = rgb[..., :3]
         # tint = F.softplus(mlp_out[..., 3:6])
-        diffuse = F.softplus(mlp_out[..., :3])
+        diffuse = torch.sigmoid(mlp_out[..., :3])
 
         # ic(f0)
         return diffuse, tint, dict(
@@ -378,6 +379,7 @@ class MLPDiffuse(torch.nn.Module):
             ratio_diffuse = ratio_diffuse,
             reflectivity = reflectivity,
             ambient = ambient,
+            diffuse = diffuse,
             roughness = roughness,
             f0 = f0*0+1,
         )

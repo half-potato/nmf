@@ -927,7 +927,7 @@ class TensorNeRF(torch.nn.Module):
             reflectivity = matprop['reflectivity']
             roughness = matprop['roughness']
             rgb[app_mask] = tint * ((1-reflectivity)*matprop['ambient'] + reflectivity * reflect_rgb)
-            # rgb[app_mask] = tint * reflect_rgb
+            rgb[app_mask] = tint * reflect_rgb + matprop['diffuse']
             # rgb[app_mask] = tint * (ambient + reflectivity * reflect_rgb)
 
             # align_world_loss = (1-(p_world_normal * world_normal).sum(dim=-1))

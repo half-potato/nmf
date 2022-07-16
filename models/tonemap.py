@@ -10,7 +10,7 @@ class SRGBTonemap(torch.nn.Module):
         # linear to SRGB
         # img from 0 to 1
         limit = 0.0031308
-        return torch.where(img > limit, 1.055 * (img ** (1.0 / 2.4)) - 0.055, 12.92 * img)
+        return torch.where(img > limit, 1.055 * (img ** (1.0 / 2.4)) - 0.055, 12.92 * img).clip(0, 1)
 
     def inverse(self, img):
         # SRGB to linear
