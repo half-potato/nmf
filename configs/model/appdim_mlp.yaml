@@ -3,27 +3,49 @@ arch:
   _partial_: True
 
   density_shift: -10
-  alphaMask_thres: 0.00001
+  alphaMask_thres: 0.0001
   distance_scale: 25
   rayMarch_weight_thres: 0.0001
   nEnvSamples: 0
-  # fea2denseAct: 'relu'
   fea2denseAct: 'softplus_shift'
   # fea2denseAct: 'relu_shift'
   max_recurs: 1
-  enable_refraction: False
+  roughness_rays: 50
   infinity_border: False
   enable_alpha_mask: false
-  roughness_rays: 20
   appdim_noise_std: 0.1
+
   tonemap:
-    _partial_: models.tonemap.HDRTonemap
+    # _target_: models.tonemap.HDRTonemap
+    # _target_: models.tonemap.LinearTonemap
+    _target_: models.tonemap.SRGBTonemap
+
+  # brdf:
+  #   _target_: models.brdf.PBR
+  #   _partial_: True
+
+  brdf:
+    _target_: models.brdf.MLPBRDF
+    _partial_: True
+    v_encoder:
+      _target_: models.ish.FullISH
+      max_degree: 3
+    n_encoder:
+      _target_: models.ish.FullISH
+      max_degree: 2
+    l_encoder:
+      _target_: models.ish.FullISH
+      max_degree: 3
+    num_layers: 2
+    feape: 2
+    featureC: 128
+
 
   rf:
     _partial_: True
     _target_: models.tensoRF.TensorVMSplit
     density_n_comp: 16
-    appearance_n_comp: 24
+    appearance_n_comp: 48
     app_dim: 48
     step_ratio: 0.5
     density_res_multi: 1
@@ -32,12 +54,18 @@ arch:
     hier_sizes: [1]
 
   bg_module:
+    # _target_: models.render_modules.BackgroundRender
     _target_: models.render_modules.HierarchicalBG
-    num_levels: 3
     bg_rank: 3
+    num_levels: 3
     num_layers: 0
-    unwrap_fn: 
+    unwrap_fn:
+      # _target_: models.render_modules.PanoUnwrap
       _target_: models.render_modules.CubeUnwrap
+    # view_encoder:
+    #   _target_: models.ish.ISH
+    #   max_degree: 6
+    # bg_resolution: [4096, 2048]
     bg_resolution: 256
 
   diffuse_module:
@@ -45,21 +73,51 @@ arch:
     _target_: models.render_modules.MLPDiffuse
     pospe: 0
     feape: 2
-    view_encoder:
-      _target_: models.ish.FullISH
-      max_degree: 4
-    unlit_tint: false
+    # view_encoder:
+    #   _target_: models.ish.FullISH
+    #   max_degree: 4
     featureC: 128
     num_layers: 2
 
+  # ref_module:
+  #   _partial_: True
+  #   _target_: models.render_modules.MLPRender_FP
+  #   feape: 0
+  #   lr: 1e-4
+  #   # view_encoder:
+  #   #   _target_: models.ish.FullISH
+  #   #   max_degree: 4
+  #   ref_encoder:
+  #     _target_: models.ish.FullISH
+  #     max_degree: 5
+  #   # ref_encoder:
+  #   #   _target_: models.render_modules.PE
+  #   #   max_degree: 4
+  #   # ref_encoder:
+  #   #   _target_: models.ish.ISH
+  #   #   max_degree: 6
+  #   # ref_encoder:
+  #   #   _target_: models.ish.RandISH
+  #   #   rand_n: 64
+  #   #   std: 5
+  #   featureC: 128
+  #   num_layers: 6
+
+  # normal_module:
+  #   _partial_: True
+  #   _target_: models.render_modules.DeepMLPNormal
+  #   pospe: 16
+  #   featureC: 128
+  #   num_layers: 5
+  #   lr: 1e-3
   normal_module:
     _partial_: True
     _target_: models.render_modules.MLPNormal
-    lr: 3e-4
+    lr: 3e-3
     pospe: 16
     feape: 2
     featureC: 128
-    num_layers: 5
+    num_layers: 3
 
 params:
   smoothing_start: 1.5
@@ -101,7 +159,7 @@ params:
   TV_weight_density: 0.0
   TV_weight_app: 0.0
   normal_lambda: 3e-2
-  diffuse_lambda: 1e-4
+  diffuse_lambda: 0
   backwards_rays_lambda: 1
   floater_lambda: 0.001
   charbonier_eps: 0.001

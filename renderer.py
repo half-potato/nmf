@@ -9,6 +9,7 @@ import torch.nn.functional as F
 import matplotlib.pyplot as plt
 from icecream import ic
 from models.tensor_nerf import LOGGER
+import traceback
 
 def chunk_renderer(rays, tensorf, focal, keys=['rgb_map'], chunk=4096, **kwargs):
 
@@ -23,16 +24,17 @@ def chunk_renderer(rays, tensorf, focal, keys=['rgb_map'], chunk=4096, **kwargs)
 
     # stack it boyyy
     for key in keys:
-        if len(data[key]) == 1:
-            data[key] = data[key][0]
-            continue
-        if torch.is_tensor(data[key][0]):
-            data[key] = torch.cat(data[key], dim=0)
-        else:
-            try:
+        try:
+            if len(data[key]) == 1:
+                data[key] = data[key][0]
+                continue
+            if torch.is_tensor(data[key][0]) and len(data[key][0].shape) > 0:
+                data[key] = torch.cat(data[key], dim=0)
+            else:
                 data[key] = torch.tensor(data[key])
-            except:
-                ic(key, data[key][0])
+        except:
+            traceback.print_exc()
+            ic(key, data[key][0])
     return data
 
 class BundleRender:
@@ -64,7 +66,7 @@ class BundleRender:
         num_rays = height * width
         device = rays.device
 
-        data = self.base_renderer(rays, tensorf, keys=['depth_map', 'rgb_map', 'normal_map', 'acc_map', 'termination_xyz', 'debug_map'],
+        data = self.base_renderer(rays, tensorf, keys=['depth_map', 'rgb_map', 'normal_map', 'acc_map', 'termination_xyz', 'debug_map'],#, 'backwards_rays_loss'],
                                   focal=self.focal, chunk=self.chunk, **kwargs)
 
         LOGGER.save('rays.pkl')
@@ -75,6 +77,7 @@ class BundleRender:
         debug_map = data['debug_map']
         acc_map = data['acc_map']
         points = data['termination_xyz']
+        # ic(data['backwards_rays_loss'].mean(), acc_map.max())
         #  ind = [598,532]
         ind = [height // 2, width // 2]
         point = points.reshape(height, width, -1)[ind[0], ind[1]].to(device)
@@ -197,8 +200,6 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
         depth_map, _ = visualize_depth_numpy(depth_map.numpy(),near_far)
         if gt_rgb is not None:
             loss = torch.mean((rgb_map.clip(0, 1) - gt_rgb.clip(0, 1)) ** 2)
-            # ic((rgb_map.clip(0, 1)-gt_rgb.clip(0, 1)).max(), rgb_map.clip(0, 1).mean(), gt_rgb.clip(0, 1).mean(), loss)
-            ic(rgb_map.shape, gt_rgb.shape)
             PSNRs.append(-10.0 * np.log(loss.item()) / np.log(10.0))
 
             # fig, axs = plt.subplots(2, 2)
@@ -212,7 +213,6 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
                 ssim = rgb_ssim(rgb_map, gt_rgb, 1)
                 l_a = rgb_lpips(gt_rgb.numpy(), rgb_map.numpy(), 'alex', tensorf.device)
                 l_v = rgb_lpips(gt_rgb.numpy(), rgb_map.numpy(), 'vgg', tensorf.device)
-                # ic(PSNRs[-1], ssim)
                 ssims.append(ssim)
                 l_alex.append(l_a)
                 l_vgg.append(l_v)
@@ -268,7 +268,6 @@ def evaluation(test_dataset,tensorf, unused, renderer, *args, N_vis=5, device='c
 
             rays = samples.view(-1,samples.shape[-1]).to(device)
             if len(test_dataset.all_rgbs):
-                ic(test_dataset.all_rgbs[idxs[idx]].shape)
                 gt_rgb = test_dataset.all_rgbs[idxs[idx]].view(H, W, 3)
                 yield idx, rays, gt_rgb
             else:

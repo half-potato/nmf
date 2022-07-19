@@ -19,8 +19,6 @@ from .tonemap import SRGBTonemap, HDRTonemap
 
 LOGGER = Logger(enable=False)
 
-def schlick(f0, n, l):
-    return f0 + (1-f0)*(1-(n*l).sum(dim=-1, keepdim=True).clip(min=1e-20))**5
 
 def snells_law(r, n, l):
     # n: (B, 3) surface outward normal
@@ -161,7 +159,7 @@ class AlphaGridMask(torch.nn.Module):
 
 
 class TensorNeRF(torch.nn.Module):
-    def __init__(self, rf, grid_size, aabb, diffuse_module, tonemap=None, normal_module=None, ref_module=None, bg_module=None,
+    def __init__(self, rf, grid_size, aabb, diffuse_module, brdf=None, tonemap=None, normal_module=None, ref_module=None, bg_module=None,
                  alphaMask=None, near_far=[2.0, 6.0], nEnvSamples=100, specularity_threshold=0.005, max_recurs=0,
                  max_normal_similarity=1, infinity_border=False, min_refraction=1.1, enable_refraction=True,
                  density_shift=-10, alphaMask_thres=0.001, distance_scale=25, rayMarch_weight_thres=0.0001,
@@ -177,6 +175,8 @@ class TensorNeRF(torch.nn.Module):
             self.tonemap = HDRTonemap()
         else:
             self.tonemap = tonemap
+
+        self.brdf = brdf(in_channels=self.rf.app_dim)
 
         self.alphaMask = alphaMask
         self.infinity_border = infinity_border
@@ -217,11 +217,14 @@ class TensorNeRF(torch.nn.Module):
         grad_vars += self.rf.get_optparam_groups(lr_init_spatial, lr_init_network)
         if self.ref_module is not None:
             grad_vars += [{'params': list(self.ref_module.parameters()), 'lr': lr_scale*self.ref_module.lr}]
-        if hasattr(self, 'normal_module') and isinstance(self.normal_module, torch.nn.Module):
+        if isinstance(self.normal_module, torch.nn.Module):
             grad_vars += [{'params': self.normal_module.parameters(),
                            'lr': self.normal_module.lr*lr_scale}]
-        if hasattr(self, 'diffuse_module') and isinstance(self.diffuse_module, torch.nn.Module):
+        if isinstance(self.diffuse_module, torch.nn.Module):
             grad_vars += [{'params': self.diffuse_module.parameters(),
+                           'lr': lr_init_network}]
+        if isinstance(self.brdf, torch.nn.Module):
+            grad_vars += [{'params': self.brdf.parameters(),
                            'lr': lr_init_network}]
         # TODO REMOVE
         # if hasattr(self, 'bg_module') and isinstance(self.bg_module, torch.nn.Module):
@@ -750,7 +753,7 @@ class TensorNeRF(torch.nn.Module):
                 ratio_diffuse = 1
                 ratio_reflected = 0
                 ratio_refracted = 0
-            elif self.ref_module is not None:
+            elif self.ref_module is not None and is_train:
                 ratio_refracted = 0
                 viewdotnorm = (viewdirs[app_mask]*L).sum(dim=-1, keepdim=True)
                 ref_col = self.ref_module(
@@ -862,60 +865,19 @@ class TensorNeRF(torch.nn.Module):
                     """
                     incoming_light = self.render_just_bg(bounce_rays.reshape(-1, D)).reshape(-1, num_roughness_rays, 3)
 
+                    ref_weight = self.brdf(V[bounce_mask], bounce_rays[..., 3:6], outward, app_features[bounce_mask], matprop, bounce_mask)
+
                     # compute rendering equation integral
                     # L_i, the incoming light
                     # omega_i = incoming light direction = bounce_rays[..., 3:6]
                     # outward = outward surface normal
-                    half = bounce_rays[..., 3:6] + V[bounce_mask].reshape(-1, 1, 3)
-                    half = half / (torch.linalg.norm(half, dim=-1, keepdim=True)+1e-8)
-
-                    cos_lamb = (bounce_rays[..., 3:6] * outward).sum(dim=-1, keepdim=True).clip(min=1e-8)
-                    cos_view = (V[bounce_mask].reshape(-1, 1, 3) * outward).sum(dim=-1, keepdim=True).clip(min=1e-8)
-                    cos_half = (half * outward).sum(dim=-1, keepdim=True).clip(min=1e-8)
-
-                    # compute the BRDF (bidirectional reflectance distribution function)
-                    # k_d = ratio_diffuse[bounce_mask].reshape(-1, 1, 1)
-                    # diffuse vs specular fraction
-                    k_s = schlick(matprop['f0'][bounce_mask].reshape(-1, 1, 1), outward.double(), half.double()).float()
-                    k_d = 1-k_s
-
-                    # diffuse vs specular intensity
-                    f_d = 1/np.pi
-
-                    alph = roughness[bounce_mask].reshape(-1, 1, 1)
-                    k = alph / 2
-                    D_ggx = alph**2 / (np.pi * (cos_half**2*(alph**2-1)+1)**2).clip(min=1e-10)
-                    G_schlick_smith = cos_lamb * cos_view / ((cos_view*(1-k)+k)*(cos_lamb*(1-k)+k)).clip(min=1e-8)
-                    
-                    f_s = D_ggx * G_schlick_smith / (4 * cos_lamb * cos_view).clip(min=1e-8)
-                    brdf = k_d*f_d + (1-k_d)*f_s
-
-                    # cos_refl = (noise_rays * refdirs[full_bounce_mask].reshape(-1, 1, 3)).sum(dim=-1, keepdim=True).clip(min=0)
-                    # cos_refl = (bounce_rays[..., 3:6] * refdirs[full_bounce_mask].reshape(-1, 1, 3)).sum(dim=-1, keepdim=True).clip(min=0)
-                    # ref_rough = roughness[bounce_mask].reshape(-1, 1)
-                    # phong shading?
-                    # ref_weight = (1-ref_rough) * cos_refl + ref_rough * cos_lamb
-                    # ref_weight = ref_weight / (ref_weight.sum(dim=-1, keepdim=True)+1e-8)
-
-                    # tinted_ref_rgb = (ref_weight * incoming_light).mean(dim=1).float()
-
-                    # aden = (-bn*l[bounce_mask].reshape(-1, 1, 3)).sum(dim=-1, keepdim=True).clip(min=0)
-                    # bden = (bn*bounce_rays[..., 3:6]).sum(dim=-1, keepdim=True).clip(min=0)
-                    # denom = 1
-                    # tinted_ref_rgb = (numer / (denom+1e-8) * incoming_light).mean(dim=1).float()
-                    # tinted_ref_rgb = (numer / (denom+1e-8)).mean(dim=1).float()
-                    # ic(k_s[:, 0], f_s[:, 0], D_ggx[:, 0], G_schlick_smith[:, 0]) 
-
-                    # tinted_ref_rgb = (brdf * incoming_light * cos_lamb).mean(dim=1).float()
-                    ref_weight = (brdf * cos_lamb).clip(min=0)
-                    ref_weight = ref_weight / (ref_weight.sum(dim=1, keepdim=True)+1e-8)
                     # ic(ref_weight[0], D_ggx[0], cos_half[0], alph[0])
 
                     tinted_ref_rgb = (ref_weight * incoming_light).sum(dim=1).float()
 
                     # tinted_ref_rgb = incoming_light.mean(dim=1)
                     # debug[full_bounce_mask] += reflectivity[bounce_mask] * tinted_ref_rgb
-                    debug[full_bounce_mask] += tinted_ref_rgb
+                    debug[full_bounce_mask] += tinted_ref_rgb/2
                     reflect_rgb[bounce_mask] = tinted_ref_rgb
 
                     # m = full_bounce_mask.sum(dim=1) > 0
@@ -937,7 +899,7 @@ class TensorNeRF(torch.nn.Module):
             reflectivity = matprop['reflectivity']
             roughness = matprop['roughness']
             rgb[app_mask] = tint * ((1-reflectivity)*matprop['ambient'] + reflectivity * reflect_rgb)
-            rgb[app_mask] = tint * reflect_rgb + matprop['diffuse']
+            # rgb[app_mask] = tint * reflect_rgb + matprop['diffuse']
             # rgb[app_mask] = tint * (ambient + reflectivity * reflect_rgb)
 
             # align_world_loss = (1-(p_world_normal * world_normal).sum(dim=-1))
@@ -953,9 +915,8 @@ class TensorNeRF(torch.nn.Module):
             reflectivity = torch.tensor(0.0)
         
         # viewdirs point inward. -viewdirs aligns with p_world_normal. So we want it below 0
-        # backwards_rays_loss = torch.matmul(viewdirs.reshape(-1, 1, 3), p_world_normal.reshape(-1, 3, 1)).reshape(app_mask.shape).clamp(min=0)**2
-        backwards_rays_loss = torch.matmul(viewdirs.reshape(-1, 1, 3), world_normal.reshape(-1, 3, 1)).reshape(app_mask.shape).clamp(min=0)**2
-        backwards_rays_loss = (weight * backwards_rays_loss).mean()
+        backwards_rays_loss = torch.matmul(viewdirs.reshape(-1, 1, 3), p_world_normal.reshape(-1, 3, 1)).reshape(app_mask.shape).clamp(min=0)**2
+        backwards_rays_loss = (weight * backwards_rays_loss).sum(dim=1).mean()
 
         # calculate depth
 
@@ -1003,7 +964,7 @@ class TensorNeRF(torch.nn.Module):
         # rgb_map = bg.reshape(-1, 1, 1, 3)
 
         # rgb_map = linear_to_srgb(rgb_map).clamp(0, 1)
-        rgb_map = self.tonemap(rgb_map.clip(min=0))
+        rgb_map = self.tonemap(rgb_map, noclip=True)
 
         # process debug to turn it into map
         # 1 = refracted. -1 = reflected

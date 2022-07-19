@@ -12,13 +12,13 @@ epochs = 500
 # bg_module = render_modules.BackgroundRender(3, render_modules.PanoUnwrap(), bg_resolution=2*1024, featureC=128, num_layers=0)
 # bg_module = render_modules.BackgroundRender(3, render_modules.CubeUnwrap(), bg_resolution=2*1024, featureC=128, num_layers=0)
 tm = tonemap.SRGBTonemap()
-bg_module = render_modules.HierarchicalBG(3, render_modules.CubeUnwrap(), bg_resolution=2*1024//2, num_levels=3, featureC=128, num_layers=0)
+bg_module = render_modules.HierarchicalBG(3, render_modules.CubeUnwrap(), bg_resolution=2*1024//4, num_levels=3, featureC=128, num_layers=0)
 bg_module = bg_module.to(device)
 pano = imageio.imread("ninomaru_teien_4k.exr")
 # optim = torch.optim.Adam(bg_module.parameters(), lr=0.30)
 optim = torch.optim.Adam(bg_module.parameters(), lr=0.1)
 # optim = torch.optim.SGD(bg_module.parameters(), lr=1.0, momentum=0.99, weight_decay=5e-4)
-scheduler = torch.optim.lr_scheduler.StepLR(optim, step_size=5, gamma=0.93)
+scheduler = torch.optim.lr_scheduler.StepLR(optim, step_size=5, gamma=0.94)
 # ic(bg_module.bg_mats[-1].shape, pano.shape)
 
 H, W, C = pano.shape
@@ -62,10 +62,11 @@ iter = tqdm(range(epochs))
 for i in iter:
     inds = sampler.nextids()
     samp = colors[inds]
-    theta = (rows[inds]+0.5+0*torch.rand(batch_size, device=device))/H * np.pi - np.pi/2
-    phi = -(cols[inds]+0.5+0*torch.rand(batch_size, device=device))/W * 2*np.pi - np.pi
-    # theta = (rows[inds]+torch.rand(batch_size, device=device))/H * np.pi - np.pi/2
-    # phi = -(cols[inds]+torch.rand(batch_size, device=device))/W * 2*np.pi - np.pi
+    # theta = (rows[inds]+0.5+0*torch.rand(batch_size, device=device))/H * np.pi - np.pi/2
+    # phi = -(cols[inds]+0.5+0*torch.rand(batch_size, device=device))/W * 2*np.pi - np.pi
+    theta = (rows[inds]+torch.rand(batch_size, device=device))/H * np.pi - np.pi/2
+    phi = -(cols[inds]+torch.rand(batch_size, device=device))/W * 2*np.pi - np.pi
+
     # TODO REMOVE
     # theta = (rows[inds]+0.5+0*torch.rand(batch_size, device=device))/H * np.pi - np.pi/2
     # phi = (cols[inds]+0.5+0*torch.rand(batch_size, device=device))/W * 2*np.pi

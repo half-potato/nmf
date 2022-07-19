@@ -37,21 +37,21 @@ def main(cfg: DictConfig):
     print(cfg.dataset)
     print(cfg.model)
 
-    if not os.path.exists(cfg.ckpt):
-        print('the ckpt path does not exists!!')
-        return
-
     # init model
-    ckpt = torch.load(cfg.ckpt)
-    # ckpt['config']['bg_module']['bg_resolution'] = ckpt['state_dict']['bg_module.bg_mat'].shape[-1] // 6
-    ckpt['config']['bg_module']['bg_resolution'] = 256
-    del ckpt['state_dict']['diffuse_module.mlp.6.weight']
-    del ckpt['state_dict']['diffuse_module.mlp.6.bias']
-    tensorf = hydra.utils.instantiate(cfg.model.arch)(aabb=torch.tensor([[-1.0, -1.0, -1.0], [1.0, 1.0, 1.0]]), grid_size=[128]*3).to(device)
-    tensorf2 = TensorNeRF.load(ckpt, strict=False).to(device)
-    # tensorf = TensorNeRF.load(ckpt).to(device)
-    tensorf.bg_module = tensorf2.bg_module
+    # ckpt = torch.load(cfg.ckpt)
+    # # ckpt['config']['bg_module']['bg_resolution'] = ckpt['state_dict']['bg_module.bg_mat'].shape[-1] // 6
+    # ckpt['config']['bg_module']['bg_resolution'] = 256
+    # del ckpt['state_dict']['diffuse_module.mlp.6.weight']
+    # del ckpt['state_dict']['diffuse_module.mlp.6.bias']
+    tensorf = hydra.utils.instantiate(cfg.model.arch)(aabb=torch.tensor([[-1.0, -1.0, -1.0], [1.0, 1.0, 1.0]]), grid_size=[128]*3)
+    bg_sd = torch.load('log/mats360_bg.th')
+    from models import render_modules
+    bg_module = render_modules.HierarchicalBG(3, render_modules.CubeUnwrap(), bg_resolution=2*1024//4, num_levels=3, featureC=128, num_layers=0)
+    # bg_module = render_modules.BackgroundRender(3, render_modules.PanoUnwrap(), bg_resolution=2*1024, featureC=128, num_layers=0)
+    bg_module.load_state_dict(bg_sd)
+    tensorf.bg_module = bg_module
     tensorf.rf.set_smoothing(1.5)
+    tensorf = tensorf.to(device)
     ic(tensorf)
 
 
@@ -105,17 +105,18 @@ def main(cfg: DictConfig):
             tint_loss = (tint[..., 0]-r)**2 + (tint[..., 1]-g)**2 + (tint[..., 2]-b)**2
             diffuse_loss = (diffuse[..., 0]-1)**2 + (diffuse[..., 1]-1)**2 + (diffuse[..., 2]-1)**2
             property_loss = (matprop['refraction_index'] - 1.5)**2 + (matprop['reflectivity'] - 1.00)**2 + (matprop['ratio_diffuse'] - 0.10)**2 + (matprop['ambient'] + 0.1)**2 + \
-                            (matprop['f0'] - 0.9)**2 + (matprop['roughness'] - 0.0)**2
+                            (matprop['f0'] - 0.9)**2 + (matprop['roughness'] - 0.2)**2
             loss = tint_loss.mean() + diffuse_loss.mean() + property_loss.mean()
             optim.zero_grad()
             loss.backward()
             optim.step()
 
     # train shape
-    optim = torch.optim.Adam(tensorf.parameters(), lr=0.02, betas=(0.9,0.99))
+    optim = torch.optim.Adam(tensorf.parameters(), lr=0.1, betas=(0.9,0.99))
+    scheduler = torch.optim.lr_scheduler.StepLR(optim, step_size=5, gamma=0.99)
     with torch.enable_grad():
         # TODO REMOVE
-        pbar = tqdm(range(300))
+        pbar = tqdm(range(500))
         for _ in pbar:
             noise = torch.rand(1, N, 4, device=device)/H
             noise[..., -1] = 0
@@ -132,10 +133,11 @@ def main(cfg: DictConfig):
             # sigma = sigma_feat
             loss = (sigma[mask]-1).abs().mean() + sigma[~mask].abs().mean()
             # loss = (-sigma[mask].clip(max=1).sum() + sigma[~mask].clip(min=1e-8).sum())
-            pbar.set_description(f"Shape loss: {loss.detach().item():.06f}")
+            pbar.set_description(f"Shape loss: {loss.detach().item():.06f} LR: {scheduler.get_last_lr()}")
             optim.zero_grad()
             loss.backward()
             optim.step()
+            scheduler.step()
 
 
     # train normals
@@ -144,8 +146,9 @@ def main(cfg: DictConfig):
     optim = torch.optim.Adam(tensorf.parameters(), lr=0.0025)
     # optim = torch.optim.Adam(tensorf.parameters(), lr=0.0010)
     # optim = torch.optim.RMSprop(tensorf.parameters(), lr=0.0500)
+    scheduler = torch.optim.lr_scheduler.StepLR(optim, step_size=5, gamma=0.99)
     with torch.enable_grad():
-        pbar = tqdm(range(3000))
+        pbar = tqdm(range(1000))
         for _ in pbar:
             noise = torch.rand(1, N, 4, device=device)/H
             noise[..., -1] = 0
@@ -195,7 +198,8 @@ def main(cfg: DictConfig):
             optim.zero_grad()
             world_loss.backward()
             optim.step()
-            pbar.set_description(f"World loss: {world_loss.item():.07f}")
+            pbar.set_description(f"World loss: {world_loss.item():.07f} LR: {scheduler.get_last_lr()}")
+            scheduler.step()
 
 
     # init dataset
@@ -204,8 +208,7 @@ def main(cfg: DictConfig):
     white_bg = test_dataset.white_bg
     ndc_ray = cfg.dataset.ndc_ray
 
-    logfolder = os.path.dirname(cfg.ckpt)
-    folder = f'{logfolder}/flat_plane_imgs'
+    folder = f'log/flat_plane_imgs'
     os.makedirs(folder, exist_ok=True)
     print(f"Saving test to {folder}")
     evaluation(test_dataset,tensorf, cfg, renderer, folder,

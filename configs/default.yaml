@@ -33,4 +33,4 @@ lr_decay_target_ratio: 0.1
 lr_upsample_reset: 1
 fp16: false
 n_bg_iters: 1000
-start_density: 2e-3
+start_density: 1e-4

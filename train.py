@@ -84,7 +84,7 @@ def reconstruction(args):
     # init dataset
     dataset = dataset_dict[args.dataset.dataset_name]
     train_dataset = dataset(os.path.join(args.datadir, args.dataset.scenedir), split='train', downsample=args.dataset.downsample_train, is_stack=False)
-    test_dataset = dataset(os.path.join(args.datadir, args.dataset.scenedir), split='train', downsample=args.dataset.downsample_train, is_stack=True)
+    test_dataset = dataset(os.path.join(args.datadir, args.dataset.scenedir), split='test', downsample=args.dataset.downsample_train, is_stack=True)
     white_bg = train_dataset.white_bg
     train_dataset.near_far = args.dataset.near_far
     near_far = train_dataset.near_far
@@ -115,11 +115,12 @@ def reconstruction(args):
         tensorf = hydra.utils.instantiate(args.model.arch)(aabb=aabb, grid_size=reso_cur).to(device)
     tensorf = hydra.utils.instantiate(args.model.arch)(aabb=aabb, grid_size=reso_cur)
     # TODO REMOVE
-    # bg_sd = torch.load('log/mats360_bg.th')
-    # from models import render_modules
-    # bg_module = render_modules.HierarchicalBG(3, render_modules.CubeUnwrap(), bg_resolution=2*1024//2, num_levels=3, featureC=128, num_layers=0)
-    # bg_module.load_state_dict(bg_sd)
-    # tensorf.bg_module = bg_module
+    bg_sd = torch.load('log/mats360_bg.th')
+    from models import render_modules
+    bg_module = render_modules.HierarchicalBG(3, render_modules.CubeUnwrap(), bg_resolution=2*1024//4, num_levels=3, featureC=128, num_layers=0)
+    # bg_module = render_modules.BackgroundRender(3, render_modules.PanoUnwrap(), bg_resolution=2*1024, featureC=128, num_layers=0)
+    bg_module.load_state_dict(bg_sd)
+    tensorf.bg_module = bg_module
 
 
     tensorf = tensorf.to(device)
@@ -269,10 +270,11 @@ def reconstruction(args):
                 normal_loss = data['normal_loss'].mean()
                 floater_loss = data['floater_loss'].mean()
                 diffuse_reg = data['diffuse_reg'].mean()
-                # loss = torch.sqrt((data['rgb_map'] - rgb_train) ** 2 + params.charbonier_eps**2).mean()
                 rgb_map = data['rgb_map']
-                loss = torch.sqrt(F.huber_loss(rgb_map, rgb_train, delta=1, reduction='none') + params.charbonier_eps**2).mean()
-                photo_loss = ((data['rgb_map'].clip(0, 1) - rgb_train.clip(0, 1)) ** 2).mean().detach()
+                loss = torch.sqrt((rgb_map - rgb_train) ** 2 + params.charbonier_eps**2).mean()
+                # ic(F.huber_loss(rgb_map, rgb_train, delta=1, reduction='none'))
+                # loss = torch.sqrt(F.huber_loss(rgb_map, rgb_train, delta=1, reduction='none') + params.charbonier_eps**2).mean()
+                photo_loss = ((rgb_map.clip(0, 1) - rgb_train.clip(0, 1)) ** 2).mean().detach()
                 backwards_rays_loss = data['backwards_rays_loss']
 
                 # loss
@@ -321,7 +323,8 @@ def reconstruction(args):
                     f'Iteration {iteration:05d}:'
                     + f' train_psnr = {float(np.mean(PSNRs)):.2f}'
                     + f' test_psnr = {float(np.mean(PSNRs_test)):.2f}'
-                    + f' normal_loss = {normal_loss:.5f}'
+                    # + f' normal_loss = {normal_loss:.5f}'
+                    + f' backnormal_loss = {backwards_rays_loss:.5f}'
                     + f' floater_loss = {floater_loss:.6f}'
                     + f' mse = {photo_loss:.6f}'
                 )

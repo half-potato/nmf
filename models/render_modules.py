@@ -121,13 +121,14 @@ class HierarchicalBG(torch.nn.Module):
         self.bg_resolution = bg_resolution
         self.num_levels = num_levels
         self.bg_mats = nn.ParameterList([
-            nn.Parameter(0.1 * torch.randn((1, bg_rank, 2**i * bg_resolution*unwrap_fn.H_mul, 2**i * bg_resolution*unwrap_fn.W_mul)))
+            # nn.Parameter(0.5 * torch.rand((1, bg_rank, 2**i * bg_resolution*unwrap_fn.H_mul, 2**i * bg_resolution*unwrap_fn.W_mul)))
+            nn.Parameter(0.5 * torch.zeros((1, bg_rank, 2**i * bg_resolution*unwrap_fn.H_mul, 2**i * bg_resolution*unwrap_fn.W_mul)))
             for i in range(num_levels)])
         self.unwrap_fn = unwrap_fn
         self.bg_rank = bg_rank
         if num_layers == 0 and bg_rank == 3:
-            # self.bg_net = nn.Softplus()
-            # TODO REMOVE
+            # self.bg_net = nn.Softplus(beta=50)
+            # self.bg_net = nn.ReLU()
             self.bg_net = nn.Identity()
         else:
             self.bg_net = nn.Sequential(
@@ -300,7 +301,7 @@ class MLPRender_FP(torch.nn.Module):
         mlp_in = torch.cat(indata, dim=-1)
         rgb = self.mlp(mlp_in)
         # rgb = torch.sigmoid(rgb)
-        rgb = F.softplus(rgb)
+        rgb = F.softplus(rgb, beta=5)
 
         return rgb
 
