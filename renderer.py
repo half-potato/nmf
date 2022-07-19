@@ -183,19 +183,22 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
     imageio.imwrite(f'{savePath}/envmaps/{prtx}view_map.png', col_map)
     imageio.imwrite(f'{savePath}/envmaps/{prtx}ref_map.png', env_map)
     print(f"Using {render_mode} render mode")
+    tensorf.eval()
     for idx, rays, gt_rgb in iterator():
 
         # rgb_map, _, depth_map, _, _ = renderer(rays, tensorf, chunk=4096, N_samples=N_samples,
         #                                 ndc_ray=ndc_ray, white_bg = white_bg, device=device)
         # rgb_map = rgb_map.clamp(0.0, 1.0)
-        rgb_map, depth_map, debug_map, normal_map, env_map, col_map = brender(rays, tensorf, N_samples=N_samples,
-                                     ndc_ray=ndc_ray, white_bg = white_bg)
+        rgb_map, depth_map, debug_map, normal_map, env_map, col_map = brender(
+                rays, tensorf, N_samples=N_samples, ndc_ray=ndc_ray, white_bg = white_bg)
         
         normal_map = (normal_map * 127 + 128).clamp(0, 255).byte()
 
         depth_map, _ = visualize_depth_numpy(depth_map.numpy(),near_far)
         if gt_rgb is not None:
-            loss = torch.mean((rgb_map - gt_rgb) ** 2)
+            loss = torch.mean((rgb_map.clip(0, 1) - gt_rgb.clip(0, 1)) ** 2)
+            # ic((rgb_map.clip(0, 1)-gt_rgb.clip(0, 1)).max(), rgb_map.clip(0, 1).mean(), gt_rgb.clip(0, 1).mean(), loss)
+            ic(rgb_map.shape, gt_rgb.shape)
             PSNRs.append(-10.0 * np.log(loss.item()) / np.log(10.0))
 
             # fig, axs = plt.subplots(2, 2)
@@ -227,6 +230,7 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
             imageio.imwrite(f'{savePath}/envmaps/{prtx}ref_map_{idx:03d}.png', env_map)
             imageio.imwrite(f'{savePath}/envmaps/{prtx}view_map_{idx:03d}.png', col_map)
 
+    tensorf.train()
     imageio.mimwrite(f'{savePath}/{prtx}video.mp4', np.stack(rgb_maps), fps=30, quality=10)
     imageio.mimwrite(f'{savePath}/{prtx}depthvideo.mp4', np.stack(depth_maps), fps=30, quality=10)
     # for i in range(100):
@@ -264,6 +268,7 @@ def evaluation(test_dataset,tensorf, unused, renderer, *args, N_vis=5, device='c
 
             rays = samples.view(-1,samples.shape[-1]).to(device)
             if len(test_dataset.all_rgbs):
+                ic(test_dataset.all_rgbs[idxs[idx]].shape)
                 gt_rgb = test_dataset.all_rgbs[idxs[idx]].view(H, W, 3)
                 yield idx, rays, gt_rgb
             else:

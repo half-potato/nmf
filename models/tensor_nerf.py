@@ -105,7 +105,6 @@ def select_top_n_app_mask(app_mask, weight, prob, N, t=0, wt=0):
 
 def raw2alpha(sigma, flip, dist):
     # sigma, dist  [N_rays, N_samples]
-    # TODO REMOVE
     v = torch.exp(-sigma*dist)
     alpha = torch.where(flip, v, 1-v)
     # alpha = 1. - torch.exp(-sigma*dist)
@@ -162,7 +161,7 @@ class AlphaGridMask(torch.nn.Module):
 
 
 class TensorNeRF(torch.nn.Module):
-    def __init__(self, rf, grid_size, aabb, diffuse_module, tonemap, normal_module=None, ref_module=None, bg_module=None,
+    def __init__(self, rf, grid_size, aabb, diffuse_module, tonemap=None, normal_module=None, ref_module=None, bg_module=None,
                  alphaMask=None, near_far=[2.0, 6.0], nEnvSamples=100, specularity_threshold=0.005, max_recurs=0,
                  max_normal_similarity=1, infinity_border=False, min_refraction=1.1, enable_refraction=True,
                  density_shift=-10, alphaMask_thres=0.001, distance_scale=25, rayMarch_weight_thres=0.0001,
@@ -174,7 +173,10 @@ class TensorNeRF(torch.nn.Module):
         self.normal_module = normal_module(in_channels=self.rf.app_dim) if normal_module is not None else None
         self.diffuse_module = diffuse_module(in_channels=self.rf.app_dim)
         self.bg_module = bg_module
-        self.tonemap = tonemap
+        if tonemap is None:
+            self.tonemap = HDRTonemap()
+        else:
+            self.tonemap = tonemap
 
         self.alphaMask = alphaMask
         self.infinity_border = infinity_border
@@ -221,9 +223,10 @@ class TensorNeRF(torch.nn.Module):
         if hasattr(self, 'diffuse_module') and isinstance(self.diffuse_module, torch.nn.Module):
             grad_vars += [{'params': self.diffuse_module.parameters(),
                            'lr': lr_init_network}]
-        if hasattr(self, 'bg_module') and isinstance(self.bg_module, torch.nn.Module):
-            grad_vars += [{'params': self.bg_module.parameters(),
-                'lr': lr_bg, 'name': 'bg'}]
+        # TODO REMOVE
+        # if hasattr(self, 'bg_module') and isinstance(self.bg_module, torch.nn.Module):
+        #     grad_vars += [{'params': self.bg_module.parameters(),
+        #         'lr': lr_bg, 'name': 'bg'}]
         return grad_vars
 
     def save(self, path, config):
@@ -494,16 +497,17 @@ class TensorNeRF(torch.nn.Module):
             -torch.sin(ele_grid),
         ], dim=-1).to(self.device)
 
+        color, tint, matprop = self.diffuse_module(xyz_samp, ang_vecs.reshape(-1, 3), app_features)
         if self.ref_module is not None:
         # roughness = 1/np.pi*torch.ones((app_features.shape[0], 1), dtype=xyz.dtype, device=xyz.device)
-            roughness = 20 * torch.ones((app_features.shape[0], 1), dtype=xyz.dtype, device=xyz.device)
+            roughness = 0.1 * torch.ones((app_features.shape[0], 1), dtype=xyz.dtype, device=xyz.device)
+            roughness = matprop['roughness']
             viewdotnorm = torch.ones((app_features.shape[0], 1), dtype=xyz.dtype, device=xyz.device)
             envmap = self.ref_module(xyz_samp, staticdir, app_features, refdirs=ang_vecs.reshape(
                 -1, 3), roughness=roughness, viewdotnorm=viewdotnorm).reshape(res, 2*res, 3)
         else:
             envmap = torch.zeros(res, 2*res, 3)
-        color = list(self.diffuse_module(xyz_samp, ang_vecs.reshape(-1, 3), app_features))[0]
-        color = color.reshape(res, 2*res, 3)
+        color = (color+tint).reshape(res, 2*res, 3)/2
         
         return self.tonemap(envmap).clamp(0, 1), self.tonemap(color).clamp(0, 1)
 
@@ -645,7 +649,13 @@ class TensorNeRF(torch.nn.Module):
         #     ic(torch.sum(weight * z_vals, 1).mean())
         #     ic(weight.sum(dim=1).mean())
 
-        floater_loss = -torch.einsum('...j,...k->...', weight.reshape(B, -1), weight.reshape(B, -1)).mean()
+        if white_bg:
+            floater_loss = -torch.einsum('...j,...k->...', weight.reshape(B, -1), weight.reshape(B, -1)).mean()
+            floater_loss = (weight**2).sum(dim=1).mean()
+        else:
+            full_weight = torch.cat([weight, bg_weight], dim=1)
+            floater_loss = -torch.einsum('...j,...k->...', full_weight.reshape(B, -1), full_weight.reshape(B, -1)).mean()
+            floater_loss = (full_weight**2).sum(dim=1).mean()
 
         # app stands for appearance
         app_mask = (weight > self.rayMarch_weight_thres)
@@ -654,7 +664,7 @@ class TensorNeRF(torch.nn.Module):
         debug = torch.zeros((B, n_samples, 3), dtype=torch.float, device=device)
         recur_depth = z_vals.clone()
         depth_map = torch.sum(weight * recur_depth, 1)
-        acc_map = torch.sum(weight, 1)
+        acc_map = bg_weight #torch.sum(weight, 1)
         depth_map = depth_map + (1. - acc_map) * rays_chunk[..., -1]
 
         if app_mask.any():
@@ -672,7 +682,7 @@ class TensorNeRF(torch.nn.Module):
                 xyz_normed[app_mask], viewdirs[app_mask], app_features)
             # diffuse = diffuse.type(rgb.dtype)
 
-            if is_train and self.appdim_noise_std > 0:
+            if self.appdim_noise_std > 0:
                 app_features = (1-self.appdim_noise_std) * (app_features + torch.randn_like(app_features) * self.appdim_noise_std)
 
             # interpolate between the predicted and world normals

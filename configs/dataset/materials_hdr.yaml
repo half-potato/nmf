@@ -1,0 +1,9 @@
+scenedir: nerf_synthetic/materials_hdr
+dataset_name: blender
+downsample_train: 1
+downsample_test: 1
+ndc_ray: false
+near_far: [2, 6]
+
+
+

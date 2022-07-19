@@ -16,6 +16,7 @@ arch:
 
   tonemap:
     # _target_: models.tonemap.HDRTonemap
+    # _target_: models.tonemap.LinearTonemap
     _target_: models.tonemap.SRGBTonemap
 
   rf:
@@ -66,25 +67,35 @@ arch:
     #   max_degree: 4
     ref_encoder:
       _target_: models.ish.FullISH
-      max_degree: 4
+      max_degree: 5
     # ref_encoder:
     #   _target_: models.render_modules.PE
     #   max_degree: 4
     # ref_encoder:
+    #   _target_: models.ish.ISH
+    #   max_degree: 6
+    # ref_encoder:
     #   _target_: models.ish.RandISH
-    #   # rand_n: 8
-    #   rand_n: 16
+    #   rand_n: 64
     #   std: 5
     featureC: 128
     num_layers: 6
 
+  # normal_module:
+  #   _partial_: True
+  #   _target_: models.render_modules.DeepMLPNormal
+  #   pospe: 16
+  #   featureC: 128
+  #   num_layers: 5
+  #   lr: 1e-3
   normal_module:
     _partial_: True
-    _target_: models.render_modules.DeepMLPNormal
+    _target_: models.render_modules.MLPNormal
+    lr: 3e-3
     pospe: 16
+    feape: 2
     featureC: 128
-    num_layers: 5
-    lr: 1e-3
+    num_layers: 3
 
 params:
   smoothing_start: 1.5

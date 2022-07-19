@@ -37,7 +37,7 @@ class SHBasis(torch.nn.Module):
     def __init__(self, deg):
         super(SHBasis, self).__init__()
         self.deg = deg.item()
-        assert(self.deg < 7)
+        # assert(self.deg < 7)
         l = deg
         coeffs = torch.tensor(legendrecoeffs(l).c[::-1].copy(), dtype=torch.float32)
         logcoeff = -2*math.log(l) - math.lgamma(l+1) + 0.5 * (math.lgamma(2*l+2) - math.log(4*math.pi))
@@ -120,7 +120,8 @@ class ISH(torch.nn.Module):
     def dim(self):
         return 3*len(self.degrees)
     
-    def forward(self, vec, kappa):
+    def forward(self, vec, roughness):
+        kappa = 1/(roughness+1e-8)
         a, b, c = vec[:, 0:1], vec[:, 1:2], vec[:, 2:3]
         norm2d = torch.sqrt(a**2+b**2)
         phi = safemath.atan2(b, a)
@@ -149,7 +150,7 @@ class RandISH(torch.nn.Module):
         self.rand_n = rand_n
         # matrices = torch.normal(0, std, (rand_n, 3, 3))
         matrices = torch.normal(0, std, (rand_n, 2))
-        degrees = torch.normal(0, std, (rand_n,1)).clip(min=1).int()
+        degrees = torch.normal(0, std, (rand_n,1)).clip(min=1, max=9).int()
         self.basii = torch.nn.ModuleList([SHBasis(deg) for deg in degrees])
         # self.y0s = [FractionalY0(degree[0]) for degree in degrees]
         self.register_buffer('matrices', matrices)
@@ -158,8 +159,9 @@ class RandISH(torch.nn.Module):
     def dim(self):
         return self.rand_n*2
     
-    def forward(self, vec, kappa):
+    def forward(self, vec, roughness):
         B = vec.shape[0]
+        kappa = 1/(roughness+1e-8)
 
         a, b, c = vec[:, 0:1], vec[:, 1:2], vec[:, 2:3]
         norm2d = torch.sqrt(a**2+b**2)
@@ -196,7 +198,9 @@ class RandISH(torch.nn.Module):
             ind = 1 if deg > 0 else 2
             degs = basis(t_theta.reshape(-1, 1), t_phi.reshape(-1, 1), kappa.reshape(-1, 1))
             #  outs.append(out)
-            outs.append(torch.stack([degs[:, 0], degs[:, ind]], dim=1))
+            out = torch.stack([degs[:, 0], degs[:, ind]], dim=1)
+            # ic(out.max(dim=0).values, deg, kappa)
+            outs.append(out)
         return torch.cat(outs, dim=1)
 
 if __name__ == "__main__":

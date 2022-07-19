@@ -84,7 +84,7 @@ def reconstruction(args):
     # init dataset
     dataset = dataset_dict[args.dataset.dataset_name]
     train_dataset = dataset(os.path.join(args.datadir, args.dataset.scenedir), split='train', downsample=args.dataset.downsample_train, is_stack=False)
-    test_dataset = dataset(os.path.join(args.datadir, args.dataset.scenedir), split='test', downsample=args.dataset.downsample_train, is_stack=True)
+    test_dataset = dataset(os.path.join(args.datadir, args.dataset.scenedir), split='train', downsample=args.dataset.downsample_train, is_stack=True)
     white_bg = train_dataset.white_bg
     train_dataset.near_far = args.dataset.near_far
     near_far = train_dataset.near_far
@@ -113,6 +113,16 @@ def reconstruction(args):
         tensorf = TensorNeRF.load(ckpt).to(device)
     else:
         tensorf = hydra.utils.instantiate(args.model.arch)(aabb=aabb, grid_size=reso_cur).to(device)
+    tensorf = hydra.utils.instantiate(args.model.arch)(aabb=aabb, grid_size=reso_cur)
+    # TODO REMOVE
+    # bg_sd = torch.load('log/mats360_bg.th')
+    # from models import render_modules
+    # bg_module = render_modules.HierarchicalBG(3, render_modules.CubeUnwrap(), bg_resolution=2*1024//2, num_levels=3, featureC=128, num_layers=0)
+    # bg_module.load_state_dict(bg_sd)
+    # tensorf.bg_module = bg_module
+
+
+    tensorf = tensorf.to(device)
 
 
     lr_bg = 0.03
@@ -182,24 +192,26 @@ def reconstruction(args):
     # / train_dataset.img_wh[0]
     # with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], with_stack=True, record_shapes=True) as prof:
     print(tensorf)
-    if tensorf.bg_module is not None and not train_dataset.white_bg:
-        pbar = tqdm(range(args.n_bg_iters), miniters=args.progress_refresh_rate, file=sys.stdout)
-        # warm up by training bg
-        for _ in pbar:
-            ray_idx, rgb_idx = trainingSampler.nextids()
-            rays_train, rgba_train = allrays[ray_idx], allrgbs[rgb_idx].reshape(-1, allrgbs.shape[-1])
-            rgb_train = rgba_train[..., :3]
-            if rgba_train.shape[-1] == 4:
-                alpha_train = rgba_train[..., 3]
-            else:
-                alpha_train = None
-            rgb = tensorf.render_just_bg(rays_train)
-            loss = torch.sqrt((rgb - rgb_train) ** 2 + params.charbonier_eps**2).mean()
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-            photo_loss = loss.detach().item()
-            pbar.set_description(f'psnr={-10.0 * np.log(photo_loss) / np.log(10.0):.04f}')
+    # TODO REMOVE
+    if tensorf.bg_module is not None and not white_bg:
+        if False:
+            pbar = tqdm(range(args.n_bg_iters), miniters=args.progress_refresh_rate, file=sys.stdout)
+            # warm up by training bg
+            for _ in pbar:
+                ray_idx, rgb_idx = trainingSampler.nextids()
+                rays_train, rgba_train = allrays[ray_idx], allrgbs[rgb_idx].reshape(-1, allrgbs.shape[-1])
+                rgb_train = rgba_train[..., :3]
+                if rgba_train.shape[-1] == 4:
+                    alpha_train = rgba_train[..., 3]
+                else:
+                    alpha_train = None
+                rgb = tensorf.render_just_bg(rays_train)
+                loss = torch.sqrt((rgb - rgb_train) ** 2 + params.charbonier_eps**2).mean()
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+                photo_loss = loss.detach().item()
+                pbar.set_description(f'psnr={-10.0 * np.log(photo_loss) / np.log(10.0):.04f}')
         tensorf.bg_module.save('test.png')
 
     space_optim = torch.optim.Adam(tensorf.parameters(), lr=0.02, betas=(0.9,0.99))
@@ -225,8 +237,8 @@ def reconstruction(args):
     # with torch.autograd.detect_anomaly():
         for iteration in pbar:
 
-            if iteration < 100:
-                ray_idx, rgb_idx = trainingSampler.nextids(args.batch_size // 4)
+            if iteration < 1000:
+                ray_idx, rgb_idx = trainingSampler.nextids(args.batch_size // 2)
             else:
                 ray_idx, rgb_idx = trainingSampler.nextids()
 
@@ -258,10 +270,10 @@ def reconstruction(args):
                 floater_loss = data['floater_loss'].mean()
                 diffuse_reg = data['diffuse_reg'].mean()
                 # loss = torch.sqrt((data['rgb_map'] - rgb_train) ** 2 + params.charbonier_eps**2).mean()
-                loss = F.huber_loss(data['rgb_map'], rgb_train, delta=1)
-                photo_loss = ((data['rgb_map'] - rgb_train) ** 2).mean().detach()
+                rgb_map = data['rgb_map']
+                loss = torch.sqrt(F.huber_loss(rgb_map, rgb_train, delta=1, reduction='none') + params.charbonier_eps**2).mean()
+                photo_loss = ((data['rgb_map'].clip(0, 1) - rgb_train.clip(0, 1)) ** 2).mean().detach()
                 backwards_rays_loss = data['backwards_rays_loss']
-
 
                 # loss
                 total_loss = loss + \

@@ -101,6 +101,7 @@ class BlenderDataset(Dataset):
             img = self.transform(img)  # (4, h, w)
             img = img.view(img.shape[0], -1).permute(1, 0)  # (h*w, 4) RGBA
 
+
             rays_o, rays_d = get_rays(self.directions, c2w)  # both (h*w, 3)
             _, rays_up = get_rays(self.rays_up, c2w)  # both (h*w, 3)
             rays = torch.cat([rays_o, rays_d, rays_up], 1)
@@ -108,6 +109,7 @@ class BlenderDataset(Dataset):
             c = img.shape[1]
             if c == 4:
                 img[:, :3] = img[:, :3] * img[:, -1:] + (1 - img[:, -1:])  # blend A to RGB
+            # img = img.clip(0, 1)
             self.all_rgbs += [img]
 
 

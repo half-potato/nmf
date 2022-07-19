@@ -401,8 +401,8 @@ class ISE(torch.nn.Module):
         # self.theta_ise = PhiISE(max_degree)
         # self.theta_ise = ThetaISE(max_degree)
         self.theta_ise = ThetaISEHack(max_degree)
-        self.register_buffer('hc_mean', hc_mean)
-        self.register_buffer('hc_std', hc_std)
+        # self.register_buffer('hc_mean', hc_mean)
+        # self.register_buffer('hc_std', hc_std)
         
     def forward(self, vec, kappa):
         v = 200

@@ -126,7 +126,9 @@ class HierarchicalBG(torch.nn.Module):
         self.unwrap_fn = unwrap_fn
         self.bg_rank = bg_rank
         if num_layers == 0 and bg_rank == 3:
-            self.bg_net = nn.Softplus()
+            # self.bg_net = nn.Softplus()
+            # TODO REMOVE
+            self.bg_net = nn.Identity()
         else:
             self.bg_net = nn.Sequential(
                 nn.Linear(bg_rank, featureC, bias=False),
@@ -146,9 +148,10 @@ class HierarchicalBG(torch.nn.Module):
         bg_mats = []
         for i in range(self.num_levels):
             bg_mat = F.interpolate(self.bg_mats[i].data, size=(bg_resolution*self.unwrap_fn.H_mul, bg_resolution*self.unwrap_fn.W_mul), mode='bilinear', align_corners=self.align_corners)
+            bg_mat = bg_mat / 2**i
             bg_mats.append(bg_mat)
         bg_mat = sum(bg_mats)
-        im = (255*(self.bg_net(bg_mat)*0.5).clamp(0, 1)).short().permute(0, 2, 3, 1).squeeze(0)
+        im = (255*(self.bg_net(bg_mat)).clamp(0, 1)).short().permute(0, 2, 3, 1).squeeze(0)
         im = im.cpu().numpy()
         im = im[::-1].astype(np.uint8)
         im = cv2.cvtColor(im, cv2.COLOR_RGB2BGR)
@@ -187,7 +190,9 @@ class BackgroundRender(torch.nn.Module):
         self.bg_rank = bg_rank
         d = self.view_encoder.dim() if self.view_encoder is not None else 0
         if num_layers == 0 and bg_rank == 3:
-            self.bg_net = nn.Softplus()
+            # TODO REMOVE
+            # self.bg_net = nn.Softplus()
+            self.bg_net = nn.Identity()
         else:
             self.bg_net = nn.Sequential(
                 nn.Linear(bg_rank+d, featureC, bias=False),
@@ -220,6 +225,9 @@ class BackgroundRender(torch.nn.Module):
         B = viewdirs.shape[0]
         x = self.unwrap_fn(viewdirs)
 
+        # col = ((x[..., 0]/2 +0.5)* self.bg_mat.shape[3]).long()
+        # row = ((x[..., 1]/2 +0.5)* self.bg_mat.shape[2]).long()
+        # ic(self.bg_mat[:, :, row, col])
         emb = F.grid_sample(self.bg_mat, x, mode='bilinear', align_corners=self.align_corners)
         emb = emb.reshape(self.bg_rank, -1).T
         # return torch.sigmoid(emb)
@@ -248,10 +256,13 @@ class MLPRender_FP(torch.nn.Module):
         self.feape = feape
 
         self.mlp = torch.nn.Sequential(
+            # torch.nn.BatchNorm1d(self.in_mlpC),
             torch.nn.Linear(self.in_mlpC, featureC),
+            # torch.nn.BatchNorm1d(featureC),
             *sum([[
                     torch.nn.ReLU(inplace=True),
                     torch.nn.Linear(featureC, featureC),
+                    # torch.nn.BatchNorm1d(featureC),
                 ] for _ in range(num_layers)], []),
             torch.nn.ReLU(inplace=True),
             torch.nn.Linear(featureC, 3)
@@ -316,9 +327,11 @@ class MLPDiffuse(torch.nn.Module):
                 torch.nn.Linear(self.in_mlpC, featureC),
                 # torch.nn.ReLU(inplace=True),
                 # torch.nn.Linear(featureC, featureC),
+                # torch.nn.BatchNorm1d(featureC),
                 *sum([[
                         torch.nn.ReLU(inplace=True),
                         torch.nn.Linear(featureC, featureC),
+                        # torch.nn.BatchNorm1d(featureC)
                     ] for _ in range(num_layers)], []),
                 torch.nn.ReLU(inplace=True),
                 torch.nn.Linear(featureC, 20),
@@ -530,7 +543,7 @@ class MLPNormal(torch.nn.Module):
 
     def init_weights(self, m):
         if isinstance(m, nn.Linear):
-            torch.nn.init.xavier_uniform(m.weight, gain=torch.nn.init.calculate_gain('relu'))
+            torch.nn.init.xavier_uniform_(m.weight, gain=torch.nn.init.calculate_gain('relu'))
 
     def forward(self, pts, features, **kwargs):
         size = pts[..., 3:4].expand(pts[..., :3].shape)

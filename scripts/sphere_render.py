@@ -189,17 +189,9 @@ def main(cfg: DictConfig):
 
             p_norm = tensorf.normal_module(xyz, app_features)
 
-            norm_diff = (1-(p_norm * gt_norms).sum(dim=-1))
+            # norm_diff = (1-(p_norm * gt_norms).sum(dim=-1))
             norm_diff_l2 = torch.linalg.norm(p_norm - gt_norms, dim=-1)
-            # ic(p_norm[0], gt_norms[0], norm_diff.max(), norm_diff.mean(), norm_diff_l2[0], norm_diff[0])
-            # ic(norm_diff)
-            # world_loss = (norm_diff + norm_diff**2).mean()
-            # world_loss = (norm_diff**2).mean()
-            # world_loss = (norm_diff).mean()
-            # world_loss = (norm_diff + 0.01*norm_diff_l2).mean()
             world_loss = (norm_diff_l2).mean()
-            # world_loss = ((1-(p_norm * gt_norms[full_shell]).sum(dim=-1))**2).mean()
-            # world_loss = ((1-(p_norm * gt_norms[full_shell]).sum(dim=-1))).mean()
             optim.zero_grad()
             world_loss.backward()
             optim.step()

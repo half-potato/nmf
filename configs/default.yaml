@@ -1,4 +1,4 @@
-n_iters: 30000
+n_iters: 60000
 render_mode: center
 
 defaults:
