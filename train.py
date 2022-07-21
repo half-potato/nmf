@@ -117,14 +117,12 @@ def reconstruction(args):
     # TODO REMOVE
     bg_sd = torch.load('log/mats360_bg.th')
     from models import render_modules
-    bg_module = render_modules.HierarchicalBG(3, render_modules.CubeUnwrap(), bg_resolution=2*1024//4, num_levels=3, featureC=128, num_layers=0)
+    bg_module = render_modules.HierarchicalBG(3, render_modules.CubeUnwrap(), bg_resolution=2*1024//2, num_levels=3, featureC=128, num_layers=0)
     # bg_module = render_modules.BackgroundRender(3, render_modules.PanoUnwrap(), bg_resolution=2*1024, featureC=128, num_layers=0)
     bg_module.load_state_dict(bg_sd)
     tensorf.bg_module = bg_module
 
-
     tensorf = tensorf.to(device)
-
 
     lr_bg = 0.03
     grad_vars = tensorf.get_optparam_groups(args.lr_init, args.lr_basis, lr_bg)
@@ -162,7 +160,9 @@ def reconstruction(args):
         ind = [i for i, d in enumerate(grad_vars) if 'name' in d and d['name'] == 'bg'][0]
         grad_vars[ind]['params'] = tensorf.bg_module.parameters()
         grad_vars[ind]['lr'] = lr_bg
-    optimizer = torch.optim.Adam(grad_vars, betas=(0.9, 0.99))
+    optimizer = torch.optim.Adam(grad_vars, betas=(0.9, 0.99), weight_decay=0)
+    # optimizer = torch.optim.SGD(grad_vars, momentum=0.9, weight_decay=0)
+    # optimizer = torch.optim.RMSprop(grad_vars, alpha=0.99, eps=1e-08, weight_decay=0, momentum=0)
     # smoothing_vals = torch.linspace(0.5, 0.5, len(upsamp_list)+1).tolist()[1:]
 
 
@@ -233,7 +233,10 @@ def reconstruction(args):
         loss.backward()
         space_optim.step()
 
+
     pbar = tqdm(range(args.n_iters), miniters=args.progress_refresh_rate, file=sys.stdout)
+    old_decay = False
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=30000, T_mult=1)
     if True:
     # with torch.autograd.detect_anomaly():
         for iteration in pbar:
@@ -307,15 +310,22 @@ def reconstruction(args):
             optimizer.zero_grad()
             total_loss.backward()
             optimizer.step()
+            if not old_decay:
+                scheduler.step()
 
             photo_loss = photo_loss.detach().item()
             
             PSNRs.append(-10.0 * np.log(photo_loss) / np.log(10.0))
             summary_writer.add_scalar('train/PSNR', PSNRs[-1], global_step=iteration)
             summary_writer.add_scalar('train/mse', photo_loss, global_step=iteration)
+            summary_writer.add_scalar('train/backwards_rays_loss', backwards_rays_loss.detach().item(), global_step=iteration)
+            summary_writer.add_scalar('train/floater_loss', floater_loss.detach().item(), global_step=iteration)
+            summary_writer.add_scalar('train/normal_loss', normal_loss.detach().item(), global_step=iteration)
 
-            for param_group in optimizer.param_groups:
-                param_group['lr'] = param_group['lr'] * lr_factor
+            if old_decay:
+                for param_group in optimizer.param_groups:
+                    param_group['lr'] = param_group['lr'] * lr_factor
+            summary_writer.add_scalar('train/lr', list(optimizer.param_groups)[0]['lr'], global_step=iteration)
 
             # Print the current values of the losses.
             if iteration % args.progress_refresh_rate == 0:
@@ -340,16 +350,6 @@ def reconstruction(args):
                 if tensorf.bg_module is not None:
                     tensorf.bg_module.save('test.png')
 
-
-            if upsamp_bg and iteration in params.bg_upsamp_list:
-                res = params.bg_upsamp_res.pop(0)
-                lr_bg = params.bg_upsamp_lr.pop(0)
-                print(f"Upsampling bg to {res}")
-                tensorf.bg_module.upsample(res)
-                ind = [i for i, d in enumerate(grad_vars) if 'name' in d and d['name'] == 'bg'][0]
-                grad_vars[ind]['params'] = tensorf.bg_module.parameters()
-                grad_vars[ind]['lr'] = lr_bg
-                optimizer = torch.optim.Adam(grad_vars, betas=(0.9, 0.99))
 
             if iteration in params.bounce_iter_list:
                 print(f"Max bounces {tensorf.max_bounce_rays} -> {bounce_n_list[0]}")
@@ -387,13 +387,18 @@ def reconstruction(args):
                 tensorf.rf.upsample_volume_grid(reso_cur)
 
 
-                if args.lr_upsample_reset:
-                    print("reset lr to initial")
-                    lr_scale = 1 #0.1 ** (iteration / args.n_iters)
-                else:
-                    lr_scale = args.lr_decay_target_ratio ** (iteration / args.n_iters)
-                grad_vars = tensorf.get_optparam_groups(args.lr_init*lr_scale, args.lr_basis*lr_scale, lr_bg=lr_bg, lr_scale=lr_scale)
-                optimizer = torch.optim.Adam(grad_vars, betas=(0.9, 0.99))
+                # if old_decay:
+                #     if args.lr_upsample_reset:
+                #         print("reset lr to initial")
+                #         lr_scale = 0.1 ** (iteration / args.n_iters)
+                #     else:
+                #         lr_scale = args.lr_decay_target_ratio ** (iteration / args.n_iters)
+                    # optimizer = torch.optim.Adam(grad_vars, betas=(0.9, 0.99))
+                # upscaling deregisters the parameter, so we need to reregister it
+                lr_scale = 1
+                new_grad_vars = tensorf.get_optparam_groups(args.lr_init*lr_scale, args.lr_basis*lr_scale, lr_bg=lr_bg, lr_scale=lr_scale)
+                for param_group, new_param_group in zip(optimizer.param_groups, new_grad_vars):
+                    param_group['params'] = new_param_group['params']
     # prof.export_chrome_trace('trace.json')
         
 

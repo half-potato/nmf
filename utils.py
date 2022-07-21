@@ -4,6 +4,7 @@ from PIL import Image
 import torchvision.transforms as T
 import torch.nn.functional as F
 import scipy.signal
+import torch.nn as nn
 
 mse2psnr = lambda x : -10. * torch.log(x) / torch.log(torch.Tensor([10.]))
 
@@ -133,7 +134,6 @@ def rgb_ssim(img0, img1, max_val,
     return ssim_map if return_map else ssim
 
 
-import torch.nn as nn
 class TVLoss(nn.Module):
     def __init__(self,TVLoss_weight=1):
         super(TVLoss,self).__init__()

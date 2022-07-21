@@ -12,7 +12,7 @@ epochs = 500
 # bg_module = render_modules.BackgroundRender(3, render_modules.PanoUnwrap(), bg_resolution=2*1024, featureC=128, num_layers=0)
 # bg_module = render_modules.BackgroundRender(3, render_modules.CubeUnwrap(), bg_resolution=2*1024, featureC=128, num_layers=0)
 tm = tonemap.SRGBTonemap()
-bg_module = render_modules.HierarchicalBG(3, render_modules.CubeUnwrap(), bg_resolution=2*1024//4, num_levels=3, featureC=128, num_layers=0)
+bg_module = render_modules.HierarchicalBG(3, render_modules.CubeUnwrap(), bg_resolution=2*1024//2, num_levels=3, featureC=128, num_layers=0)
 bg_module = bg_module.to(device)
 pano = imageio.imread("ninomaru_teien_4k.exr")
 # optim = torch.optim.Adam(bg_module.parameters(), lr=0.30)

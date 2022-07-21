@@ -4,7 +4,7 @@ from models import safemath
 from scipy.special import legendre as legendrecoeffs
 import numpy as np
 from icecream import ic
-from .sh import eval_sh_bases
+from .sh import eval_sh_bases, eval_sh_bases_scaled, sh_basis
 import functools
 import operator
 
@@ -90,6 +90,19 @@ class LHyperGeom(torch.nn.Module):
         # ic(s2.sum(dim=-1))
         return s2.sum(dim=-1)
 
+class ListISH(torch.nn.Module):
+    def __init__(self, degs=[0,1,2,4,8,16]):
+        super().__init__()
+        self.degs = degs
+
+    def dim(self):
+        return sum([2*deg+1 for deg in self.degs])
+
+    def forward(self, vecs, roughness):
+        kappa = 1/(roughness+1e-8)
+        base = sh_basis(self.degs, vecs, kappa)
+        return base
+
 class FullISH(torch.nn.Module):
     def __init__(self, max_degree=1):
         super().__init__()
@@ -98,8 +111,9 @@ class FullISH(torch.nn.Module):
     def dim(self):
         return (self.max_degree+1)**2
 
-    def forward(self, vecs, kappa):
-        base = eval_sh_bases(self.max_degree, vecs)
+    def forward(self, vecs, roughness):
+        kappa = 1/(roughness+1e-8)
+        base = eval_sh_bases_scaled(self.max_degree, vecs, kappa)
         return base
 
 def compute_ortho_basis(phi, theta, kappa, deg):

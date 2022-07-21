@@ -20,25 +20,25 @@ arch:
     # _target_: models.tonemap.LinearTonemap
     _target_: models.tonemap.SRGBTonemap
 
-  # brdf:
-  #   _target_: models.brdf.PBR
-  #   _partial_: True
-
   brdf:
-    _target_: models.brdf.MLPBRDF
+    _target_: models.brdf.PBR
     _partial_: True
-    v_encoder:
-      _target_: models.ish.FullISH
-      max_degree: 3
-    n_encoder:
-      _target_: models.ish.FullISH
-      max_degree: 2
-    l_encoder:
-      _target_: models.ish.FullISH
-      max_degree: 3
-    num_layers: 2
-    feape: 2
-    featureC: 128
+
+  # brdf:
+  #   _target_: models.brdf.MLPBRDF
+  #   _partial_: True
+  #   v_encoder:
+  #     _target_: models.ish.FullISH
+  #     max_degree: 3
+  #   n_encoder:
+  #     _target_: models.ish.FullISH
+  #     max_degree: 2
+  #   l_encoder:
+  #     _target_: models.ish.FullISH
+  #     max_degree: 3
+  #   num_layers: 2
+  #   feape: 2
+  #   featureC: 128
 
 
   rf:
@@ -103,13 +103,6 @@ arch:
   #   featureC: 128
   #   num_layers: 6
 
-  # normal_module:
-  #   _partial_: True
-  #   _target_: models.render_modules.DeepMLPNormal
-  #   pospe: 16
-  #   featureC: 128
-  #   num_layers: 5
-  #   lr: 1e-3
   normal_module:
     _partial_: True
     _target_: models.render_modules.MLPNormal
@@ -133,8 +126,8 @@ params:
   # bounce_n_list: [100, 1000, 10000, 20000]
   # bounce_iter_list: [9000, 12000, 14000]
 
-  bounce_n_list: [4000, 4000]
-  bounce_iter_list: [0]
+  bounce_n_list: [0, 1000000]
+  bounce_iter_list: [2000]
 
   num_bw_iters: 0
 

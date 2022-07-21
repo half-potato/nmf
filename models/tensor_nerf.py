@@ -176,7 +176,7 @@ class TensorNeRF(torch.nn.Module):
         else:
             self.tonemap = tonemap
 
-        self.brdf = brdf(in_channels=self.rf.app_dim)
+        self.brdf = brdf(in_channels=self.rf.app_dim) if brdf is not None else None
 
         self.alphaMask = alphaMask
         self.infinity_border = infinity_border
@@ -753,7 +753,7 @@ class TensorNeRF(torch.nn.Module):
                 ratio_diffuse = 1
                 ratio_reflected = 0
                 ratio_refracted = 0
-            elif self.ref_module is not None and is_train:
+            elif self.ref_module is not None:# and is_train:
                 ratio_refracted = 0
                 viewdotnorm = (viewdirs[app_mask]*L).sum(dim=-1, keepdim=True)
                 ref_col = self.ref_module(
@@ -816,7 +816,7 @@ class TensorNeRF(torch.nn.Module):
                 ratio_diffuse = matprop['ratio_diffuse']
                 ratio_reflected = 1 - ratio_diffuse
                 bounce_mask, full_bounce_mask, inv_full_bounce_mask = select_top_n_app_mask(
-                        app_mask, weight, ratio_reflected, 100000,
+                        app_mask, weight, ratio_reflected, self.max_bounce_rays,
                         0, 0)
                 # if the bounce is not calculated, set the ratio to 0 to make sure we don't get black spots
                 if not bounce_mask.all() and not is_train:
@@ -898,8 +898,9 @@ class TensorNeRF(torch.nn.Module):
             # in addition, the light is interpolated between emissive and reflective
             reflectivity = matprop['reflectivity']
             roughness = matprop['roughness']
-            rgb[app_mask] = tint * ((1-reflectivity)*matprop['ambient'] + reflectivity * reflect_rgb)
-            # rgb[app_mask] = tint * reflect_rgb + matprop['diffuse']
+            # rgb[app_mask] = tint * ((1-reflectivity)*matprop['ambient'] + reflectivity * reflect_rgb)
+            rgb[app_mask] = tint * reflect_rgb + matprop['diffuse']
+            # rgb[app_mask] = tint * reflectivity * reflect_rgb + (1-reflectivity)*matprop['diffuse']
             # rgb[app_mask] = tint * (ambient + reflectivity * reflect_rgb)
 
             # align_world_loss = (1-(p_world_normal * world_normal).sum(dim=-1))

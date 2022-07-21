@@ -23,8 +23,8 @@ arch:
     _partial_: True
     _target_: models.tensoRF.TensorVMSplit
     density_n_comp: 16
-    appearance_n_comp: 48
-    app_dim: 48
+    appearance_n_comp: 24
+    app_dim: 24
     step_ratio: 0.5
     density_res_multi: 1
     contract_space: False
@@ -60,14 +60,14 @@ arch:
   ref_module:
     _partial_: True
     _target_: models.render_modules.MLPRender_FP
-    feape: 0
+    feape: 2
     lr: 1e-4
     # view_encoder:
     #   _target_: models.ish.FullISH
     #   max_degree: 4
     ref_encoder:
-      _target_: models.ish.FullISH
-      max_degree: 5
+      _target_: models.ish.ListISH
+      degs: [0,1,2,4,8,16]
     # ref_encoder:
     #   _target_: models.render_modules.PE
     #   max_degree: 4
@@ -78,7 +78,7 @@ arch:
     #   _target_: models.ish.RandISH
     #   rand_n: 64
     #   std: 5
-    featureC: 128
+    featureC: 256
     num_layers: 6
 
   # normal_module:
@@ -95,7 +95,7 @@ arch:
     pospe: 16
     feape: 2
     featureC: 128
-    num_layers: 3
+    num_layers: 5
 
 params:
   smoothing_start: 1.5
@@ -136,7 +136,7 @@ params:
 
   TV_weight_density: 0.0
   TV_weight_app: 0.0
-  normal_lambda: 3e-2
+  normal_lambda: 3e-4
   diffuse_lambda: 0
   backwards_rays_lambda: 1
   floater_lambda: 0.001

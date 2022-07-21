@@ -10,6 +10,7 @@ from models.ise import ISE, RandISE
 from models.ish import ISH, RandISH
 from typing import List
 import cv2
+from .grid_sample_Cinf import gkern
 
 def positional_encoding(positions, freqs):
     freq_bands = (2**torch.arange(freqs).float()).to(positions.device)  # (F,)
@@ -142,6 +143,7 @@ class HierarchicalBG(torch.nn.Module):
                 nn.Softplus()
             )
         self.align_corners = False
+        self.smoothing = 1
 
     @torch.no_grad()
     def save(self, path):
@@ -174,6 +176,13 @@ class HierarchicalBG(torch.nn.Module):
 
         embs = []
         for i, bg_mat in enumerate(self.bg_mats):
+
+            # smooth_kern = gkern(2*int(self.smoothing)+1, std=self.smoothing+1e-8, device=viewdirs.device)
+            # s = smooth_kern.shape[-1]
+            # smooth_mat = F.conv2d(bg_mat.permute(1, 0, 2, 3), smooth_kern.reshape(1, -1, s, s), stride=1, padding=s//2)
+            #
+            # emb = F.grid_sample(smooth_mat.permute(1, 0, 2, 3), x, mode='bilinear', align_corners=self.align_corners)
+
             emb = F.grid_sample(bg_mat, x, mode='bilinear', align_corners=self.align_corners)
             emb = emb.reshape(self.bg_rank, -1).T
             embs.append(emb / 2**i)
@@ -248,7 +257,9 @@ class MLPRender_FP(torch.nn.Module):
 
         self.lr = lr
         self.ref_encoder = ref_encoder
-        self.in_mlpC = 2*feape*in_channels + 6 + in_channels + 1
+        self.in_mlpC = 3 + 1
+        if feape > -1:
+            self.in_mlpC += 2*feape*in_channels + in_channels
         self.view_encoder = view_encoder
         if view_encoder is not None:
             self.in_mlpC += self.view_encoder.dim()
@@ -280,7 +291,9 @@ class MLPRender_FP(torch.nn.Module):
         pts = pts[..., :3]
 
 
-        indata = [pts, features, refdirs, viewdotnorm]
+        indata = [refdirs, viewdotnorm]
+        if self.feape > -1:
+            indata.append(features)
         # if self.pospe > 0:
         #     indata += [positional_encoding(pts, self.pospe)]
         if self.feape > 0:
