@@ -1,5 +1,5 @@
 from operator import index
-from models.ish import ISH, RandISH, FullISH
+from models.ish import ISH, RandISH, FullISH, ListISH, RandRotISH
 from models.ise import RandISE
 import cv2
 import torch
@@ -21,7 +21,12 @@ device = torch.device('cuda')
 #      "/data/sun_pano/streetview/18 1.jpg",
 #  ]
 pano_paths = list(Path('./envmaps/').glob('*.png'))
-ish = RandISH(128, 10).to(device)
+pano_paths = [Path('./ninomaru_teien_4k.exr')]
+hdr = True
+ish = ListISH([1,2,4,8,16]).to(device)
+# ish = RandRotISH(16, [1,2,8], [16]).to(device)
+# ish = RandISH(256, 10).to(device)
+ic(ish.dim())
 batch_size = 4096*50
 
 # ish = RandISE(512, 32).to(device)
@@ -31,7 +36,7 @@ featureC = 256
 #  pano_feat_dim = 128
 pano_feat_dim = 27*3
 #  num_layers = 3
-num_layers = 5
+num_layers = 6
 epochs = 500
 
 num_panos = len(pano_paths)
@@ -39,10 +44,14 @@ colors = []
 for pano_path in pano_paths:
     pano = imageio.imread(pano_path)
     H, W, C = pano.shape
-    #  pano = cv2.resize(pano, (2000, 1000))
-    pano = cv2.resize(pano, (200, 100))
+    pano = cv2.resize(pano, (2000, 1000))
+    # pano = cv2.resize(pano, (200, 100))
     H, W, C = pano.shape
-    pano_t = torch.tensor(pano, dtype=torch.float32, device=device)/255
+    pano_t = torch.tensor(pano, dtype=torch.float32, device=device)
+    if not hdr:
+        pano_t = pano_t/255
+    else:
+        pano_t = pano_t.clip(0, 1)
     colors.append(pano_t.reshape(-1, 3))
 
 M = colors[0].shape[0]
@@ -118,7 +127,7 @@ mlp = torch.nn.Sequential(
 
 mlp.apply(init_weights)
 
-optim = torch.optim.Adam(mlp.parameters(), lr=5e-3)
+optim = torch.optim.Adam(mlp.parameters(), lr=5e-4)
 
 class SimpleSampler:
     def __init__(self, total, batch):
@@ -136,15 +145,16 @@ class SimpleSampler:
         ids = self.ids[self.curr:self.curr+batch]
         return ids
 
-kappa = torch.tensor(20, device=device)
 sampler = SimpleSampler(N, batch_size)
 for i in tqdm(range(epochs)):
     inds = sampler.nextids()
     samp = colors[inds]
     samp_vecs = vecs[inds % M]
     samp_angs = angs[inds % M]
+    batch_size = samp_angs.shape[0]
+    roughness = 0.01*torch.ones((batch_size, 1), device=device)
 
-    enc = ish(samp_vecs, kappa)
+    enc = ish(samp_vecs, roughness)
     enc = enc.reshape(batch_size, -1)
     feats = get_features(inds)
     enc = torch.cat([enc, feats], dim=-1)
@@ -167,10 +177,11 @@ with torch.no_grad():
         for i in tqdm(range(0, M, batch_size)):
             torch.cuda.empty_cache()
             inds = torch.arange(i, min(M, i+batch_size), device=device) + pind * M
+            roughness = 0.01*torch.ones((inds.shape[0], 1), device=device)
             samp_vecs = vecs[inds % M]
             samp_angs = angs[inds % M]
 
-            enc = ish(samp_vecs, kappa).reshape(-1, ish.dim())
+            enc = ish(samp_vecs, roughness).reshape(-1, ish.dim())
             #  enc = torch.cat([enc, eval_sh_bases(4, samp_vecs)], dim=-1)
             feats = get_features(inds)
             enc = torch.cat([enc, feats], dim=-1)

@@ -123,7 +123,7 @@ class HierarchicalBG(torch.nn.Module):
         self.num_levels = num_levels
         self.bg_mats = nn.ParameterList([
             # nn.Parameter(0.5 * torch.rand((1, bg_rank, 2**i * bg_resolution*unwrap_fn.H_mul, 2**i * bg_resolution*unwrap_fn.W_mul)))
-            nn.Parameter(0.5 * torch.zeros((1, bg_rank, 2**i * bg_resolution*unwrap_fn.H_mul, 2**i * bg_resolution*unwrap_fn.W_mul)))
+            nn.Parameter(0.5 * torch.zeros((1, bg_rank, 4**i * bg_resolution*unwrap_fn.H_mul, 4**i * bg_resolution*unwrap_fn.W_mul)))
             for i in range(num_levels)])
         self.unwrap_fn = unwrap_fn
         self.bg_rank = bg_rank
@@ -313,8 +313,8 @@ class MLPRender_FP(torch.nn.Module):
 
         mlp_in = torch.cat(indata, dim=-1)
         rgb = self.mlp(mlp_in)
-        # rgb = torch.sigmoid(rgb)
-        rgb = F.softplus(rgb, beta=5)
+        rgb = torch.sigmoid(rgb)
+        # rgb = F.softplus(rgb)
 
         return rgb
 

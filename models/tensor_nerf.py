@@ -215,6 +215,7 @@ class TensorNeRF(torch.nn.Module):
     def get_optparam_groups(self, lr_init_spatial=0.02, lr_init_network=0.001, lr_bg=0.01, lr_scale=1):
         grad_vars = []
         grad_vars += self.rf.get_optparam_groups(lr_init_spatial, lr_init_network)
+        # TODO REMOVE
         if self.ref_module is not None:
             grad_vars += [{'params': list(self.ref_module.parameters()), 'lr': lr_scale*self.ref_module.lr}]
         if isinstance(self.normal_module, torch.nn.Module):
@@ -477,7 +478,7 @@ class TensorNeRF(torch.nn.Module):
                 roughness=roughness)
         return color
 
-    def recover_envmap(self, res, xyz=None):
+    def recover_envmap(self, res, xyz=None, roughness=None):
         if xyz is None:
             xyz = self.sample_occupied()
 
@@ -503,8 +504,7 @@ class TensorNeRF(torch.nn.Module):
         color, tint, matprop = self.diffuse_module(xyz_samp, ang_vecs.reshape(-1, 3), app_features)
         if self.ref_module is not None:
         # roughness = 1/np.pi*torch.ones((app_features.shape[0], 1), dtype=xyz.dtype, device=xyz.device)
-            roughness = 0.1 * torch.ones((app_features.shape[0], 1), dtype=xyz.dtype, device=xyz.device)
-            roughness = matprop['roughness']
+            roughness = matprop['roughness'] if roughness is None else roughness * torch.ones((app_features.shape[0], 1), dtype=xyz.dtype, device=xyz.device)
             viewdotnorm = torch.ones((app_features.shape[0], 1), dtype=xyz.dtype, device=xyz.device)
             envmap = self.ref_module(xyz_samp, staticdir, app_features, refdirs=ang_vecs.reshape(
                 -1, 3), roughness=roughness, viewdotnorm=viewdotnorm).reshape(res, 2*res, 3)
@@ -760,7 +760,8 @@ class TensorNeRF(torch.nn.Module):
                     xyz_normed[app_mask], viewdirs[app_mask],
                     app_features, refdirs=refdirs,
                     roughness=roughness, viewdotnorm=viewdotnorm)
-                reflect_rgb = ref_col + matprop['ambient']
+                reflect_rgb = ref_col
+                debug[app_mask] += ref_col
             else:
                 num_roughness_rays = 1 if recur > 0 else self.roughness_rays
                 """
@@ -877,7 +878,7 @@ class TensorNeRF(torch.nn.Module):
 
                     # tinted_ref_rgb = incoming_light.mean(dim=1)
                     # debug[full_bounce_mask] += reflectivity[bounce_mask] * tinted_ref_rgb
-                    debug[full_bounce_mask] += tinted_ref_rgb/2
+                    debug[full_bounce_mask] += tinted_ref_rgb
                     reflect_rgb[bounce_mask] = tinted_ref_rgb
 
                     # m = full_bounce_mask.sum(dim=1) > 0
@@ -898,8 +899,8 @@ class TensorNeRF(torch.nn.Module):
             # in addition, the light is interpolated between emissive and reflective
             reflectivity = matprop['reflectivity']
             roughness = matprop['roughness']
-            # rgb[app_mask] = tint * ((1-reflectivity)*matprop['ambient'] + reflectivity * reflect_rgb)
-            rgb[app_mask] = tint * reflect_rgb + matprop['diffuse']
+            rgb[app_mask] = tint * ((1-reflectivity)*matprop['ambient'] + reflectivity * reflect_rgb)
+            # rgb[app_mask] = tint * reflect_rgb + matprop['diffuse']
             # rgb[app_mask] = tint * reflectivity * reflect_rgb + (1-reflectivity)*matprop['diffuse']
             # rgb[app_mask] = tint * (ambient + reflectivity * reflect_rgb)
 
@@ -909,6 +910,7 @@ class TensorNeRF(torch.nn.Module):
             tint_brightness = tint.mean(dim=-1)
         else:
             ratio_diffuse = torch.tensor(0.0)
+            diffuse = torch.tensor(0.0)
             tint_brightness = torch.tensor(0.5)
             v_world_normal = world_normal
             roughness = torch.tensor(0.0)
@@ -979,7 +981,7 @@ class TensorNeRF(torch.nn.Module):
             # normal_map=v_world_normal_map.cpu(),
             recur=recur,
             acc_map=acc_map,
-            diffuse_reg=roughness.mean() - reflectivity.mean() + (tint_brightness-0.5).abs().mean(),
+            diffuse_reg=roughness.mean() - reflectivity.mean() + diffuse.mean(),# + ((tint_brightness-0.5)**2).mean(),
             normal_loss=normal_loss,
             backwards_rays_loss=backwards_rays_loss,
             termination_xyz=termination_xyz.cpu(),

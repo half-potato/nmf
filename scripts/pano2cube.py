@@ -1,4 +1,4 @@
-from models import render_modules, tonemap
+from models import render_modules, tonemap, ish
 import imageio
 from icecream import ic
 import torch
@@ -12,12 +12,15 @@ epochs = 500
 # bg_module = render_modules.BackgroundRender(3, render_modules.PanoUnwrap(), bg_resolution=2*1024, featureC=128, num_layers=0)
 # bg_module = render_modules.BackgroundRender(3, render_modules.CubeUnwrap(), bg_resolution=2*1024, featureC=128, num_layers=0)
 tm = tonemap.SRGBTonemap()
-bg_module = render_modules.HierarchicalBG(3, render_modules.CubeUnwrap(), bg_resolution=2*1024//2, num_levels=3, featureC=128, num_layers=0)
+bg_module = render_modules.HierarchicalBG(3, render_modules.CubeUnwrap(), bg_resolution=2*1024//4**5, num_levels=6, featureC=128, num_layers=0)
+# bg_module = render_modules.MLPRender_FP(0, None, ish.ListISH([0,1,2,4,8,16]), -1, 256, 6)
+ic(bg_module)
 bg_module = bg_module.to(device)
 pano = imageio.imread("ninomaru_teien_4k.exr")
 # optim = torch.optim.Adam(bg_module.parameters(), lr=0.30)
 optim = torch.optim.Adam(bg_module.parameters(), lr=0.1)
 # optim = torch.optim.SGD(bg_module.parameters(), lr=1.0, momentum=0.99, weight_decay=5e-4)
+# optim = torch.optim.Adam(bg_module.parameters(), lr=0.001)
 scheduler = torch.optim.lr_scheduler.StepLR(optim, step_size=5, gamma=0.94)
 # ic(bg_module.bg_mats[-1].shape, pano.shape)
 
@@ -79,6 +82,10 @@ for i in iter:
     ], dim=1)
     samp_vecs = vecs
     output = bg_module(samp_vecs)
+    # viewdotnorm = torch.ones_like(theta).reshape(-1, 1)
+    # roughness = 0.01*torch.ones_like(theta).reshape(-1, 1)
+    # output = bg_module(pts=torch.zeros_like(vecs), viewdirs=None, features=None, refdirs=samp_vecs, roughness=roughness, viewdotnorm=viewdotnorm)
+
     loss = torch.sqrt((output - samp)**2+1e-8).mean()
     photo_loss = torch.sqrt((output.clip(0, 1) - samp.clip(0, 1))**2+1e-8).mean()
     loss.backward()
@@ -88,6 +95,7 @@ for i in iter:
     iter.set_description(f"PSNR: {psnr}. LR: {scheduler.get_last_lr()}")
     scheduler.step()
 
-bg_module.save('cubed.png')
+# bg_module.save('cubed.png')
 torch.save(bg_module.state_dict(), 'log/mats360_bg.th')
+# torch.save(bg_module.state_dict(), 'log/refmodule_mats360.th')
 

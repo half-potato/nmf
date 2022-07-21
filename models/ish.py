@@ -4,6 +4,7 @@ from models import safemath
 from scipy.special import legendre as legendrecoeffs
 import numpy as np
 from icecream import ic
+from scipy.spatial.transform import Rotation
 from .sh import eval_sh_bases, eval_sh_bases_scaled, sh_basis
 import functools
 import operator
@@ -158,12 +159,47 @@ class FractionalY0(torch.nn.Module):
     def forward(self, theta):
         return math.sqrt((2*self.degree+1)/4/math.pi)*self.hypergeom((1-torch.cos(theta))/2)
 
+class RandRotISH(torch.nn.Module):
+    def __init__(self, rand_n, core_degs=[1,2,4,8], rand_degs=[16]):
+        super().__init__()
+        self.rand_n = rand_n
+        angs = torch.rand(rand_n, 3)*2*np.pi
+        matrices = []
+        for ang in angs:
+            matrices.append(torch.as_tensor(Rotation.from_euler('xyz', ang).as_matrix()))
+        matrices = torch.stack(matrices, dim=0).float()
+        self.core_basis = ListISH(core_degs)
+        self.rand_basis = ListISH(rand_degs)
+        self.register_buffer('matrices', matrices)
+        
+    def dim(self):
+        return self.rand_n*self.rand_basis.dim() + self.core_basis.dim()
+    
+    def forward(self, vec, roughness):
+        B = vec.shape[0]
+
+        evec = vec.reshape(B, 1, 3).expand(B, self.rand_n, 3).reshape(-1, 1, 3)
+        emats = self.matrices.reshape(1, -1, 3, 3).expand(B, self.rand_n, 3, 3).reshape(-1, 3, 3)
+        eroughness = roughness.reshape(B, 1, 1).expand(B, self.rand_n, 1).reshape(-1, 1)
+        rvecs = torch.matmul(evec, emats).reshape(-1, 3)
+        rbasis = self.rand_basis(rvecs, eroughness).reshape(B, -1)
+        outbasis = torch.cat([self.core_basis(vec, roughness), rbasis], dim=-1)
+        return outbasis
+
 class RandISH(torch.nn.Module):
     def __init__(self, rand_n, std=10):
         super().__init__()
         self.rand_n = rand_n
         # matrices = torch.normal(0, std, (rand_n, 3, 3))
-        matrices = torch.normal(0, std, (rand_n, 2))
+        # matrices = torch.normal(0, std, (rand_n, 3, 3))
+        # matrices = torch.normal(0, std, (rand_n, 2))
+        # """
+        angs = torch.rand(rand_n, 3)*2*np.pi
+        matrices = []
+        for ang in angs:
+            matrices.append(torch.as_tensor(Rotation.from_euler('xyz', ang).as_matrix()))
+        matrices = torch.stack(matrices, dim=0).float()
+        # """
         degrees = torch.normal(0, std, (rand_n,1)).clip(min=1, max=9).int()
         self.basii = torch.nn.ModuleList([SHBasis(deg) for deg in degrees])
         # self.y0s = [FractionalY0(degree[0]) for degree in degrees]
@@ -198,16 +234,14 @@ class RandISH(torch.nn.Module):
         for i, (basis, deg, mat) in enumerate(zip(self.basii, self.degrees, self.matrices)):
         #  for i, (deg, mat) in enumerate(zip(self.degrees, self.matrices)):
             # ob = compute_ortho_basis(phi, theta, kappa, deg)
-            t_theta = theta
-            t_phi = mat[0] * theta + mat[1] * phi
-            #
-            #  Als1 = Al(abs(int(deg[0])), kappa).reshape(-1, 1)
-            #  Als2 = Al(abs(int(deg[1])), kappa).reshape(-1, 1)
-            #  vert1 = Y0(t_theta, abs(int(deg[0])))
-            #  # vert1 = self.y0s[i](t_theta)
-            #  horz1, horz2 = Yl(t_theta, t_phi, abs(int(deg[1])))
-            #  horz = horz1 if deg[1] > 0 else horz2
-            #  outs.append(torch.cat([Als1*vert1, Als2*horz], dim=1))
+            rvec = vec @ mat
+            a, b, c = rvec[:, 0:1], rvec[:, 1:2], rvec[:, 2:3]
+            norm2d = torch.sqrt(a**2+b**2)
+            t_phi = safemath.atan2(b, a)
+            t_theta = safemath.atan2(c, norm2d) - np.pi/2
+
+            # t_theta = theta
+            # t_phi = mat[0] * theta + mat[1] * phi
 
             ind = 1 if deg > 0 else 2
             degs = basis(t_theta.reshape(-1, 1), t_phi.reshape(-1, 1), kappa.reshape(-1, 1))

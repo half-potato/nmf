@@ -82,7 +82,7 @@ class BundleRender:
         ind = [height // 2, width // 2]
         point = points.reshape(height, width, -1)[ind[0], ind[1]].to(device)
 
-        env_map, col_map = tensorf.recover_envmap(512, xyz=point)
+        env_map, col_map = tensorf.recover_envmap(512, xyz=point, roughness=0.01)
         env_map = (env_map.detach().cpu().numpy() * 255).astype('uint8')
         col_map = (col_map.detach().cpu().numpy() * 255).astype('uint8')
 

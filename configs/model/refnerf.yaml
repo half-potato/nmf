@@ -12,7 +12,7 @@ arch:
   max_recurs: 0
   infinity_border: False
   enable_alpha_mask: false
-  appdim_noise_std: 0.1
+  appdim_noise_std: 0.4
 
   tonemap:
     # _target_: models.tonemap.HDRTonemap
@@ -136,8 +136,8 @@ params:
 
   TV_weight_density: 0.0
   TV_weight_app: 0.0
-  normal_lambda: 3e-4
-  diffuse_lambda: 0
+  normal_lambda: 3e-2
+  diffuse_lambda: 1e-5
   backwards_rays_lambda: 1
   floater_lambda: 0.001
   charbonier_eps: 0.001

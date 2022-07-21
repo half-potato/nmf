@@ -116,11 +116,18 @@ def reconstruction(args):
     tensorf = hydra.utils.instantiate(args.model.arch)(aabb=aabb, grid_size=reso_cur)
     # TODO REMOVE
     bg_sd = torch.load('log/mats360_bg.th')
-    from models import render_modules
-    bg_module = render_modules.HierarchicalBG(3, render_modules.CubeUnwrap(), bg_resolution=2*1024//2, num_levels=3, featureC=128, num_layers=0)
+    from models import render_modules, ish
+    # bg_module = render_modules.HierarchicalBG(3, render_modules.CubeUnwrap(), bg_resolution=2*1024//2, num_levels=3, featureC=128, num_layers=0)
+    bg_module = render_modules.HierarchicalBG(3, render_modules.CubeUnwrap(), bg_resolution=2*1024//4**5, num_levels=6, featureC=128, num_layers=0)
     # bg_module = render_modules.BackgroundRender(3, render_modules.PanoUnwrap(), bg_resolution=2*1024, featureC=128, num_layers=0)
     bg_module.load_state_dict(bg_sd)
     tensorf.bg_module = bg_module
+
+    # TODO REMOVE
+    # ref_sd = torch.load('log/refmodule_mats360.th')
+    # ref_module = render_modules.MLPRender_FP(0, None, ish.ListISH([0,1,2,4,8,16]), -1, 256, 6)
+    # ref_module.load_state_dict(ref_sd)
+    # tensorf.ref_module = ref_module
 
     tensorf = tensorf.to(device)
 
@@ -236,7 +243,10 @@ def reconstruction(args):
 
     pbar = tqdm(range(args.n_iters), miniters=args.progress_refresh_rate, file=sys.stdout)
     old_decay = False
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=30000, T_mult=1)
+    T_max = 30000
+    scheduler1 = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=T_max//2)
+    scheduler2 = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=30000, T_mult=1)
+    scheduler = torch.optim.lr_scheduler.SequentialLR(optimizer, schedulers=[scheduler1, scheduler2], milestones=[T_max])
     if True:
     # with torch.autograd.detect_anomaly():
         for iteration in pbar:
@@ -321,6 +331,7 @@ def reconstruction(args):
             summary_writer.add_scalar('train/backwards_rays_loss', backwards_rays_loss.detach().item(), global_step=iteration)
             summary_writer.add_scalar('train/floater_loss', floater_loss.detach().item(), global_step=iteration)
             summary_writer.add_scalar('train/normal_loss', normal_loss.detach().item(), global_step=iteration)
+            summary_writer.add_scalar('train/diffuse_loss', diffuse_reg.detach().item(), global_step=iteration)
 
             if old_decay:
                 for param_group in optimizer.param_groups:
