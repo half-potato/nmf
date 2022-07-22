@@ -12,6 +12,18 @@ from typing import List
 import cv2
 from .grid_sample_Cinf import gkern
 
+def str2fn(name):
+    if name == 'sigmoid':
+        return torch.nn.Sigmoid()
+    elif name == 'softplus':
+        return torch.nn.Softplus()
+    elif name == 'identity':
+        return torch.nn.Identity()
+    elif name == 'clamp':
+        return Clamp(0, 1)
+    else:
+        raise Exception(f"Unknown function {name}")
+
 def positional_encoding(positions, freqs):
     freq_bands = (2**torch.arange(freqs).float()).to(positions.device)  # (F,)
     pts = (positions[..., None] * freq_bands).reshape(
@@ -43,6 +55,15 @@ def SHRender(xyz_sampled, viewdirs, features):
 def RGBRender(xyz_sampled, viewdirs, features):
     rgb = features
     return rgb
+
+class Clamp(torch.nn.Module):
+    def __init__(self, min=None, max=None):
+        super().__init__()
+        self.min = min
+        self.max = max
+
+    def forward(self, x):
+        return x.clamp(self.min, self.max)
 
 class IPE(torch.nn.Module):
     def __init__(self, max_degree=8, in_dim=3) -> None:
@@ -117,7 +138,7 @@ class CubeUnwrap(torch.nn.Module):
         return coords.reshape(1, 1, -1, 2)
 
 class HierarchicalBG(torch.nn.Module):
-    def __init__(self, bg_rank, unwrap_fn, bg_resolution=512, num_levels=2, featureC=128, num_layers=2):
+    def __init__(self, bg_rank, unwrap_fn, bg_resolution=512, num_levels=2, featureC=128, activation='identity', num_layers=2):
         super().__init__()
         self.bg_resolution = bg_resolution
         self.num_levels = num_levels
@@ -127,10 +148,11 @@ class HierarchicalBG(torch.nn.Module):
             for i in range(num_levels)])
         self.unwrap_fn = unwrap_fn
         self.bg_rank = bg_rank
+        activation_fn = str2fn(activation)
         if num_layers == 0 and bg_rank == 3:
             # self.bg_net = nn.Softplus(beta=50)
             # self.bg_net = nn.ReLU()
-            self.bg_net = nn.Identity()
+            self.bg_net = activation_fn
         else:
             self.bg_net = nn.Sequential(
                 nn.Linear(bg_rank, featureC, bias=False),
@@ -140,7 +162,7 @@ class HierarchicalBG(torch.nn.Module):
                     ] for _ in range(num_layers-2)], []),
                 torch.nn.ReLU(inplace=True),
                 nn.Linear(featureC, 3, bias=False),
-                nn.Softplus()
+                activation_fn
             )
         self.align_corners = False
         self.smoothing = 1
@@ -252,7 +274,7 @@ class MLPRender_FP(torch.nn.Module):
     feape: int
     featureC: int
     num_layers: int
-    def __init__(self, in_channels, view_encoder=None, ref_encoder=None, feape=6, featureC=128, num_layers=4, lr=1e-3):
+    def __init__(self, in_channels, view_encoder=None, ref_encoder=None, feape=6, featureC=128, num_layers=4, activation='softplus', lr=1e-3):
         super().__init__()
 
         self.lr = lr
@@ -279,6 +301,7 @@ class MLPRender_FP(torch.nn.Module):
             torch.nn.ReLU(inplace=True),
             torch.nn.Linear(featureC, 3)
         )
+        self.activation = str2fn(activation)
         torch.nn.init.constant_(self.mlp[-1].bias, 0)
         self.mlp.apply(self.init_weights)
 
@@ -313,8 +336,7 @@ class MLPRender_FP(torch.nn.Module):
 
         mlp_in = torch.cat(indata, dim=-1)
         rgb = self.mlp(mlp_in)
-        rgb = torch.sigmoid(rgb)
-        # rgb = F.softplus(rgb)
+        rgb = self.activation(rgb)
 
         return rgb
 
@@ -381,8 +403,9 @@ class MLPDiffuse(torch.nn.Module):
         ambient = F.softplus(mlp_out[..., 6:7])
         refraction_index = F.softplus(mlp_out[..., 7:8]-1) + self.min_refraction_index
         reflectivity = torch.sigmoid(mlp_out[..., 8:9])
-        roughness = F.softplus(mlp_out[..., 10:11])
-        f0 = torch.sigmoid(mlp_out[..., 11:12])
+        # roughness = F.softplus(mlp_out[..., 10:11])
+        roughness = torch.sigmoid(mlp_out[..., 10:11])
+        f0 = torch.sigmoid(mlp_out[..., 11:14])
         # ambient = torch.sigmoid(mlp_out[..., 9:10])
         ratio_diffuse = rgb[..., 9:10]
         if self.unlit_tint:
@@ -408,7 +431,8 @@ class MLPDiffuse(torch.nn.Module):
             ambient = ambient,
             diffuse = diffuse,
             roughness = roughness,
-            f0 = f0*0+1,
+            f0 = f0,
+            tint=tint,
         )
 
 class DeepMLPNormal(torch.nn.Module):

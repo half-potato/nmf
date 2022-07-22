@@ -16,8 +16,8 @@ class SRGBTonemap(torch.nn.Module):
         out[mask] = 1.055 * (img[mask] ** (1.0 / 2.4)) - 0.055
         out[~mask] = 12.92 * img[~mask]
         if not noclip:
-            img = img.clip(0, 1)
-        return img
+            out = out.clip(0, 1)
+        return out
 
     def inverse(self, img):
         # SRGB to linear
@@ -30,13 +30,17 @@ class HDRTonemap(torch.nn.Module):
         super().__init__()
         pass
 
-    def forward(self, img):
+    def forward(self, img, noclip=False):
         # linear to HDR
-        return img
+        # reinhard hdr mapping + gamma correction
+        out = (img / (img+1)).clip(min=0)**(1/2.2)
+        if not noclip:
+            out = out.clip(0, 1)
+        return out
 
     def inverse(self, img):
         # HDR to linear
-        return img
+        return - img / (img-1)
 
 class LinearTonemap(torch.nn.Module):
     def __init__(self):

@@ -22,6 +22,7 @@ arch:
 
   brdf:
     _target_: models.brdf.PBR
+    # _target_: models.brdf.SimplePBR
     _partial_: True
 
   # brdf:
@@ -127,7 +128,7 @@ params:
   # bounce_iter_list: [9000, 12000, 14000]
 
   bounce_n_list: [0, 1000000]
-  bounce_iter_list: [2000]
+  bounce_iter_list: [000]
 
   num_bw_iters: 0
 
@@ -152,7 +153,7 @@ params:
   TV_weight_density: 0.0
   TV_weight_app: 0.0
   normal_lambda: 3e-2
-  diffuse_lambda: 0
+  diffuse_lambda: 1e-5
   backwards_rays_lambda: 1
   floater_lambda: 0.001
   charbonier_eps: 0.001

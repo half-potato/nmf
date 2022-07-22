@@ -95,7 +95,7 @@ for i in iter:
     iter.set_description(f"PSNR: {psnr}. LR: {scheduler.get_last_lr()}")
     scheduler.step()
 
-# bg_module.save('cubed.png')
+bg_module.save('log/cubed.png')
 torch.save(bg_module.state_dict(), 'log/mats360_bg.th')
 # torch.save(bg_module.state_dict(), 'log/refmodule_mats360.th')
 

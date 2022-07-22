@@ -12,7 +12,7 @@ arch:
   max_recurs: 0
   infinity_border: False
   enable_alpha_mask: false
-  appdim_noise_std: 0.4
+  appdim_noise_std: 0.25
 
   tonemap:
     # _target_: models.tonemap.HDRTonemap
@@ -78,6 +78,8 @@ arch:
     #   _target_: models.ish.RandISH
     #   rand_n: 64
     #   std: 5
+    # activation: 'softplus'
+    activation: 'sigmoid'
     featureC: 256
     num_layers: 6
 

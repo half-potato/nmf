@@ -65,14 +65,14 @@ rows, cols = torch.meshgrid(
 rows = rows.reshape(-1)
 cols = cols.reshape(-1)
 theta = rows/H * np.pi - np.pi/2
-phi = cols/W * 2*np.pi - np.pi
+phi = -cols/W * 2*np.pi - np.pi
 
 angs = torch.stack([theta, phi], dim=1).reshape(-1, 2).to(device)
 
 vecs = torch.stack([
     torch.cos(phi)*torch.cos(theta),
     torch.sin(phi)*torch.cos(theta),
-    torch.sin(theta),
+    -torch.sin(theta),
 ], dim=1).to(device)
 
 # ish = ISH(4)

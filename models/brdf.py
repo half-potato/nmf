@@ -8,6 +8,15 @@ from icecream import ic
 def schlick(f0, n, l):
     return f0 + (1-f0)*(1-(n*l).sum(dim=-1, keepdim=True).clip(min=1e-20))**5
 
+class SimplePBR(torch.nn.Module):
+    def __init__(self, in_channels):
+        super().__init__()
+
+    def forward(self, V, L, N, features, matprop, mask):
+        cos_lamb = (L * N).sum(dim=-1, keepdim=True).clip(min=1e-8)
+        ref_weight = cos_lamb / cos_lamb.sum(dim=1, keepdim=True)
+        return ref_weight
+
 class PBR(torch.nn.Module):
     def __init__(self, in_channels):
         super().__init__()
@@ -28,19 +37,30 @@ class PBR(torch.nn.Module):
         # compute the BRDF (bidirectional reflectance distribution function)
         # k_d = ratio_diffuse[bounce_mask].reshape(-1, 1, 1)
         # diffuse vs specular fraction
-        k_s = schlick(matprop['f0'][mask].reshape(-1, 1, 1), N.double(), half.double()).float()
+        r = matprop['reflectivity'][mask]
+        f0 = (1-r)*0.04 + r*matprop['tint'][mask]
+        k_s = schlick(f0.reshape(-1, 1, 3), N.double(), half.double()).float()
         k_d = 1-k_s
 
         # diffuse vs specular intensity
         f_d = 1/np.pi
 
-        alph = 0*matprop['roughness'][mask].reshape(-1, 1, 1) + 0.1
-        k = alph / 2
-        D_ggx = alph**2 / (np.pi * (cos_half**2*(alph**2-1)+1)**2).clip(min=1e-10)
-        G_schlick_smith = cos_lamb * cos_view / ((cos_view*(1-k)+k)*(cos_lamb*(1-k)+k)).clip(min=1e-8)
+        # alph = 0*matprop['roughness'][mask].reshape(-1, 1, 1) + 0.1
+        alph = matprop['roughness'][mask].reshape(-1, 1, 1)
+        k = (alph+1)**2 / 8
+        a2 = alph**4
+        # k = alph / 2
+        # a2 = alph**2
+        D_ggx = (a2 / (np.pi * (cos_half**2*(a2-1)+1)**2).clip(min=1e-10))
+        G_schlick_smith = (cos_lamb * cos_view / ((cos_view*(1-k)+k)*(cos_lamb*(1-k)+k)).clip(min=1e-8))
         
+        # f_s = D_ggx.clip(min=0, max=1) * G_schlick_smith.clip(min=0, max=1) / (4 * cos_lamb * cos_view).clip(min=1e-8)
         f_s = D_ggx * G_schlick_smith / (4 * cos_lamb * cos_view).clip(min=1e-8)
-        brdf = k_d*f_d + (1-k_d)*f_s
+        # brdf = k_d*f_d + k_s*f_s
+        # the diffuse light is covered by other components of the rendering equation
+        f_s = f_s / f_s.sum(dim=1, keepdim=True)
+        brdf = k_s*f_s
+        # ic(k_s.mean(dim=1).mean(dim=0))
 
         # cos_refl = (noise_rays * refdirs[full_bounce_mask].reshape(-1, 1, 3)).sum(dim=-1, keepdim=True).clip(min=0)
         # cos_refl = (bounce_rays[..., 3:6] * refdirs[full_bounce_mask].reshape(-1, 1, 3)).sum(dim=-1, keepdim=True).clip(min=0)
@@ -59,8 +79,11 @@ class PBR(torch.nn.Module):
         # ic(k_s[:, 0], f_s[:, 0], D_ggx[:, 0], G_schlick_smith[:, 0]) 
 
         # tinted_ref_rgb = (brdf * incoming_light * cos_lamb).mean(dim=1).float()
-        ref_weight = (brdf * cos_lamb).clip(min=0)
-        ref_weight = ref_weight / (ref_weight.sum(dim=1, keepdim=True)+1e-8)
+        ref_weight = (brdf * cos_lamb)
+        # ic(brdf.min(), brdf.max(), k_s.max(), f_s.max(), D_ggx.max(), G_schlick_smith.max(), ref_weight.max(), ref_weight.sum(dim=1).mean(dim=0))
+        # ref_weight = ref_weight / (ref_weight.sum(dim=1, keepdim=True).max(dim=2, keepdim=True).values+1e-8)
+        # ic(matprop['f0'].shape, brdf.shape, k_s.shape, f_s.shape, ref_weight.shape)
+        # ic(ref_weight.sum(dim=1).mean(dim=0))
         return ref_weight
 
 class MLPBRDF(torch.nn.Module):

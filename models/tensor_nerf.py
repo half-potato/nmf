@@ -524,6 +524,8 @@ class TensorNeRF(torch.nn.Module):
         # return roughness
         # slope = 6
         # TODO REMOVE
+        return roughness
+        return (roughness/8).clip(max=0.3)
         slope = 6
         zero_point = 0.001
         offset = math.exp(slope*(zero_point-1))
@@ -756,7 +758,7 @@ class TensorNeRF(torch.nn.Module):
             elif self.ref_module is not None:# and is_train:
                 ratio_refracted = 0
                 viewdotnorm = (viewdirs[app_mask]*L).sum(dim=-1, keepdim=True)
-                ref_col = self.ref_module(
+                ref_col = tint * self.ref_module(
                     xyz_normed[app_mask], viewdirs[app_mask],
                     app_features, refdirs=refdirs,
                     roughness=roughness, viewdotnorm=viewdotnorm)
@@ -829,9 +831,11 @@ class TensorNeRF(torch.nn.Module):
                     brefdirs = refdirs[bounce_mask].reshape(-1, 1, 3)
                     # add noise to simulate roughness
                     N = brefdirs.shape[0]
+                    # ray_noise = self.roughness2noisestd(roughness[bounce_mask].reshape(-1, 1, 1)) * torch.normal(0, 1, (N, num_roughness_rays, 3), device=device)
+                    # diffuse_noise = ray_noise / (torch.linalg.norm(ray_noise, dim=-1, keepdim=True)+1e-8)
                     ray_noise = torch.normal(0, 1, (N, num_roughness_rays, 3), device=device)
-                    reflect_noise = 0
                     diffuse_noise = ray_noise / (torch.linalg.norm(ray_noise, dim=-1, keepdim=True)+1e-8)
+                    diffuse_noise = self.roughness2noisestd(roughness[bounce_mask].reshape(-1, 1, 1)) * diffuse_noise
                     outward = L[bounce_mask].reshape(-1, 1, 3)
 
                     # this formulation uses ratio diffuse and ratio reflected to do importance sampling
@@ -840,7 +844,7 @@ class TensorNeRF(torch.nn.Module):
                     # noise_rays = ratio_reflected[bounce_mask].reshape(-1, 1, 1) * (brefdirs + reflect_noise) + diffuse_noise
 
                     # this formulation uses roughness to do importance sampling
-                    diffuse_noise = outward+diffuse_noise
+                    # diffuse_noise = outward+diffuse_noise
                     diffuse_noise[:, 0] = 0
                     # noise_rays = (1-roughness[bounce_mask].reshape(-1, 1, 1)) * brefdirs + roughness[bounce_mask].reshape(-1, 1, 1) * diffuse_noise
                     noise_rays = brefdirs + diffuse_noise
@@ -874,7 +878,7 @@ class TensorNeRF(torch.nn.Module):
                     # outward = outward surface normal
                     # ic(ref_weight[0], D_ggx[0], cos_half[0], alph[0])
 
-                    tinted_ref_rgb = (ref_weight * incoming_light).sum(dim=1).float()
+                    tinted_ref_rgb = tint * (ref_weight * incoming_light).sum(dim=1).float()
 
                     # tinted_ref_rgb = incoming_light.mean(dim=1)
                     # debug[full_bounce_mask] += reflectivity[bounce_mask] * tinted_ref_rgb
@@ -899,8 +903,8 @@ class TensorNeRF(torch.nn.Module):
             # in addition, the light is interpolated between emissive and reflective
             reflectivity = matprop['reflectivity']
             roughness = matprop['roughness']
-            rgb[app_mask] = tint * ((1-reflectivity)*matprop['ambient'] + reflectivity * reflect_rgb)
-            # rgb[app_mask] = tint * reflect_rgb + matprop['diffuse']
+            # rgb[app_mask] = tint * ((1-reflectivity)*matprop['ambient'] + reflectivity * reflect_rgb)
+            rgb[app_mask] = reflect_rgb + matprop['diffuse']
             # rgb[app_mask] = tint * reflectivity * reflect_rgb + (1-reflectivity)*matprop['diffuse']
             # rgb[app_mask] = tint * (ambient + reflectivity * reflect_rgb)
 

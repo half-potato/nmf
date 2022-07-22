@@ -46,7 +46,8 @@ def main(cfg: DictConfig):
     tensorf = hydra.utils.instantiate(cfg.model.arch)(aabb=torch.tensor([[-1.0, -1.0, -1.0], [1.0, 1.0, 1.0]]), grid_size=[128]*3)
     bg_sd = torch.load('log/mats360_bg.th')
     from models import render_modules
-    bg_module = render_modules.HierarchicalBG(3, render_modules.CubeUnwrap(), bg_resolution=2*1024//4, num_levels=3, featureC=128, num_layers=0)
+    # bg_module = render_modules.HierarchicalBG(3, render_modules.CubeUnwrap(), bg_resolution=2*1024//4, num_levels=3, featureC=128, num_layers=0)
+    bg_module = render_modules.HierarchicalBG(3, render_modules.CubeUnwrap(), bg_resolution=2*1024//4**5, num_levels=6, featureC=128, num_layers=0, activation='identity')
     # bg_module = render_modules.BackgroundRender(3, render_modules.PanoUnwrap(), bg_resolution=2*1024, featureC=128, num_layers=0)
     bg_module.load_state_dict(bg_sd)
     tensorf.bg_module = bg_module
@@ -82,38 +83,10 @@ def main(cfg: DictConfig):
         else:
             return mask1 | mask2
 
-    # r, g, b = 0.955, 0.638, 0.538
-    r, g, b = 1, 1, 1
-    # train appearance
-    optim = torch.optim.Adam(tensorf.parameters(), lr=1e-3)
-    with torch.enable_grad():
-        for _ in tqdm(range(200)):
-            noise = torch.rand(1, N, 4, device=device)/H
-            noise[..., -1] = 0
-            xyz = (grid + noise).reshape(-1, 4)
-            mask = gen_mask(xyz[:, :3])
-            app_features = tensorf.rf.compute_appfeature(xyz[mask])
-            diffuse, tint, matprop = tensorf.diffuse_module(
-                    xyz[mask], torch.rand_like(xyz[..., :3][mask]), app_features)
-
-            # shell = (dist[mask] > inner_r - eps)
-            # full_shell = (dist < outer_r + eps) & (dist > inner_r - eps)
-            # p_norm = tensorf.normal_module(xyz[mask][shell], app_features[shell])
-            # gt_norm = xyz[full_shell, :3] / (torch.linalg.norm(xyz[full_shell, :3], dim=1, keepdim=True)+1e-10)
-            # world_loss = -(p_norm * gt_norm).sum(dim=-1).sum()
-            
-            tint_loss = (tint[..., 0]-r)**2 + (tint[..., 1]-g)**2 + (tint[..., 2]-b)**2
-            diffuse_loss = (diffuse[..., 0]-1)**2 + (diffuse[..., 1]-1)**2 + (diffuse[..., 2]-1)**2
-            property_loss = (matprop['refraction_index'] - 1.5)**2 + (matprop['reflectivity'] - 1.00)**2 + (matprop['ratio_diffuse'] - 0.10)**2 + (matprop['ambient'] + 0.1)**2 + \
-                            (matprop['f0'] - 0.9)**2 + (matprop['roughness'] - 0.2)**2
-            loss = tint_loss.mean() + diffuse_loss.mean() + property_loss.mean()
-            optim.zero_grad()
-            loss.backward()
-            optim.step()
 
     # train shape
     optim = torch.optim.Adam(tensorf.parameters(), lr=0.1, betas=(0.9,0.99))
-    scheduler = torch.optim.lr_scheduler.StepLR(optim, step_size=5, gamma=0.99)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optim, T_max=500)
     with torch.enable_grad():
         # TODO REMOVE
         pbar = tqdm(range(500))
@@ -140,13 +113,16 @@ def main(cfg: DictConfig):
             scheduler.step()
 
 
+    r, g, b = 0.955, 0.638, 0.538
+    # r, g, b = 1, 1, 1
     # train normals
-    # first calculate normals
+    # f0_col = torch.tensor([0.955, 0.638, 0.538]).to(device)
     # optim = torch.optim.Adam(tensorf.parameters(), lr=0.0100)
     optim = torch.optim.Adam(tensorf.parameters(), lr=0.0025)
     # optim = torch.optim.Adam(tensorf.parameters(), lr=0.0010)
     # optim = torch.optim.RMSprop(tensorf.parameters(), lr=0.0500)
-    scheduler = torch.optim.lr_scheduler.StepLR(optim, step_size=5, gamma=0.99)
+    # scheduler = torch.optim.lr_scheduler.StepLR(optim, step_size=5, gamma=0.99)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optim, T_max=1000)
     with torch.enable_grad():
         pbar = tqdm(range(1000))
         for _ in pbar:
@@ -195,10 +171,27 @@ def main(cfg: DictConfig):
             # norm_diff = (1-(p_norm * gt_norms).sum(dim=-1))
             norm_diff_l2 = torch.linalg.norm(p_norm - gt_norms, dim=-1)
             world_loss = (norm_diff_l2).mean()
+
+            # appearance
+            diffuse, tint, matprop = tensorf.diffuse_module(
+                    xyz[full_shell], torch.rand_like(xyz[..., :3][full_shell]), app_features[full_shell])
+
+            # shell = (dist[mask] > inner_r - eps)
+            # full_shell = (dist < outer_r + eps) & (dist > inner_r - eps)
+            # p_norm = tensorf.normal_module(xyz[mask][shell], app_features[shell])
+            # gt_norm = xyz[full_shell, :3] / (torch.linalg.norm(xyz[full_shell, :3], dim=1, keepdim=True)+1e-10)
+            # world_loss = -(p_norm * gt_norm).sum(dim=-1).sum()
+            
+            tint_loss = (tint[..., 0]-r)**2 + (tint[..., 1]-g)**2 + (tint[..., 2]-b)**2
+            diffuse_loss = (diffuse[..., 0]-0)**2 + (diffuse[..., 1]-0)**2 + (diffuse[..., 2]-0)**2
+            property_loss = (matprop['refraction_index'] - 1.5)**2 + (matprop['reflectivity'] - 1.00)**2 + (matprop['ratio_diffuse'] - 0.10)**2 + (matprop['ambient'] + 0.1)**2 + \
+                            (matprop['roughness'] - 0.2)**2
+            app_loss = tint_loss.mean() + diffuse_loss.mean() + property_loss.mean()
+            loss = 1e-4*app_loss + world_loss
             optim.zero_grad()
-            world_loss.backward()
+            loss.backward()
             optim.step()
-            pbar.set_description(f"World loss: {world_loss.item():.07f} LR: {scheduler.get_last_lr()}")
+            pbar.set_description(f"World loss: {world_loss.item():.07f} Loss: {loss.item():.07f} LR: {scheduler.get_last_lr()}")
             scheduler.step()
 
 

@@ -3,6 +3,7 @@ from tqdm.auto import tqdm
 from models.tensor_nerf import TensorNeRF
 from renderer import *
 from utils import *
+from torch.optim import lr_scheduler
 from torch.utils.tensorboard import SummaryWriter
 import datetime
 from omegaconf import DictConfig, OmegaConf
@@ -118,7 +119,7 @@ def reconstruction(args):
     bg_sd = torch.load('log/mats360_bg.th')
     from models import render_modules, ish
     # bg_module = render_modules.HierarchicalBG(3, render_modules.CubeUnwrap(), bg_resolution=2*1024//2, num_levels=3, featureC=128, num_layers=0)
-    bg_module = render_modules.HierarchicalBG(3, render_modules.CubeUnwrap(), bg_resolution=2*1024//4**5, num_levels=6, featureC=128, num_layers=0)
+    bg_module = render_modules.HierarchicalBG(3, render_modules.CubeUnwrap(), bg_resolution=2*1024//4**5, num_levels=6, featureC=128, num_layers=0, activation='clamp')
     # bg_module = render_modules.BackgroundRender(3, render_modules.PanoUnwrap(), bg_resolution=2*1024, featureC=128, num_layers=0)
     bg_module.load_state_dict(bg_sd)
     tensorf.bg_module = bg_module
@@ -244,9 +245,13 @@ def reconstruction(args):
     pbar = tqdm(range(args.n_iters), miniters=args.progress_refresh_rate, file=sys.stdout)
     old_decay = False
     T_max = 30000
-    scheduler1 = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=T_max//2)
-    scheduler2 = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=30000, T_mult=1)
-    scheduler = torch.optim.lr_scheduler.SequentialLR(optimizer, schedulers=[scheduler1, scheduler2], milestones=[T_max])
+    scheduler1 = lr_scheduler.CosineAnnealingLR(optimizer, T_max=T_max)
+    scheduler2 = lr_scheduler.ChainedScheduler([
+            lr_scheduler.ConstantLR(optimizer, factor=0.25, total_iters=600000),
+            lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=30000, T_mult=1)
+    ])
+    scheduler = lr_scheduler.SequentialLR(optimizer, schedulers=[scheduler1, scheduler2], milestones=[3000])
+    scheduler = lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=30000, T_mult=1)
     if True:
     # with torch.autograd.detect_anomaly():
         for iteration in pbar:
@@ -353,13 +358,13 @@ def reconstruction(args):
                 
 
             if iteration % args.vis_every == args.vis_every - 1 and args.N_vis!=0:
-                tensorf.save(f'{logfolder}/{args.expname}_{iteration}.th', args.model.arch)
+                # tensorf.save(f'{logfolder}/{args.expname}_{iteration}.th', args.model.arch)
                 PSNRs_test = evaluation(test_dataset,tensorf, args, renderer, f'{logfolder}/imgs_vis/', N_vis=args.N_vis,
                                         prtx=f'{iteration:06d}_', N_samples=nSamples, white_bg = white_bg, ndc_ray=ndc_ray,
                                         compute_extra_metrics=False, render_mode=args.render_mode)
                 summary_writer.add_scalar('test/psnr', np.mean(PSNRs_test), global_step=iteration)
                 if tensorf.bg_module is not None:
-                    tensorf.bg_module.save('test.png')
+                    tensorf.bg_module.save('log/bg.png')
 
 
             if iteration in params.bounce_iter_list:
