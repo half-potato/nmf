@@ -1,3 +1,4 @@
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -7,6 +8,87 @@ from icecream import ic
 
 def schlick(f0, n, l):
     return f0 + (1-f0)*(1-(n*l).sum(dim=-1, keepdim=True).clip(min=1e-20))**5
+
+def normalize(x):
+    return x / (torch.linalg.norm(x, dim=-1, keepdim=True)+1e-8)
+
+class NormalSampler:
+    def __init__(self) -> None:
+        pass
+
+    def roughness2noisestd(self, roughness):
+        # return roughness
+        # slope = 6
+        # TODO REMOVE
+        return roughness
+        return (roughness/8).clip(max=0.3)
+        slope = 6
+        zero_point = 0.001
+        offset = math.exp(slope*(zero_point-1))
+        return torch.exp(slope*(roughness-1)).clip(min=0, max=1) - offset
+
+    def sample(self, num_samples, refdirs, viewdir, normal, roughness):
+        device = normal.device
+        B = normal.shape[0]
+        ray_noise = torch.normal(0, 1, (B, num_samples, 3), device=device)
+        diffuse_noise = ray_noise / (torch.linalg.norm(ray_noise, dim=-1, keepdim=True)+1e-8)
+        diffuse_noise = self.roughness2noisestd(roughness.reshape(-1, 1, 1)) * diffuse_noise
+        outward = normal.reshape(-1, 1, 3)
+
+        # this formulation uses ratio diffuse and ratio reflected to do importance sampling
+        # diffuse_noise = ratio_diffuse[bounce_mask].reshape(-1, 1, 1) * (outward+diffuse_noise)
+        # diffuse_noise[:, 0] = 0
+        # noise_rays = ratio_reflected[bounce_mask].reshape(-1, 1, 1) * (brefdirs + reflect_noise) + diffuse_noise
+
+        # this formulation uses roughness to do importance sampling
+        # diffuse_noise = outward+diffuse_noise
+        diffuse_noise[:, 0] = 0
+        # noise_rays = (1-roughness[bounce_mask].reshape(-1, 1, 1)) * brefdirs + roughness[bounce_mask].reshape(-1, 1, 1) * diffuse_noise
+        noise_rays = refdirs + diffuse_noise
+
+        # noise_rays = ratio_reflected[bounce_mask].reshape(-1, 1, 1) * (bounce_rays[..., 3:6] + reflect_noise)
+        noise_rays = noise_rays / (torch.linalg.norm(noise_rays, dim=-1, keepdim=True)+1e-8)
+        # project into 
+        return noise_rays
+
+class GGXSampler:
+    def __init__(self) -> None:
+        self.sampler = torch.quasirandom.SobolEngine(dimension=2)
+
+    def sample(self, num_samples, refdirs, viewdir, normal, roughness):
+        # viewdir: (B, 3)
+        # normal: (B, 3)
+        # roughness: B
+        device = normal.device
+        B = normal.shape[0]
+        # adapated from learnopengl.com
+        angs = self.sampler.draw(B*num_samples).to(device).reshape(B, num_samples, 2)
+        # a = (roughness*roughness).reshape(B, 1).expand(B, num_samples).reshape(-1)
+        a = (roughness**4).reshape(B, 1)#.expand(B, num_samples).reshape(-1)
+	    
+        phi = 2.0 * math.pi * angs[..., 0]
+        cosTheta2 = ((1.0 - angs[..., 1]) / (1.0 + (a - 1.0) * angs[..., 1]).clip(min=1e-8))
+        cosTheta = torch.sqrt(cosTheta2.clip(min=1e-8))
+        sinTheta = torch.sqrt((1.0 - cosTheta2).clip(min=1e-8))
+
+        H = torch.stack([
+            torch.cos(phi)*sinTheta,
+            torch.sin(phi)*sinTheta,
+            cosTheta,
+        ], dim=-1).reshape(B, num_samples, 3)
+	    
+        # from tangent-space vector to world-space sample vector
+        # note: it's free to expand
+        z_up = torch.tensor([0.0, 0.0, 1.0], device=device).reshape(1, 3).expand(B, 3)
+        x_up = torch.tensor([1.0, 0.0, 0.0], device=device).reshape(1, 3).expand(B, 3)
+        up = torch.where(normal[:, 2:3] < 0.999, z_up, x_up)
+        tangent = torch.linalg.cross(up, normal)
+        bitangent = torch.linalg.cross(normal, tangent)
+
+        sampleVec = tangent.unsqueeze(1) * H[..., 0:1] + bitangent.unsqueeze(1) * H[..., 1:2] + normal.unsqueeze(1) * H[..., 2:3]
+        sampleVec = normalize(sampleVec)
+        L = normalize(2.0 * (viewdir.unsqueeze(1) * sampleVec).sum(dim=-1, keepdim=True) * sampleVec - viewdir.unsqueeze(1))
+        return L
 
 class SimplePBR(torch.nn.Module):
     def __init__(self, in_channels):
@@ -27,8 +109,7 @@ class PBR(torch.nn.Module):
         # N: outward normal
         # matprop: dictionary of attributes
         # mask: mask for matprop
-        half = L + V.reshape(-1, 1, 3)
-        half = half / (torch.linalg.norm(half, dim=-1, keepdim=True)+1e-8)
+        half = normalize(L + V.reshape(-1, 1, 3))
 
         cos_lamb = (L * N).sum(dim=-1, keepdim=True).clip(min=1e-8)
         cos_view = (V.reshape(-1, 1, 3) * N).sum(dim=-1, keepdim=True).clip(min=1e-8)
@@ -38,6 +119,7 @@ class PBR(torch.nn.Module):
         # k_d = ratio_diffuse[bounce_mask].reshape(-1, 1, 1)
         # diffuse vs specular fraction
         r = matprop['reflectivity'][mask]
+        # 0.04 is the approximate value of F0 for non-metallic surfaces
         f0 = (1-r)*0.04 + r*matprop['tint'][mask]
         k_s = schlick(f0.reshape(-1, 1, 3), N.double(), half.double()).float()
         k_d = 1-k_s
@@ -47,15 +129,18 @@ class PBR(torch.nn.Module):
 
         # alph = 0*matprop['roughness'][mask].reshape(-1, 1, 1) + 0.1
         alph = matprop['roughness'][mask].reshape(-1, 1, 1)
-        k = (alph+1)**2 / 8
+        k = (alph+1)**2 / 8 # direct lighting
         a2 = alph**4
-        # k = alph / 2
+        # k = alph**2 / 2 # ibl
         # a2 = alph**2
         D_ggx = (a2 / (np.pi * (cos_half**2*(a2-1)+1)**2).clip(min=1e-10))
-        G_schlick_smith = (cos_lamb * cos_view / ((cos_view*(1-k)+k)*(cos_lamb*(1-k)+k)).clip(min=1e-8))
+        G_schlick_smith = 1 / ((cos_view*(1-k)+k)*(cos_lamb*(1-k)+k)).clip(min=1e-8)
         
         # f_s = D_ggx.clip(min=0, max=1) * G_schlick_smith.clip(min=0, max=1) / (4 * cos_lamb * cos_view).clip(min=1e-8)
-        f_s = D_ggx * G_schlick_smith / (4 * cos_lamb * cos_view).clip(min=1e-8)
+        # f_s = D_ggx / (4 * cos_lamb * cos_view).clip(min=1e-8)
+
+        f_s = D_ggx * G_schlick_smith / 4
+        # f_s = D_ggx / (4 * cos_lamb * cos_view).clip(min=1e-8)
         # brdf = k_d*f_d + k_s*f_s
         # the diffuse light is covered by other components of the rendering equation
         f_s = f_s / f_s.sum(dim=1, keepdim=True)
@@ -82,8 +167,6 @@ class PBR(torch.nn.Module):
         ref_weight = (brdf * cos_lamb)
         # ic(brdf.min(), brdf.max(), k_s.max(), f_s.max(), D_ggx.max(), G_schlick_smith.max(), ref_weight.max(), ref_weight.sum(dim=1).mean(dim=0))
         # ref_weight = ref_weight / (ref_weight.sum(dim=1, keepdim=True).max(dim=2, keepdim=True).values+1e-8)
-        # ic(matprop['f0'].shape, brdf.shape, k_s.shape, f_s.shape, ref_weight.shape)
-        # ic(ref_weight.sum(dim=1).mean(dim=0))
         return ref_weight
 
 class MLPBRDF(torch.nn.Module):

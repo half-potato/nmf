@@ -5,17 +5,16 @@ import time
 from icecream import ic
 
 from . import render_modules
+from .tonemap import SRGBTonemap
 import plotly.express as px
 import plotly.graph_objects as go
 import random
 import hydra
 
-from .tensoRF import TensorCP, TensorVM, TensorVMSplit
 from torch.autograd import grad
 import matplotlib.pyplot as plt
 import math
 from .logger import Logger
-from .tonemap import SRGBTonemap, HDRTonemap
 
 LOGGER = Logger(enable=False)
 
@@ -159,7 +158,7 @@ class AlphaGridMask(torch.nn.Module):
 
 
 class TensorNeRF(torch.nn.Module):
-    def __init__(self, rf, grid_size, aabb, diffuse_module, brdf=None, tonemap=None, normal_module=None, ref_module=None, bg_module=None,
+    def __init__(self, rf, grid_size, aabb, diffuse_module, sampler=None, brdf=None, tonemap=None, normal_module=None, ref_module=None, bg_module=None,
                  alphaMask=None, near_far=[2.0, 6.0], nEnvSamples=100, specularity_threshold=0.005, max_recurs=0,
                  max_normal_similarity=1, infinity_border=False, min_refraction=1.1, enable_refraction=True,
                  density_shift=-10, alphaMask_thres=0.001, distance_scale=25, rayMarch_weight_thres=0.0001,
@@ -172,9 +171,11 @@ class TensorNeRF(torch.nn.Module):
         self.diffuse_module = diffuse_module(in_channels=self.rf.app_dim)
         self.bg_module = bg_module
         if tonemap is None:
-            self.tonemap = HDRTonemap()
+            self.tonemap = SRGBTonemap()
         else:
             self.tonemap = tonemap
+
+        self.sampler = sampler
 
         self.brdf = brdf(in_channels=self.rf.app_dim) if brdf is not None else None
 
@@ -520,17 +521,6 @@ class TensorNeRF(torch.nn.Module):
             xyz_sampled, dim=-1, ord=torch.inf).abs() >= margin
         return at_infinity
 
-    def roughness2noisestd(self, roughness):
-        # return roughness
-        # slope = 6
-        # TODO REMOVE
-        return roughness
-        return (roughness/8).clip(max=0.3)
-        slope = 6
-        zero_point = 0.001
-        offset = math.exp(slope*(zero_point-1))
-        return torch.exp(slope*(roughness-1)).clip(min=0, max=1) - offset
-
     def calculate_normals(self, xyz):
         with torch.enable_grad():
             xyz_g = xyz.clone()
@@ -758,11 +748,11 @@ class TensorNeRF(torch.nn.Module):
             elif self.ref_module is not None:# and is_train:
                 ratio_refracted = 0
                 viewdotnorm = (viewdirs[app_mask]*L).sum(dim=-1, keepdim=True)
-                ref_col = tint * self.ref_module(
+                ref_col = self.ref_module(
                     xyz_normed[app_mask], viewdirs[app_mask],
                     app_features, refdirs=refdirs,
                     roughness=roughness, viewdotnorm=viewdotnorm)
-                reflect_rgb = ref_col
+                reflect_rgb = tint * ref_col
                 debug[app_mask] += ref_col
             else:
                 num_roughness_rays = 1 if recur > 0 else self.roughness_rays
@@ -831,28 +821,11 @@ class TensorNeRF(torch.nn.Module):
                     brefdirs = refdirs[bounce_mask].reshape(-1, 1, 3)
                     # add noise to simulate roughness
                     N = brefdirs.shape[0]
+                    outward = L[bounce_mask]
                     # ray_noise = self.roughness2noisestd(roughness[bounce_mask].reshape(-1, 1, 1)) * torch.normal(0, 1, (N, num_roughness_rays, 3), device=device)
                     # diffuse_noise = ray_noise / (torch.linalg.norm(ray_noise, dim=-1, keepdim=True)+1e-8)
-                    ray_noise = torch.normal(0, 1, (N, num_roughness_rays, 3), device=device)
-                    diffuse_noise = ray_noise / (torch.linalg.norm(ray_noise, dim=-1, keepdim=True)+1e-8)
-                    diffuse_noise = self.roughness2noisestd(roughness[bounce_mask].reshape(-1, 1, 1)) * diffuse_noise
-                    outward = L[bounce_mask].reshape(-1, 1, 3)
-
-                    # this formulation uses ratio diffuse and ratio reflected to do importance sampling
-                    # diffuse_noise = ratio_diffuse[bounce_mask].reshape(-1, 1, 1) * (outward+diffuse_noise)
-                    # diffuse_noise[:, 0] = 0
-                    # noise_rays = ratio_reflected[bounce_mask].reshape(-1, 1, 1) * (brefdirs + reflect_noise) + diffuse_noise
-
-                    # this formulation uses roughness to do importance sampling
-                    # diffuse_noise = outward+diffuse_noise
-                    diffuse_noise[:, 0] = 0
-                    # noise_rays = (1-roughness[bounce_mask].reshape(-1, 1, 1)) * brefdirs + roughness[bounce_mask].reshape(-1, 1, 1) * diffuse_noise
-                    noise_rays = brefdirs + diffuse_noise
-
-                    # noise_rays = ratio_reflected[bounce_mask].reshape(-1, 1, 1) * (bounce_rays[..., 3:6] + reflect_noise)
-                    noise_rays = noise_rays / (torch.linalg.norm(noise_rays, dim=-1, keepdim=True)+1e-8)
-                    # project into 
-                    outsim = (outward * noise_rays).sum(dim=-1, keepdim=True)
+                    # noise_rays = self.sampler.sample(num_roughness_rays, V[bounce_mask].detach(), outward.detach(), roughness[bounce_mask].detach())
+                    noise_rays = self.sampler.sample(num_roughness_rays, brefdirs, V[bounce_mask], outward, roughness[bounce_mask])
                     bounce_rays = torch.cat([
                         xyz_sampled[full_bounce_mask][..., :3].reshape(-1, 1, 3).expand(noise_rays.shape),
                         noise_rays,
@@ -870,18 +843,12 @@ class TensorNeRF(torch.nn.Module):
                     """
                     incoming_light = self.render_just_bg(bounce_rays.reshape(-1, D)).reshape(-1, num_roughness_rays, 3)
 
-                    ref_weight = self.brdf(V[bounce_mask], bounce_rays[..., 3:6], outward, app_features[bounce_mask], matprop, bounce_mask)
+                    ref_weight = self.brdf(V[bounce_mask], bounce_rays[..., 3:6], outward.reshape(-1, 1, 3), app_features[bounce_mask], matprop, bounce_mask)
 
                     # compute rendering equation integral
-                    # L_i, the incoming light
-                    # omega_i = incoming light direction = bounce_rays[..., 3:6]
-                    # outward = outward surface normal
-                    # ic(ref_weight[0], D_ggx[0], cos_half[0], alph[0])
 
-                    tinted_ref_rgb = tint * (ref_weight * incoming_light).sum(dim=1).float()
-
+                    tinted_ref_rgb = (ref_weight * incoming_light).sum(dim=1).float()
                     # tinted_ref_rgb = incoming_light.mean(dim=1)
-                    # debug[full_bounce_mask] += reflectivity[bounce_mask] * tinted_ref_rgb
                     debug[full_bounce_mask] += tinted_ref_rgb
                     reflect_rgb[bounce_mask] = tinted_ref_rgb
 
