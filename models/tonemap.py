@@ -33,13 +33,14 @@ class HDRTonemap(torch.nn.Module):
     def forward(self, img, noclip=False):
         # linear to HDR
         # reinhard hdr mapping + gamma correction
-        out = (img / (img+1)).clip(min=0)**(1/2.2)
+        out = (img / (img.clip(min=0)+1))**(1/2.2)
         if not noclip:
             out = out.clip(0, 1)
         return out
 
     def inverse(self, img):
         # HDR to linear
+        img = img ** 2.2
         return - img / (img-1)
 
 class LinearTonemap(torch.nn.Module):

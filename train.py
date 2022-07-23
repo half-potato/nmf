@@ -402,14 +402,6 @@ def reconstruction(args):
                 nSamples = min(args.nSamples, cal_n_samples(reso_cur,args.step_ratio/tensorf.rf.density_res_multi))
                 tensorf.rf.upsample_volume_grid(reso_cur)
 
-
-                # if old_decay:
-                #     if args.lr_upsample_reset:
-                #         print("reset lr to initial")
-                #         lr_scale = 0.1 ** (iteration / args.n_iters)
-                #     else:
-                #         lr_scale = args.lr_decay_target_ratio ** (iteration / args.n_iters)
-                    # optimizer = torch.optim.Adam(grad_vars, betas=(0.9, 0.99))
                 # upscaling deregisters the parameter, so we need to reregister it
                 lr_scale = 1
                 new_grad_vars = tensorf.get_optparam_groups(args.lr_init*lr_scale, args.lr_basis*lr_scale, lr_bg=lr_bg, lr_scale=lr_scale)

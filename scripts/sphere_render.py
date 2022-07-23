@@ -113,7 +113,9 @@ def main(cfg: DictConfig):
             scheduler.step()
 
 
-    r, g, b = 0.955, 0.638, 0.538
+    # rgb = torch.tensor([0.955, 0.638, 0.538], device=device).reshape(1, 3)
+    # rgb = torch.tensor([0.98, 0.82, 0.76], device=device).reshape(1, 3)
+    rgb = torch.tensor([0.98, 0.539, 0.316], device=device).reshape(1, 3)
     # r, g, b = 1, 1, 1
     # train normals
     # f0_col = torch.tensor([0.955, 0.638, 0.538]).to(device)
@@ -182,10 +184,10 @@ def main(cfg: DictConfig):
             # gt_norm = xyz[full_shell, :3] / (torch.linalg.norm(xyz[full_shell, :3], dim=1, keepdim=True)+1e-10)
             # world_loss = -(p_norm * gt_norm).sum(dim=-1).sum()
             
-            tint_loss = (tint[..., 0]-r)**2 + (tint[..., 1]-g)**2 + (tint[..., 2]-b)**2
+            tint_loss = ((tint-rgb)**2).sum()
             diffuse_loss = (diffuse[..., 0]-0)**2 + (diffuse[..., 1]-0)**2 + (diffuse[..., 2]-0)**2
-            property_loss = (matprop['refraction_index'] - 1.5)**2 + (matprop['reflectivity'] - 1.00)**2 + (matprop['ratio_diffuse'] - 0.10)**2 + (matprop['ambient'] + 0.1)**2 + \
-                            (matprop['roughness'] - 0.2)**2
+            property_loss = (matprop['refraction_index'] - 1.5)**2 + (matprop['reflectivity'] - 0.00)**2 + (matprop['ratio_diffuse'] - 0.10)**2 + (matprop['ambient'] + 0.1)**2 + \
+                            (matprop['roughness'] - 0.1)**2
             app_loss = tint_loss.mean() + diffuse_loss.mean() + property_loss.mean()
             loss = 1e-4*app_loss + world_loss
             optim.zero_grad()

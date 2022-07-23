@@ -187,14 +187,15 @@ class HierarchicalBG(torch.nn.Module):
         return
         self.bg_mats = nn.ParameterList([
                 nn.Parameter(
-                    F.interpolate(self.bg_mats[i].data, size=(2**i * bg_resolution*self.unwrap_fn.H_mul, 2**i * bg_resolution*self.unwrap_fn.W_mul), mode='bilinear', align_corners=self.align_corners)
+                    F.interpolate(self.bg_mats[i].data, size=(4**i * bg_resolution*self.unwrap_fn.H_mul, 4**i * bg_resolution*self.unwrap_fn.W_mul), mode='bilinear', align_corners=self.align_corners)
                 )
                 for i in range(self.num_levels)
             ])
         
-    def forward(self, viewdirs):
+    def forward(self, viewdirs, roughness, max_level=None):
         B = viewdirs.shape[0]
         x = self.unwrap_fn(viewdirs)
+        max_level = self.num_levels if max_level is None else max_level
 
         embs = []
         for i, bg_mat in enumerate(self.bg_mats):
@@ -207,7 +208,10 @@ class HierarchicalBG(torch.nn.Module):
 
             emb = F.grid_sample(bg_mat, x, mode='bilinear', align_corners=self.align_corners)
             emb = emb.reshape(self.bg_rank, -1).T
-            embs.append(emb / 2**i)
+            mask = (1-roughness)*max_level >= i
+            embs.append(emb / 2**i * mask)
+            if i >= max_level:
+                break
         emb = sum(embs)
         return self.bg_net(emb)
 
@@ -253,7 +257,7 @@ class BackgroundRender(torch.nn.Module):
             F.interpolate(self.bg_mat.data, size=(bg_resolution*self.unwrap_fn.H_mul, bg_resolution*self.unwrap_fn.W_mul), mode='bilinear', align_corners=self.align_corners)
         )
         
-    def forward(self, viewdirs):
+    def forward(self, viewdirs, roughness):
         B = viewdirs.shape[0]
         x = self.unwrap_fn(viewdirs)
 
@@ -406,6 +410,7 @@ class MLPDiffuse(torch.nn.Module):
         # roughness = F.softplus(mlp_out[..., 10:11])
         roughness = torch.sigmoid(mlp_out[..., 10:11])
         f0 = torch.sigmoid(mlp_out[..., 11:14])
+        albedo = torch.sigmoid(mlp_out[..., 14:17])
         # ambient = torch.sigmoid(mlp_out[..., 9:10])
         ratio_diffuse = rgb[..., 9:10]
         if self.unlit_tint:
@@ -429,6 +434,7 @@ class MLPDiffuse(torch.nn.Module):
             ratio_diffuse = ratio_diffuse,
             reflectivity = reflectivity,
             ambient = ambient,
+            albedo=albedo,
             diffuse = diffuse,
             roughness = roughness,
             f0 = f0,

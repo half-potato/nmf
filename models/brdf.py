@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-from .render_modules import positional_encoding
+from .render_modules import positional_encoding, str2fn
 from icecream import ic
 
 def schlick(f0, n, l):
@@ -56,6 +56,7 @@ class GGXSampler:
         self.sampler = torch.quasirandom.SobolEngine(dimension=2)
 
     def sample(self, num_samples, refdirs, viewdir, normal, roughness):
+        # viewdir: (refdirs, 3)
         # viewdir: (B, 3)
         # normal: (B, 3)
         # roughness: B
@@ -88,6 +89,7 @@ class GGXSampler:
         sampleVec = tangent.unsqueeze(1) * H[..., 0:1] + bitangent.unsqueeze(1) * H[..., 1:2] + normal.unsqueeze(1) * H[..., 2:3]
         sampleVec = normalize(sampleVec)
         L = normalize(2.0 * (viewdir.unsqueeze(1) * sampleVec).sum(dim=-1, keepdim=True) * sampleVec - viewdir.unsqueeze(1))
+        L[:, 0] = refdirs.reshape(-1, 3)
         return L
 
 class SimplePBR(torch.nn.Module):
@@ -103,37 +105,42 @@ class PBR(torch.nn.Module):
     def __init__(self, in_channels):
         super().__init__()
 
-    def forward(self, V, L, N, features, matprop, mask):
-        # V: -viewdirs, the outgoing light direction
-        # L: incoming light direction. bounce_rays
-        # N: outward normal
+    def forward(self, incoming_light, V, L, N, features, matprop, mask):
+        # V: (B, 3)-viewdirs, the outgoing light direction
+        # L: (B, M, 3) incoming light direction. bounce_rays
+        # N: (B, 3) outward normal
         # matprop: dictionary of attributes
         # mask: mask for matprop
+        B, M, _ = L.shape
         half = normalize(L + V.reshape(-1, 1, 3))
 
         cos_lamb = (L * N).sum(dim=-1, keepdim=True).clip(min=1e-8)
         cos_view = (V.reshape(-1, 1, 3) * N).sum(dim=-1, keepdim=True).clip(min=1e-8)
-        cos_half = (half * N).sum(dim=-1, keepdim=True).clip(min=1e-8)
+        cos_half = (half * N).sum(dim=-1, keepdim=True)
 
         # compute the BRDF (bidirectional reflectance distribution function)
         # k_d = ratio_diffuse[bounce_mask].reshape(-1, 1, 1)
         # diffuse vs specular fraction
-        r = matprop['reflectivity'][mask]
+        # r = matprop['reflectivity'][mask]
         # 0.04 is the approximate value of F0 for non-metallic surfaces
-        f0 = (1-r)*0.04 + r*matprop['tint'][mask]
-        k_s = schlick(f0.reshape(-1, 1, 3), N.double(), half.double()).float()
-        k_d = 1-k_s
+        # f0 = (1-r)*0.04 + r*matprop['tint'][mask]
+
+        f0 = matprop['f0'][mask].reshape(-1, 1, 3)
+        # f0 = matprop['tint'][mask].reshape(-1, 1, 3)
+
+        k_s = schlick(f0, N.double(), half.double()).float()
 
         # diffuse vs specular intensity
-        f_d = 1/np.pi
+        f_d = matprop['reflectivity'].reshape(-1, 1, 1)/np.pi/M
+        k_d = 1-k_s
 
         # alph = 0*matprop['roughness'][mask].reshape(-1, 1, 1) + 0.1
         alph = matprop['roughness'][mask].reshape(-1, 1, 1)
         k = (alph+1)**2 / 8 # direct lighting
-        a2 = alph**4
+        a2 = alph**2
         # k = alph**2 / 2 # ibl
         # a2 = alph**2
-        D_ggx = (a2 / (np.pi * (cos_half**2*(a2-1)+1)**2).clip(min=1e-10))
+        D_ggx = a2 / np.pi / ((cos_half**2*(a2-1)+1)**2).clip(min=1e-8)
         G_schlick_smith = 1 / ((cos_view*(1-k)+k)*(cos_lamb*(1-k)+k)).clip(min=1e-8)
         
         # f_s = D_ggx.clip(min=0, max=1) * G_schlick_smith.clip(min=0, max=1) / (4 * cos_lamb * cos_view).clip(min=1e-8)
@@ -141,40 +148,85 @@ class PBR(torch.nn.Module):
 
         f_s = D_ggx * G_schlick_smith / 4
         # f_s = D_ggx / (4 * cos_lamb * cos_view).clip(min=1e-8)
-        # brdf = k_d*f_d + k_s*f_s
+
+
         # the diffuse light is covered by other components of the rendering equation
-        f_s = f_s / f_s.sum(dim=1, keepdim=True)
-        brdf = k_s*f_s
-        # ic(k_s.mean(dim=1).mean(dim=0))
+        # ic(k_d.mean(dim=1).mean(dim=0), k_s.mean(dim=1).mean(dim=0))
+        # brdf = k_d*f_d + k_s*f_s
+        albedo = matprop['albedo'][mask].reshape(-1, 1, 3)
+        brdf = k_d*f_d*albedo + k_s*f_s
+        # normalize probabilities so they sum to 1. the rgb dims represent the spectra in equal parts.
+        brdf = brdf / brdf.sum(dim=1, keepdim=True).sum(dim=2, keepdim=True)
+        # brdf = k_s * f_s
 
         # cos_refl = (noise_rays * refdirs[full_bounce_mask].reshape(-1, 1, 3)).sum(dim=-1, keepdim=True).clip(min=0)
         # cos_refl = (bounce_rays[..., 3:6] * refdirs[full_bounce_mask].reshape(-1, 1, 3)).sum(dim=-1, keepdim=True).clip(min=0)
         # ref_rough = roughness[bounce_mask].reshape(-1, 1)
         # phong shading?
         # ref_weight = (1-ref_rough) * cos_refl + ref_rough * cos_lamb
-        # ref_weight = ref_weight / (ref_weight.sum(dim=-1, keepdim=True)+1e-8)
+        ref_weight = brdf * cos_lamb
+        spec_color = (incoming_light * ref_weight).sum(dim=1)
+        return spec_color
 
-        # tinted_ref_rgb = (ref_weight * incoming_light).mean(dim=1).float()
+class MLPBRDFCos(torch.nn.Module):
+    def __init__(self, in_channels, feape=6, featureC=128, num_layers=2, activation='sigmoid'):
+        super().__init__()
+        self.in_mlpC = 2*feape*in_channels + in_channels + 4
+        self.feape = feape
+        if num_layers > 0:
+            self.mlp = torch.nn.Sequential(
+                torch.nn.Linear(self.in_mlpC, featureC),
+                # torch.nn.ReLU(inplace=True),
+                # torch.nn.Linear(featureC, featureC),
+                # torch.nn.BatchNorm1d(featureC),
+                *sum([[
+                        torch.nn.ReLU(inplace=True),
+                        torch.nn.Linear(featureC, featureC),
+                        # torch.nn.BatchNorm1d(featureC)
+                    ] for _ in range(num_layers)], []),
+                torch.nn.ReLU(inplace=True),
+                torch.nn.Linear(featureC, 3),
+                str2fn(activation)
+            )
+            # self.mlp.apply(self.init_weights)
+        else:
+            self.mlp = str2fn(activation)
 
-        # aden = (-bn*l[bounce_mask].reshape(-1, 1, 3)).sum(dim=-1, keepdim=True).clip(min=0)
-        # bden = (bn*bounce_rays[..., 3:6]).sum(dim=-1, keepdim=True).clip(min=0)
-        # denom = 1
-        # tinted_ref_rgb = (numer / (denom+1e-8) * incoming_light).mean(dim=1).float()
-        # tinted_ref_rgb = (numer / (denom+1e-8)).mean(dim=1).float()
-        # ic(k_s[:, 0], f_s[:, 0], D_ggx[:, 0], G_schlick_smith[:, 0]) 
+    def forward(self, incoming_light, V, L, N, features, matprop, mask):
+        roughness = matprop['roughness'][mask]
+        D = features.shape[-1]
+        n, m, _ = L.shape
+        features = features.reshape(n, 1, D).expand(n, m, D).reshape(-1, D)
+        eroughness = roughness.expand(n, m).reshape(-1, 1)
 
-        # tinted_ref_rgb = (brdf * incoming_light * cos_lamb).mean(dim=1).float()
-        ref_weight = (brdf * cos_lamb)
-        # ic(brdf.min(), brdf.max(), k_s.max(), f_s.max(), D_ggx.max(), G_schlick_smith.max(), ref_weight.max(), ref_weight.sum(dim=1).mean(dim=0))
-        # ref_weight = ref_weight / (ref_weight.sum(dim=1, keepdim=True).max(dim=2, keepdim=True).values+1e-8)
-        return ref_weight
+        B, M, _ = L.shape
+        half = normalize(L + V.reshape(-1, 1, 3))
+
+        cos_lamb = (L * N).sum(dim=-1, keepdim=True).clip(min=1e-8)
+        cos_view = (V.reshape(-1, 1, 3) * N).sum(dim=-1, keepdim=True).clip(min=1e-8).expand(n, m, 1)
+        cos_half = (half * N).sum(dim=-1, keepdim=True)
+
+        # ic(features.shape, eroughness.shape, cos_lamb.shape, cos_view.shape, cos_half.shape)
+        indata = [features, eroughness, cos_lamb.reshape(-1, 1), cos_view.reshape(-1, 1), cos_half.reshape(-1, 1)]
+        if self.feape > 0:
+            indata += [positional_encoding(features, self.feape)]
+
+        mlp_in = torch.cat(indata, dim=-1)
+        ref_weight = self.mlp(mlp_in).reshape(n, m, -1)
+
+        ref_weight = ref_weight / (ref_weight.sum(dim=1, keepdim=True).sum(dim=2, keepdim=True)+1e-8)
+        # ref_weight = torch.softmax(ref_weight, dim=1)
+        spec_color = (incoming_light * ref_weight).sum(dim=1)
+        return spec_color
+
 
 class MLPBRDF(torch.nn.Module):
-    def __init__(self, in_channels, v_encoder=None, n_encoder=None, l_encoder=None, feape=6, featureC=128, num_layers=2):
+    def __init__(self, in_channels, v_encoder=None, n_encoder=None, l_encoder=None, feape=6, featureC=128, num_layers=2, mul_ggx=False, activation='sigmoid'):
         super().__init__()
 
         self.in_channels = in_channels
-        self.in_mlpC = 2*feape*in_channels + in_channels
+        self.mul_ggx=False
+        self.in_mlpC = 2*feape*in_channels + in_channels + 1
         self.v_encoder = v_encoder
         self.n_encoder = n_encoder
         self.l_encoder = l_encoder
@@ -199,17 +251,17 @@ class MLPBRDF(torch.nn.Module):
                     ] for _ in range(num_layers)], []),
                 torch.nn.ReLU(inplace=True),
                 torch.nn.Linear(featureC, 3),
+                str2fn(activation)
             )
-            torch.nn.init.constant_(self.mlp[-1].bias, 0)
             # self.mlp.apply(self.init_weights)
         else:
-            self.mlp = torch.nn.Identity()
+            self.mlp = str2fn(activation)
 
     def init_weights(self, m):
         if isinstance(m, torch.nn.Linear):
             torch.nn.init.xavier_uniform_(m.weight, gain=np.sqrt(2))
 
-    def forward(self, V, L, N, features, matprop, mask):
+    def forward(self, incoming_light, V, L, N, features, matprop, mask):
         # V: (n, 3)-viewdirs, the outgoing light direction
         # L: (n, m, 3) incoming light direction. bounce_rays
         # N: (n, 1, 3) outward normal
@@ -220,7 +272,8 @@ class MLPBRDF(torch.nn.Module):
         D = features.shape[-1]
         n, m, _ = L.shape
         features = features.reshape(n, 1, D).expand(n, m, D).reshape(-1, D)
-        indata = [features]
+        eroughness = roughness.expand(n, m).reshape(-1, 1)
+        indata = [features, eroughness]
 
         V = V.reshape(n, 1, 3).expand(L.shape).reshape(-1, 3)
         N = N.expand(n, m, 3).reshape(-1, 3)
@@ -230,14 +283,26 @@ class MLPBRDF(torch.nn.Module):
         if self.feape > 0:
             indata += [positional_encoding(features, self.feape)]
         if self.v_encoder is not None:
-            indata += [self.v_encoder(V, roughness).reshape(B, -1), V]
+            indata += [self.v_encoder(V, eroughness).reshape(B, -1), V]
         if self.n_encoder is not None:
-            indata += [self.n_encoder(N, roughness).reshape(B, -1), N]
+            indata += [self.n_encoder(N, eroughness).reshape(B, -1), N]
         if self.l_encoder is not None:
-            indata += [self.l_encoder(L, roughness).reshape(B, -1), L]
+            indata += [self.l_encoder(L, eroughness).reshape(B, -1), L]
 
         mlp_in = torch.cat(indata, dim=-1)
-        ref_weight = self.mlp(mlp_in)
-        ref_weight = torch.softmax(ref_weight.reshape(n, m, -1), dim=1)
-        return ref_weight
+        ref_weight = self.mlp(mlp_in).reshape(n, m, -1)
+
+        if self.mul_ggx:
+            alph = matprop['roughness'][mask].reshape(-1, 1, 1)
+            half = normalize(L + V)
+            cos_half = (half * N).sum(dim=-1, keepdim=True).reshape(n, m, 1)
+            a2 = alph**2
+            D_ggx = a2 / np.pi / ((cos_half**2*(a2-1)+1)**2).clip(min=1e-8)
+
+            ref_weight = ref_weight*D_ggx
+
+        ref_weight = ref_weight / (ref_weight.sum(dim=1, keepdim=True).sum(dim=2, keepdim=True)+1e-8)
+        # ref_weight = torch.softmax(ref_weight, dim=1)
+        spec_color = (incoming_light * ref_weight).sum(dim=1)
+        return spec_color
 
