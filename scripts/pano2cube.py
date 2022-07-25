@@ -6,21 +6,23 @@ import numpy as np
 from tqdm import tqdm
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
+from pathlib import Path
 
 batch_size = 4096*500
 device = torch.device('cuda')
-epochs = 100
+epochs = 500
 
 # bg_module = render_modules.BackgroundRender(3, render_modules.PanoUnwrap(), bg_resolution=2*1024, featureC=128, num_layers=0)
 # bg_module = render_modules.BackgroundRender(3, render_modules.CubeUnwrap(), bg_resolution=2*1024, featureC=128, num_layers=0)
 tm = tonemap.SRGBTonemap()
 # bg_module = render_modules.HierarchicalBG(3, render_modules.CubeUnwrap(), bg_resolution=2*1024//4**5, num_levels=6, featureC=128, num_layers=0)
-bg_module = bg_modules.HierarchicalBG(3, bg_modules.CubeUnwrap(), bg_resolution=2*1024//2**4, num_levels=5, featureC=128, num_layers=0, activation='softplus', power=2)
+# bg_module = bg_modules.HierarchicalBG(3, bg_modules.CubeUnwrap(), bg_resolution=2048//4**4, num_levels=5, featureC=128, num_layers=0, activation='softplus', power=4)
+bg_module = bg_modules.HierarchicalCubeMap(3, bg_resolution=2048//2**5, num_levels=6, featureC=128, num_layers=0, activation='softplus', power=2)
 # bg_module = render_modules.MLPRender_FP(0, None, ish.ListISH([0,1,2,4,8,16]), -1, 256, 6)
 ic(bg_module)
 bg_module = bg_module.to(device)
 pano = imageio.imread("ninomaru_teien_4k.exr")
-optim = torch.optim.Adam(bg_module.parameters(), lr=0.80)
+optim = torch.optim.Adam(bg_module.parameters(), lr=0.30)
 # optim = torch.optim.Adam(bg_module.parameters(), lr=1.0)
 # optim = torch.optim.SGD(bg_module.parameters(), lr=0.5, momentum=0.99, weight_decay=0)
 # optim = torch.optim.Adam(bg_module.parameters(), lr=0.001)
@@ -89,7 +91,7 @@ for i in iter:
     ], dim=1)
     samp_vecs = vecs
     # roughness = 1e-8*torch.ones(theta.shape[0], device=device)
-    roughness = torch.ones(theta.shape[0], device=device)*0.1**(10*i/epochs+3)
+    roughness = torch.ones(theta.shape[0], device=device)*0.1**(10*i/100+3.0)
     # roughness = 99999*torch.ones(theta.shape[0], device=device)
     output = bg_module(samp_vecs, roughness)
     # viewdotnorm = torch.ones_like(theta).reshape(-1, 1)
@@ -113,7 +115,7 @@ for i in iter:
 #     bg_mat += bg_mat2 / (i+1)
 #     plt.imshow(F.softplus(bg_mat[0].permute(1, 2, 0)))
 #     plt.show()
-bg_module.save('log/cubed.png')
+bg_module.save(Path('log/cubed'))
 torch.save(bg_module.state_dict(), 'log/mats360_bg.th')
 # torch.save(bg_module.state_dict(), 'log/refmodule_mats360.th')
 

@@ -12,6 +12,7 @@ from dataLoader import dataset_dict
 import sys
 import hydra
 from omegaconf import OmegaConf
+from pathlib import Path
 
 # from torch.profiler import profile, record_function, ProfilerActivity
 
@@ -126,14 +127,14 @@ def reconstruction(args):
     bg_sd = torch.load('log/mats360_bg.th')
     from models import bg_modules, ish
     # bg_module = render_modules.HierarchicalBG(3, render_modules.CubeUnwrap(), bg_resolution=2*1024//2, num_levels=3, featureC=128, num_layers=0)
-    bg_module = bg_modules.HierarchicalBG(3, bg_modules.CubeUnwrap(), bg_resolution=2*1024//4**4, num_levels=5, featureC=128, num_layers=0, activation='softplus')
+    bg_module = bg_modules.HierarchicalCubeMap(3, bg_resolution=2048//2**5, num_levels=6, featureC=128, num_layers=0, activation='softplus', power=2)
     # bg_module = render_modules.BackgroundRender(3, render_modules.PanoUnwrap(), bg_resolution=2*1024, featureC=128, num_layers=0)
     bg_module.load_state_dict(bg_sd)
     tensorf.bg_module = bg_module
 
     tensorf = tensorf.to(device)
 
-    lr_bg = 0.03
+    lr_bg = 1e-5
     grad_vars = tensorf.get_optparam_groups(args.lr_init, args.lr_basis, lr_bg)
     if args.lr_decay_iters > 0:
         lr_factor = args.lr_decay_target_ratio**(1/args.lr_decay_iters)
@@ -222,7 +223,7 @@ def reconstruction(args):
                 optimizer.step()
                 photo_loss = loss.detach().item()
                 pbar.set_description(f'psnr={-10.0 * np.log(photo_loss) / np.log(10.0):.04f}')
-        tensorf.bg_module.save('test.png')
+        # tensorf.bg_module.save('test.png')
 
     if args.ckpt is None:
         space_optim = torch.optim.Adam(tensorf.parameters(), lr=0.02, betas=(0.9,0.99))
@@ -250,7 +251,7 @@ def reconstruction(args):
     scheduler1 = lr_scheduler.CosineAnnealingLR(optimizer, T_max=T_max)
     scheduler2 = lr_scheduler.ChainedScheduler([
             lr_scheduler.ConstantLR(optimizer, factor=0.25, total_iters=600000),
-            lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=30000, T_mult=1)
+            lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=10000, T_mult=1)
     ])
     scheduler = lr_scheduler.SequentialLR(optimizer, schedulers=[scheduler1, scheduler2], milestones=[3000])
     scheduler = lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=30000, T_mult=1)
@@ -274,7 +275,7 @@ def reconstruction(args):
                 alpha_train = rgba_train[..., 3]
             else:
                 alpha_train = None
-                
+
             if iteration <= params.num_bw_iters:
                 # convert rgb to bw
                 rgb_train = rgb_train[..., :1].expand(rgb_train.shape)
@@ -366,7 +367,7 @@ def reconstruction(args):
                                         compute_extra_metrics=False, render_mode=args.render_mode)
                 summary_writer.add_scalar('test/psnr', np.mean(PSNRs_test), global_step=iteration)
                 if tensorf.bg_module is not None:
-                    tensorf.bg_module.save('log/bg.png')
+                    tensorf.bg_module.save(Path('log/bg'))
                 if args.save_often:
                     tensorf.save(f'{logfolder}/{args.expname}_{iteration:06d}.th', args.model.arch)
 

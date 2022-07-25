@@ -241,7 +241,8 @@ class MLPDiffuse(torch.nn.Module):
             ], dim=-1)
             tint = sphere/2 - 0.5
         else:
-            tint = F.softplus(mlp_out[..., 3:6])
+            # tint = F.softplus(mlp_out[..., 3:6])
+            tint = torch.sigmoid(mlp_out[..., 3:6])
         # diffuse = rgb[..., :3]
         # tint = F.softplus(mlp_out[..., 3:6])
         diffuse = torch.sigmoid(mlp_out[..., :3])

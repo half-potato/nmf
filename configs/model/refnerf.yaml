@@ -12,7 +12,7 @@ arch:
   max_recurs: 0
   infinity_border: False
   enable_alpha_mask: false
-  appdim_noise_std: 0.25
+  appdim_noise_std: 0.50
 
   tonemap:
     # _target_: models.tonemap.HDRTonemap
@@ -23,8 +23,8 @@ arch:
     _partial_: True
     _target_: models.tensoRF.TensorVMSplit
     density_n_comp: 16
-    appearance_n_comp: 24
-    app_dim: 24
+    appearance_n_comp: 48
+    app_dim: 48
     step_ratio: 0.5
     density_res_multi: 1
     contract_space: False

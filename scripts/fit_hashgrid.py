@@ -24,11 +24,9 @@ device = torch.device('cuda')
 pano_paths = list(Path('./envmaps/').glob('*.png'))
 pano_paths = [Path('./ninomaru_teien_4k.exr')]
 hdr = True
-ish = ListISH([1,2,4,8,16]).to(device)
-# ish = RandRotISH(16, [1,2,8], [16]).to(device)
-# ish = RandISH(256, 10).to(device)
-ic(ish.dim())
-batch_size = 4096*50
+batch_size = 4096*1000
+ish = TrigHashGrid(3, 128, max_freq=2.0, level_dim=2048, M=2, num_per_level=2).to(device)
+ic(ish)
 
 # ish = RandISE(512, 32).to(device)
 # ish = FullISH(4).to(device)
@@ -39,7 +37,7 @@ pano_feat_dim = 27*3
 #  num_layers = 3
 num_layers = 6
 
-epochs = 500
+epochs = 1000
 
 num_panos = len(pano_paths)
 colors = []
@@ -91,11 +89,9 @@ def init_weights(m):
         torch.nn.init.xavier_uniform_(m.weight, gain=np.sqrt(2))
 
 mlp = torch.nn.Sequential(
-    torch.nn.Linear(ish.dim()+pano_feat_dim, featureC),
-    *sum([[
-            torch.nn.ReLU(inplace=True),
-            torch.nn.Linear(featureC, featureC, bias=False)
-        ] for _ in range(num_layers-2)], []),
+    torch.nn.Linear(ish.dim(), featureC),
+    torch.nn.ReLU(inplace=True),
+    torch.nn.Linear(featureC, featureC),
     torch.nn.ReLU(inplace=True),
     torch.nn.Linear(featureC, 3),
     torch.nn.Sigmoid()
@@ -129,7 +125,7 @@ mlp = torch.nn.Sequential(
 
 mlp.apply(init_weights)
 
-optim = torch.optim.Adam(mlp.parameters(), lr=5e-4)
+optim = torch.optim.Adam(list(ish.parameters()) + list(mlp.parameters()), lr=5e-3)
 
 class SimpleSampler:
     def __init__(self, total, batch):
@@ -148,7 +144,9 @@ class SimpleSampler:
         return ids
 
 sampler = SimpleSampler(N, batch_size)
-for i in tqdm(range(epochs)):
+iter = tqdm(range(epochs))
+scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optim, T_max=epochs)
+for i in iter:
     inds = sampler.nextids()
     samp = colors[inds]
     samp_vecs = vecs[inds % M]
@@ -158,8 +156,6 @@ for i in tqdm(range(epochs)):
 
     enc = ish(samp_vecs, roughness)
     enc = enc.reshape(batch_size, -1)
-    feats = get_features(inds)
-    enc = torch.cat([enc, feats], dim=-1)
     #  enc = torch.cat([enc, eval_sh_bases(4, samp_vecs)], dim=-1)
     output = mlp(enc)
 
@@ -170,6 +166,8 @@ for i in tqdm(range(epochs)):
     loss.backward()
     optim.step()
     optim.zero_grad()
+    scheduler.step()
+    iter.set_description(f'Loss: {loss.detach().item()}')
 ic(loss)
 
 # kappa = torch.tensor(20, device=device)
@@ -185,8 +183,6 @@ with torch.no_grad():
 
             enc = ish(samp_vecs, roughness).reshape(-1, ish.dim())
             #  enc = torch.cat([enc, eval_sh_bases(4, samp_vecs)], dim=-1)
-            feats = get_features(inds)
-            enc = torch.cat([enc, feats], dim=-1)
             output = mlp(enc)
 
             #  output = mlp(samp_vecs)
@@ -200,3 +196,4 @@ with torch.no_grad():
         pano = (pano*255).numpy().astype(np.uint8)
         pano = cv2.cvtColor(pano, cv2.COLOR_BGR2RGB)
         cv2.imwrite(f'fit_panos/pano{pind}.png', pano)
+

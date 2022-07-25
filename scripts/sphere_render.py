@@ -50,7 +50,7 @@ def main(cfg: DictConfig):
     bg_sd = torch.load('log/mats360_bg.th')
     from models import render_modules
     # bg_module = render_modules.HierarchicalBG(3, render_modules.CubeUnwrap(), bg_resolution=2*1024//4, num_levels=3, featureC=128, num_layers=0)
-    bg_module = bg_modules.HierarchicalBG(3, bg_modules.CubeUnwrap(), bg_resolution=2*1024//4**4, num_levels=5, featureC=128, num_layers=0, activation='softplus')
+    bg_module = bg_modules.HierarchicalCubeMap(3, bg_resolution=2048//2**5, num_levels=6, featureC=128, num_layers=0, activation='softplus', power=2)
     # bg_module = render_modules.BackgroundRender(3, render_modules.PanoUnwrap(), bg_resolution=2*1024, featureC=128, num_layers=0)
     bg_module.load_state_dict(bg_sd)
     tensorf.bg_module = bg_module

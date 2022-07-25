@@ -51,8 +51,16 @@ class NormalSampler:
         return noise_rays
 
 class GGXSampler:
-    def __init__(self) -> None:
+    def __init__(self, num_samples) -> None:
         self.sampler = torch.quasirandom.SobolEngine(dimension=2)
+        self.angs = self.sampler.draw(num_samples)
+
+    def draw(self, B, num_samples):
+        angs = self.angs.reshape(1, num_samples, 2).expand(B, num_samples, 2)
+        # add random offset
+        offset = torch.rand(B, 1, 2)
+        angs = (angs + offset) % 1
+        return angs
 
     def sample(self, num_samples, refdirs, viewdir, normal, roughness):
         # viewdir: (refdirs, 3)
@@ -62,9 +70,9 @@ class GGXSampler:
         device = normal.device
         B = normal.shape[0]
         # adapated from learnopengl.com
-        angs = self.sampler.draw(B*num_samples).to(device).reshape(B, num_samples, 2)
         # a = (roughness*roughness).reshape(B, 1).expand(B, num_samples).reshape(-1)
         a = (roughness**4).reshape(B, 1)#.expand(B, num_samples).reshape(-1)
+        angs = self.draw(B, num_samples).to(device)
 	    
         phi = 2.0 * math.pi * angs[..., 0]
         cosTheta2 = ((1.0 - angs[..., 1]) / (1.0 + (a - 1.0) * angs[..., 1]).clip(min=1e-8))
@@ -81,7 +89,7 @@ class GGXSampler:
         # note: it's free to expand
         z_up = torch.tensor([0.0, 0.0, 1.0], device=device).reshape(1, 3).expand(B, 3)
         x_up = torch.tensor([1.0, 0.0, 0.0], device=device).reshape(1, 3).expand(B, 3)
-        up = torch.where(normal[:, 2:3] < 0.999, z_up, x_up)
+        up = torch.where(normal[:, 2:3] < 0.9999, z_up, x_up)
         tangent = torch.linalg.cross(up, normal)
         bitangent = torch.linalg.cross(normal, tangent)
 
@@ -297,7 +305,11 @@ class MLPBRDF(torch.nn.Module):
         cos_half = (half * N).sum(dim=-1, keepdim=True)
 
         # ic(features.shape, eroughness.shape, cos_lamb.shape, cos_view.shape, cos_half.shape)
-        indata = [features, cos_lamb.reshape(-1, 1), cos_view.reshape(-1, 1), cos_half.reshape(-1, 1)]
+        # a = 0.2
+        # v = a/(cos_half.reshape(-1, 1).abs()+a)
+        v = cos_half.reshape(-1, 1).abs()
+        indata = [features, cos_lamb.reshape(-1, 1), cos_view.reshape(-1, 1), v]
+        # indata = [features]
         if self.use_roughness:
             indata.append(eroughness)
 
