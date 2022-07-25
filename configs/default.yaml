@@ -4,7 +4,7 @@ render_mode: center
 defaults:
   - _self_
   - dataset: counter
-  - model: refmodel
+  - model: refnerf
 basedir: ./log
 filter_rays: false
 batch_size: 4096
@@ -34,3 +34,4 @@ lr_upsample_reset: 1
 fp16: false
 n_bg_iters: 1000
 start_density: 1e-4
+save_often: false

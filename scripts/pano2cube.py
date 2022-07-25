@@ -1,9 +1,10 @@
-from models import render_modules, tonemap, ish
+from models import render_modules, tonemap, ish, bg_modules
 import imageio
 from icecream import ic
 import torch
 import numpy as np
 from tqdm import tqdm
+import torch.nn.functional as F
 
 batch_size = 4096*500
 device = torch.device('cuda')
@@ -12,16 +13,18 @@ epochs = 500
 # bg_module = render_modules.BackgroundRender(3, render_modules.PanoUnwrap(), bg_resolution=2*1024, featureC=128, num_layers=0)
 # bg_module = render_modules.BackgroundRender(3, render_modules.CubeUnwrap(), bg_resolution=2*1024, featureC=128, num_layers=0)
 tm = tonemap.SRGBTonemap()
-bg_module = render_modules.HierarchicalBG(3, render_modules.CubeUnwrap(), bg_resolution=2*1024//4**5, num_levels=6, featureC=128, num_layers=0)
+# bg_module = render_modules.HierarchicalBG(3, render_modules.CubeUnwrap(), bg_resolution=2*1024//4**5, num_levels=6, featureC=128, num_layers=0)
+bg_module = bg_modules.HierarchicalBG(3, bg_modules.CubeUnwrap(), bg_resolution=2*1024//4**4, num_levels=5, featureC=128, num_layers=0, activation='softplus')
 # bg_module = render_modules.MLPRender_FP(0, None, ish.ListISH([0,1,2,4,8,16]), -1, 256, 6)
 ic(bg_module)
 bg_module = bg_module.to(device)
 pano = imageio.imread("ninomaru_teien_4k.exr")
-# optim = torch.optim.Adam(bg_module.parameters(), lr=0.30)
-optim = torch.optim.Adam(bg_module.parameters(), lr=0.1)
-# optim = torch.optim.SGD(bg_module.parameters(), lr=1.0, momentum=0.99, weight_decay=5e-4)
+optim = torch.optim.Adam(bg_module.parameters(), lr=0.30)
+# optim = torch.optim.Adam(bg_module.parameters(), lr=1.0)
+# optim = torch.optim.SGD(bg_module.parameters(), lr=0.5, momentum=0.99, weight_decay=0)
 # optim = torch.optim.Adam(bg_module.parameters(), lr=0.001)
-scheduler = torch.optim.lr_scheduler.StepLR(optim, step_size=5, gamma=0.94)
+# scheduler = torch.optim.lr_scheduler.StepLR(optim, step_size=5, gamma=0.94)
+scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optim, T_max=epochs)
 # ic(bg_module.bg_mats[-1].shape, pano.shape)
 
 H, W, C = pano.shape
@@ -39,6 +42,7 @@ colors = torch.tensor(pano, dtype=torch.float32, device=device)
 
 # bg_module.bg_mat = torch.nn.Parameter(torch.flip(colors, dims=[0]).permute(2, 0, 1).reshape(1, C, H, W))
 # bg_module.bg_mat = torch.nn.Parameter(colors.permute(2, 0, 1).reshape(1, C, H, W))
+col_mat = colors.permute(2, 0, 1).unsqueeze(0)
 colors = colors.reshape(-1, 3)
 N = colors.shape[0]
 # ic(bg_module.bg_mats[-1].numel(), N)
@@ -67,8 +71,10 @@ for i in iter:
     samp = colors[inds]
     # theta = (rows[inds]+0.5+0*torch.rand(batch_size, device=device))/H * np.pi - np.pi/2
     # phi = -(cols[inds]+0.5+0*torch.rand(batch_size, device=device))/W * 2*np.pi - np.pi
-    theta = (rows[inds]+torch.rand(batch_size, device=device))/H * np.pi - np.pi/2
-    phi = -(cols[inds]+torch.rand(batch_size, device=device))/W * 2*np.pi - np.pi
+    brows = rows[inds]#+torch.rand(batch_size, device=device)
+    bcols = cols[inds]#+torch.rand(batch_size, device=device)
+    theta = brows/(H-1) * np.pi - np.pi/2
+    phi = -bcols/(W-1) * 2*np.pi - np.pi
 
     # TODO REMOVE
     # theta = (rows[inds]+0.5+0*torch.rand(batch_size, device=device))/H * np.pi - np.pi/2
@@ -81,7 +87,8 @@ for i in iter:
         -torch.sin(theta),
     ], dim=1)
     samp_vecs = vecs
-    output = bg_module(samp_vecs)
+    roughness = torch.zeros(theta.shape[0], device=device)
+    output = bg_module(samp_vecs, roughness)
     # viewdotnorm = torch.ones_like(theta).reshape(-1, 1)
     # roughness = 0.01*torch.ones_like(theta).reshape(-1, 1)
     # output = bg_module(pts=torch.zeros_like(vecs), viewdirs=None, features=None, refdirs=samp_vecs, roughness=roughness, viewdotnorm=viewdotnorm)

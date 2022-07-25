@@ -12,6 +12,10 @@ def schlick(f0, n, l):
 def normalize(x):
     return x / (torch.linalg.norm(x, dim=-1, keepdim=True)+1e-8)
 
+def ggx_dist(NdotH, roughness):
+    a2 = roughness**2
+    return a2 / np.pi / ((NdotH**2*(a2-1)+1)**2).clip(min=1e-8)
+
 class NormalSampler:
     def __init__(self) -> None:
         pass
@@ -21,11 +25,6 @@ class NormalSampler:
         # slope = 6
         # TODO REMOVE
         return roughness
-        return (roughness/8).clip(max=0.3)
-        slope = 6
-        zero_point = 0.001
-        offset = math.exp(slope*(zero_point-1))
-        return torch.exp(slope*(roughness-1)).clip(min=0, max=1) - offset
 
     def sample(self, num_samples, refdirs, viewdir, normal, roughness):
         device = normal.device
@@ -90,16 +89,28 @@ class GGXSampler:
         sampleVec = normalize(sampleVec)
         L = normalize(2.0 * (viewdir.unsqueeze(1) * sampleVec).sum(dim=-1, keepdim=True) * sampleVec - viewdir.unsqueeze(1))
         L[:, 0] = refdirs.reshape(-1, 3)
-        return L
+
+        # calculate mipval, which will be used to calculate the mip level
+        half = normalize(L + viewdir.reshape(-1, 1, 3))
+
+        NdotH = (half * normal.reshape(-1, 1, 3)).sum(dim=-1).clip(min=1e-8)
+        HdotV = (half * viewdir.reshape(-1, 1, 3)).sum(dim=-1).clip(min=1e-8)
+        D = ggx_dist(NdotH, roughness.reshape(-1, 1))
+        pdf = D * NdotH / 4 / HdotV
+        mipval = 1 / (num_samples * pdf + 1e-6)
+        # ic(mipval.mean(dim=1).squeeze(), roughness)
+        # ic(mipval[0, 0], D[0, 0], NdotH[0, 0], HdotV[0, 0])
+
+        return L, mipval
 
 class SimplePBR(torch.nn.Module):
     def __init__(self, in_channels):
         super().__init__()
 
-    def forward(self, V, L, N, features, matprop, mask):
+    def forward(self, incoming_light, V, L, N, features, matprop, mask):
         cos_lamb = (L * N).sum(dim=-1, keepdim=True).clip(min=1e-8)
         ref_weight = cos_lamb / cos_lamb.sum(dim=1, keepdim=True)
-        return ref_weight
+        return (ref_weight*incoming_light).sum(dim=1)
 
 class PBR(torch.nn.Module):
     def __init__(self, in_channels):
@@ -140,7 +151,7 @@ class PBR(torch.nn.Module):
         a2 = alph**2
         # k = alph**2 / 2 # ibl
         # a2 = alph**2
-        D_ggx = a2 / np.pi / ((cos_half**2*(a2-1)+1)**2).clip(min=1e-8)
+        D_ggx = ggx_dist(cos_half, alph)
         G_schlick_smith = 1 / ((cos_view*(1-k)+k)*(cos_lamb*(1-k)+k)).clip(min=1e-8)
         
         # f_s = D_ggx.clip(min=0, max=1) * G_schlick_smith.clip(min=0, max=1) / (4 * cos_lamb * cos_view).clip(min=1e-8)
@@ -169,9 +180,10 @@ class PBR(torch.nn.Module):
         return spec_color
 
 class MLPBRDFCos(torch.nn.Module):
-    def __init__(self, in_channels, feape=6, featureC=128, num_layers=2, activation='sigmoid'):
+    def __init__(self, in_channels, feape=6, featureC=128, num_layers=2, activation='sigmoid', lr=1e-3):
         super().__init__()
         self.in_mlpC = 2*feape*in_channels + in_channels + 4
+        self.lr = lr
         self.feape = feape
         if num_layers > 0:
             self.mlp = torch.nn.Sequential(
@@ -214,22 +226,25 @@ class MLPBRDFCos(torch.nn.Module):
         mlp_in = torch.cat(indata, dim=-1)
         ref_weight = self.mlp(mlp_in).reshape(n, m, -1)
 
-        ref_weight = ref_weight / (ref_weight.sum(dim=1, keepdim=True).sum(dim=2, keepdim=True)+1e-8)
+        ref_weight = ref_weight / m
         # ref_weight = torch.softmax(ref_weight, dim=1)
         spec_color = (incoming_light * ref_weight).sum(dim=1)
         return spec_color
 
 
 class MLPBRDF(torch.nn.Module):
-    def __init__(self, in_channels, v_encoder=None, n_encoder=None, l_encoder=None, feape=6, featureC=128, num_layers=2, mul_ggx=False, activation='sigmoid'):
+    def __init__(self, in_channels, v_encoder=None, n_encoder=None, l_encoder=None, feape=6, featureC=128, num_layers=2,
+                 mul_ggx=False, activation='sigmoid', use_roughness=False, lr=1e-4):
         super().__init__()
 
         self.in_channels = in_channels
-        self.mul_ggx=False
-        self.in_mlpC = 2*feape*in_channels + in_channels + 1
+        self.use_roughness = use_roughness
+        self.mul_ggx = mul_ggx
+        self.in_mlpC = 2*feape*in_channels + in_channels + (1 if use_roughness else 0) + 3
         self.v_encoder = v_encoder
         self.n_encoder = n_encoder
         self.l_encoder = l_encoder
+        self.lr = lr
         if v_encoder is not None:
             self.in_mlpC += self.v_encoder.dim() + 3
         if n_encoder is not None:
@@ -253,7 +268,8 @@ class MLPBRDF(torch.nn.Module):
                 torch.nn.Linear(featureC, 3),
                 str2fn(activation)
             )
-            # self.mlp.apply(self.init_weights)
+            torch.nn.init.constant_(self.mlp[-2].bias, 0)
+            self.mlp.apply(self.init_weights)
         else:
             self.mlp = str2fn(activation)
 
@@ -273,7 +289,17 @@ class MLPBRDF(torch.nn.Module):
         n, m, _ = L.shape
         features = features.reshape(n, 1, D).expand(n, m, D).reshape(-1, D)
         eroughness = roughness.expand(n, m).reshape(-1, 1)
-        indata = [features, eroughness]
+        indata = [features]
+        half = normalize(L + V.reshape(-1, 1, 3))
+
+        cos_lamb = (L * N).sum(dim=-1, keepdim=True).clip(min=1e-8)
+        cos_view = (V.reshape(-1, 1, 3) * N).sum(dim=-1, keepdim=True).clip(min=1e-8).expand(n, m, 1)
+        cos_half = (half * N).sum(dim=-1, keepdim=True)
+
+        # ic(features.shape, eroughness.shape, cos_lamb.shape, cos_view.shape, cos_half.shape)
+        indata = [features, cos_lamb.reshape(-1, 1), cos_view.reshape(-1, 1), cos_half.reshape(-1, 1)]
+        if self.use_roughness:
+            indata.append(eroughness)
 
         V = V.reshape(n, 1, 3).expand(L.shape).reshape(-1, 3)
         N = N.expand(n, m, 3).reshape(-1, 3)
@@ -301,7 +327,8 @@ class MLPBRDF(torch.nn.Module):
 
             ref_weight = ref_weight*D_ggx
 
-        ref_weight = ref_weight / (ref_weight.sum(dim=1, keepdim=True).sum(dim=2, keepdim=True)+1e-8)
+        # ref_weight = ref_weight / (ref_weight.sum(dim=1, keepdim=True).mean(dim=2, keepdim=True)+1e-8)
+        ref_weight = ref_weight / m
         # ref_weight = torch.softmax(ref_weight, dim=1)
         spec_color = (incoming_light * ref_weight).sum(dim=1)
         return spec_color

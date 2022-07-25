@@ -2,12 +2,13 @@ import os
 from torch.nn.modules import activation
 from tqdm.auto import tqdm
 from models.tensor_nerf import TensorNeRF
+from models.brdf import PBR, SimplePBR
 from renderer import *
 from utils import *
 from torch.utils.tensorboard import SummaryWriter
 import datetime
 from omegaconf import DictConfig, OmegaConf
-from models import render_modules
+from models import bg_modules
 
 from dataLoader import dataset_dict
 import sys
@@ -43,19 +44,20 @@ def main(cfg: DictConfig):
     # ckpt['config']['bg_module']['bg_resolution'] = 256
     # del ckpt['state_dict']['diffuse_module.mlp.6.weight']
     # del ckpt['state_dict']['diffuse_module.mlp.6.bias']
+    cfg.model.arch.rf.appearance_n_comp = 48
+    cfg.model.arch.rf.app_dim = 48
     tensorf = hydra.utils.instantiate(cfg.model.arch)(aabb=torch.tensor([[-1.0, -1.0, -1.0], [1.0, 1.0, 1.0]]), grid_size=[128]*3)
     bg_sd = torch.load('log/mats360_bg.th')
     from models import render_modules
     # bg_module = render_modules.HierarchicalBG(3, render_modules.CubeUnwrap(), bg_resolution=2*1024//4, num_levels=3, featureC=128, num_layers=0)
-    bg_module = render_modules.HierarchicalBG(3, render_modules.CubeUnwrap(), bg_resolution=2*1024//4**5, num_levels=6, featureC=128, num_layers=0, activation='identity')
+    bg_module = bg_modules.HierarchicalBG(3, bg_modules.CubeUnwrap(), bg_resolution=2*1024//4**4, num_levels=5, featureC=128, num_layers=0, activation='softplus')
     # bg_module = render_modules.BackgroundRender(3, render_modules.PanoUnwrap(), bg_resolution=2*1024, featureC=128, num_layers=0)
     bg_module.load_state_dict(bg_sd)
     tensorf.bg_module = bg_module
+    tensorf.brdf = SimplePBR(0)
     tensorf.rf.set_smoothing(1.5)
     tensorf = tensorf.to(device)
     ic(tensorf)
-
-
 
     H, W = tensorf.rf.density_plane[0].shape[-2:]
     C = tensorf.rf.density_plane[0].shape[1]
@@ -166,7 +168,7 @@ def main(cfg: DictConfig):
             # """
             app_features = tensorf.rf.compute_appfeature(xyz)
 
-            app_features = (app_features + torch.randn_like(app_features) * tensorf.appdim_noise_std)
+            # app_features = (app_features + torch.randn_like(app_features) * tensorf.appdim_noise_std)
 
             p_norm = tensorf.normal_module(xyz, app_features)
 
@@ -187,7 +189,7 @@ def main(cfg: DictConfig):
             tint_loss = ((tint-rgb)**2).sum()
             diffuse_loss = (diffuse[..., 0]-0)**2 + (diffuse[..., 1]-0)**2 + (diffuse[..., 2]-0)**2
             property_loss = (matprop['refraction_index'] - 1.5)**2 + (matprop['reflectivity'] - 0.00)**2 + (matprop['ratio_diffuse'] - 0.10)**2 + (matprop['ambient'] + 0.1)**2 + \
-                            (matprop['roughness'] - 0.1)**2
+                            (matprop['roughness'] - 0.5)**2
             app_loss = tint_loss.mean() + diffuse_loss.mean() + property_loss.mean()
             loss = 1e-4*app_loss + world_loss
             optim.zero_grad()

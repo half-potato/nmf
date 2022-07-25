@@ -109,26 +109,27 @@ def reconstruction(args):
     reso_cur = N_to_reso(params.N_voxel_init, aabb)
     nSamples = min(args.nSamples, cal_n_samples(reso_cur,args.step_ratio))
 
+    tensorf = hydra.utils.instantiate(args.model.arch)(aabb=aabb, grid_size=reso_cur)
     if args.ckpt is not None:
         ckpt = torch.load(args.ckpt)
-        tensorf = TensorNeRF.load(ckpt).to(device)
-    else:
-        tensorf = hydra.utils.instantiate(args.model.arch)(aabb=aabb, grid_size=reso_cur).to(device)
-    tensorf = hydra.utils.instantiate(args.model.arch)(aabb=aabb, grid_size=reso_cur)
+        # tensorf = TensorNeRF.load(ckpt)
+        # TODO REMOVE PRIORITY
+        tensorf2 = TensorNeRF.load(ckpt, strict=False)
+        tensorf.normal_module = tensorf2.normal_module
+        tensorf.rf = tensorf2.rf
+        tensorf.diffuse_module = tensorf2.diffuse_module
+        # TODO REMOVE PRIORITY
+        grid_size = N_to_reso(params.N_voxel_final, tensorf.rf.aabb)
+        tensorf.rf.update_stepSize(grid_size)
+        nSamples = min(args.nSamples, cal_n_samples(grid_size,args.step_ratio))
     # TODO REMOVE
     bg_sd = torch.load('log/mats360_bg.th')
-    from models import render_modules, ish
+    from models import bg_modules, ish
     # bg_module = render_modules.HierarchicalBG(3, render_modules.CubeUnwrap(), bg_resolution=2*1024//2, num_levels=3, featureC=128, num_layers=0)
-    bg_module = render_modules.HierarchicalBG(3, render_modules.CubeUnwrap(), bg_resolution=2*1024//4**5, num_levels=6, featureC=128, num_layers=0, activation='clamp')
+    bg_module = bg_modules.HierarchicalBG(3, bg_modules.CubeUnwrap(), bg_resolution=2*1024//4**4, num_levels=5, featureC=128, num_layers=0, activation='softplus')
     # bg_module = render_modules.BackgroundRender(3, render_modules.PanoUnwrap(), bg_resolution=2*1024, featureC=128, num_layers=0)
     bg_module.load_state_dict(bg_sd)
     tensorf.bg_module = bg_module
-
-    # TODO REMOVE
-    # ref_sd = torch.load('log/refmodule_mats360.th')
-    # ref_module = render_modules.MLPRender_FP(0, None, ish.ListISH([0,1,2,4,8,16]), -1, 256, 6)
-    # ref_module.load_state_dict(ref_sd)
-    # tensorf.ref_module = ref_module
 
     tensorf = tensorf.to(device)
 
@@ -223,23 +224,24 @@ def reconstruction(args):
                 pbar.set_description(f'psnr={-10.0 * np.log(photo_loss) / np.log(10.0):.04f}')
         tensorf.bg_module.save('test.png')
 
-    space_optim = torch.optim.Adam(tensorf.parameters(), lr=0.02, betas=(0.9,0.99))
-    pbar = tqdm(range(500))
-    for _ in pbar:
-        xyz = torch.rand(5000, 3, device=device)*2-1
-        feat = tensorf.rf.compute_densityfeature(xyz)
-        sigma_feat = tensorf.feature2density(feat)
+    if args.ckpt is None:
+        space_optim = torch.optim.Adam(tensorf.parameters(), lr=0.02, betas=(0.9,0.99))
+        pbar = tqdm(range(500))
+        for _ in pbar:
+            xyz = torch.rand(5000, 3, device=device)*2-1
+            feat = tensorf.rf.compute_densityfeature(xyz)
+            sigma_feat = tensorf.feature2density(feat)
 
-        # sigma = 1-torch.exp(-sigma_feat * 0.025 * 25)
-        sigma = 1-torch.exp(-sigma_feat)
-        # sigma = sigma_feat
-        # loss = (sigma-torch.rand_like(sigma)*args.start_density).abs().mean()
-        loss = (sigma-args.start_density).abs().mean()
-        # loss = (-sigma[mask].clip(max=1).sum() + sigma[~mask].clip(min=1e-8).sum())
-        pbar.set_description(f"Mean sigma: {sigma.detach().mean().item():.06f}")
-        space_optim.zero_grad()
-        loss.backward()
-        space_optim.step()
+            # sigma = 1-torch.exp(-sigma_feat * 0.025 * 25)
+            sigma = 1-torch.exp(-sigma_feat)
+            # sigma = sigma_feat
+            # loss = (sigma-torch.rand_like(sigma)*args.start_density).abs().mean()
+            loss = (sigma-args.start_density).abs().mean()
+            # loss = (-sigma[mask].clip(max=1).sum() + sigma[~mask].clip(min=1e-8).sum())
+            pbar.set_description(f"Mean sigma: {sigma.detach().mean().item():.06f}")
+            space_optim.zero_grad()
+            loss.backward()
+            space_optim.step()
 
 
     pbar = tqdm(range(args.n_iters), miniters=args.progress_refresh_rate, file=sys.stdout)
@@ -365,6 +367,8 @@ def reconstruction(args):
                 summary_writer.add_scalar('test/psnr', np.mean(PSNRs_test), global_step=iteration)
                 if tensorf.bg_module is not None:
                     tensorf.bg_module.save('log/bg.png')
+                if args.save_often:
+                    tensorf.save(f'{logfolder}/{args.expname}_{iteration:06d}.th', args.model.arch)
 
 
             if iteration in params.bounce_iter_list:

@@ -27,7 +27,7 @@ class TensorVMSplit(TensorBase):
         self.align_corners = False
 
         self.density_plane, self.density_line = self.init_one_svd(self.density_n_comp, [int(self.density_res_multi*g) for g in self.grid_size], 0.1, -0)
-        self.app_plane, self.app_line = self.init_one_svd(self.app_n_comp, self.grid_size, 1.0, 0)
+        self.app_plane, self.app_line = self.init_one_svd(self.app_n_comp, self.grid_size, 0.1, 0)
         m = sum(self.app_n_comp)
         self.basis_mat = torch.nn.Linear(m, self.app_dim, bias=False)
         self.dbasis_mat = torch.nn.Linear(sum(self.density_n_comp), 1, bias=False)

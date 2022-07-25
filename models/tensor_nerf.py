@@ -215,19 +215,19 @@ class TensorNeRF(torch.nn.Module):
 
     def get_optparam_groups(self, lr_init_spatial=0.02, lr_init_network=0.001, lr_bg=0.01, lr_scale=1):
         grad_vars = []
-        grad_vars += self.rf.get_optparam_groups(lr_init_spatial, lr_init_network)
         # TODO REMOVE
+        # grad_vars += self.rf.get_optparam_groups(lr_init_spatial, lr_init_network)
+        # if isinstance(self.normal_module, torch.nn.Module):
+        #     grad_vars += [{'params': self.normal_module.parameters(),
+        #                    'lr': self.normal_module.lr*lr_scale}]
         if self.ref_module is not None:
             grad_vars += [{'params': list(self.ref_module.parameters()), 'lr': lr_scale*self.ref_module.lr}]
-        if isinstance(self.normal_module, torch.nn.Module):
-            grad_vars += [{'params': self.normal_module.parameters(),
-                           'lr': self.normal_module.lr*lr_scale}]
         if isinstance(self.diffuse_module, torch.nn.Module):
             grad_vars += [{'params': self.diffuse_module.parameters(),
                            'lr': lr_init_network}]
         if isinstance(self.brdf, torch.nn.Module):
             grad_vars += [{'params': self.brdf.parameters(),
-                           'lr': lr_init_network}]
+                           'lr': self.brdf.lr}]
         # TODO REMOVE
         # if hasattr(self, 'bg_module') and isinstance(self.bg_module, torch.nn.Module):
         #     grad_vars += [{'params': self.bg_module.parameters(),
@@ -541,7 +541,7 @@ class TensorNeRF(torch.nn.Module):
 
     def render_just_bg(self, rays_chunk, roughness, white_bg=True):
         viewdirs = rays_chunk[:, 3:6]
-        bg = self.bg_module(viewdirs[:, :], roughness, max_level=4)
+        bg = self.bg_module(viewdirs[:, :], roughness)
         return bg.reshape(-1, 3)
 
     def forward(self, rays_chunk, focal, recur=0, init_refraction_index=torch.tensor(1.0), override_near=None, output_alpha=None, white_bg=True, is_train=False, ndc_ray=False, N_samples=-1):
@@ -677,8 +677,7 @@ class TensorNeRF(torch.nn.Module):
                 xyz_normed[app_mask], viewdirs[app_mask], app_features)
             # diffuse = diffuse.type(rgb.dtype)
 
-            if self.appdim_noise_std > 0:
-                app_features = (1-self.appdim_noise_std) * (app_features + torch.randn_like(app_features) * self.appdim_noise_std)
+            noise_app_features = (app_features + torch.randn_like(app_features) * self.appdim_noise_std)
 
             # interpolate between the predicted and world normals
             if self.normal_module is not None:
@@ -750,7 +749,7 @@ class TensorNeRF(torch.nn.Module):
                 viewdotnorm = (viewdirs[app_mask]*L).sum(dim=-1, keepdim=True)
                 ref_col = self.ref_module(
                     xyz_normed[app_mask], viewdirs[app_mask],
-                    app_features, refdirs=refdirs,
+                    noise_app_features, refdirs=refdirs,
                     roughness=roughness, viewdotnorm=viewdotnorm)
                 reflect_rgb = tint * ref_col
                 debug[app_mask] += ref_col
@@ -825,7 +824,7 @@ class TensorNeRF(torch.nn.Module):
                     # ray_noise = self.roughness2noisestd(roughness[bounce_mask].reshape(-1, 1, 1)) * torch.normal(0, 1, (N, num_roughness_rays, 3), device=device)
                     # diffuse_noise = ray_noise / (torch.linalg.norm(ray_noise, dim=-1, keepdim=True)+1e-8)
                     # noise_rays = self.sampler.sample(num_roughness_rays, V[bounce_mask].detach(), outward.detach(), roughness[bounce_mask].detach())
-                    noise_rays = self.sampler.sample(num_roughness_rays, brefdirs, V[bounce_mask], outward, roughness[bounce_mask])
+                    noise_rays, mipval = self.sampler.sample(num_roughness_rays, brefdirs, V[bounce_mask], outward, roughness[bounce_mask])
                     bounce_rays = torch.cat([
                         xyz_sampled[full_bounce_mask][..., :3].reshape(-1, 1, 3).expand(noise_rays.shape),
                         noise_rays,
@@ -841,10 +840,9 @@ class TensorNeRF(torch.nn.Module):
 
                     incoming_light = reflect_data['rgb_map'].reshape(-1, num_roughness_rays, 3).mean(dim=1)
                     """
-                    eroughness = roughness[bounce_mask].reshape(-1, 1).expand(N, num_roughness_rays).reshape(-1, 1)
-                    incoming_light = self.render_just_bg(bounce_rays.reshape(-1, D), eroughness).reshape(-1, num_roughness_rays, 3)
+                    incoming_light = self.render_just_bg(bounce_rays.reshape(-1, D), mipval).reshape(-1, num_roughness_rays, 3)
+                    tinted_ref_rgb = self.brdf(incoming_light, V[bounce_mask], bounce_rays[..., 3:6], outward.reshape(-1, 1, 3), noise_app_features[bounce_mask], matprop, bounce_mask)
 
-                    tinted_ref_rgb = self.brdf(incoming_light, V[bounce_mask], bounce_rays[..., 3:6], outward.reshape(-1, 1, 3), app_features[bounce_mask], matprop, bounce_mask)
 
                     # tinted_ref_rgb = incoming_light.mean(dim=1)
                     debug[full_bounce_mask] += tinted_ref_rgb
@@ -860,7 +858,7 @@ class TensorNeRF(torch.nn.Module):
                     viewdotnorm = (viewdirs[inv_full_bounce_mask]*L[~bounce_mask]).sum(dim=-1, keepdim=True)
                     ref_col = self.ref_module(
                         xyz_normed[inv_full_bounce_mask], viewdirs[inv_full_bounce_mask],
-                        app_features[~bounce_mask], refdirs=refdirs[~bounce_mask],
+                        noise_app_features[~bounce_mask], refdirs=refdirs[~bounce_mask],
                         roughness=roughness[~bounce_mask], viewdotnorm=viewdotnorm)
                     reflect_rgb[~bounce_mask] = tint * ref_col
                     debug[inv_full_bounce_mask] += ref_col
