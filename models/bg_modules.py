@@ -60,10 +60,11 @@ class HierarchicalBG(torch.nn.Module):
         super().__init__()
         self.bg_resolution = bg_resolution
         self.num_levels = num_levels
-        self.power = 4
+        self.power = power
+        ic([bg_resolution*self.power**i for i in range(num_levels)])
         self.bg_mats = nn.ParameterList([
             # nn.Parameter(0.5 * torch.rand((1, bg_rank, self.power**i * bg_resolution*unwrap_fn.H_mul, self.power**i * bg_resolution*unwrap_fn.W_mul)))
-            nn.Parameter(0.5 * torch.ones((1, bg_rank, self.power**i * bg_resolution*unwrap_fn.H_mul, self.power**i * bg_resolution*unwrap_fn.W_mul)))
+            nn.Parameter(0.1 * torch.ones((1, bg_rank, self.power**i * bg_resolution*unwrap_fn.H_mul, self.power**i * bg_resolution*unwrap_fn.W_mul)))
             for i in range(num_levels)])
         self.unwrap_fn = unwrap_fn
         self.bg_rank = bg_rank
@@ -90,7 +91,7 @@ class HierarchicalBG(torch.nn.Module):
         bg_mats = []
         for i in range(self.num_levels):
             bg_mat = F.interpolate(self.bg_mats[i].data, size=(bg_resolution*self.unwrap_fn.H_mul, bg_resolution*self.unwrap_fn.W_mul), mode='bilinear', align_corners=self.align_corners)
-            bg_mat = bg_mat / 2**i
+            bg_mat = bg_mat / (i+1)
             bg_mats.append(bg_mat)
         bg_mat = sum(bg_mats)
         im = (255*(self.bg_net(bg_mat)).clamp(0, 1)).short().permute(0, 2, 3, 1).squeeze(0)
@@ -109,8 +110,8 @@ class HierarchicalBG(torch.nn.Module):
         max_level = self.num_levels if max_level is None else max_level
         res = self.bg_mats[-1].shape[-2]
         saTexel = 4 * math.pi / (6*res*res)
-        miplevel = torch.log(saSample / saTexel) / math.log(self.power) / self.power
-        miplevel = torch.zeros_like(miplevel) + 6
+        miplevel = (torch.log(saSample / saTexel) / math.log(self.power) / self.power).clip(0, self.num_levels)
+        # miplevel = torch.zeros_like(miplevel) + 6
         # ic(miplevel.min(), miplevel.max(), saSample.min(), saSample.max())
         # mip level is 0 when it wants the full image and inf when it wants just the color
 
@@ -125,10 +126,12 @@ class HierarchicalBG(torch.nn.Module):
 
             emb = F.grid_sample(bg_mat, x, mode='bicubic', align_corners=self.align_corners)
             emb = emb.reshape(self.bg_rank, -1).T
-            weight = (self.num_levels - miplevel + 1).clip(0, 1)
+            weight = (self.num_levels - miplevel - i).clip(0, 1)
+            # ic(weight, miplevel, miplevel-i, (self.num_levels - miplevel - i))
             # weight = torch.sigmoid((1-roughness)*max_level - i - 2)
             # embs.append(emb / 2**i * mask.reshape(-1, 1))
             embs.append(emb / (i+1) * weight.reshape(-1, 1))
+            # embs.append(emb / 2**(i) * weight.reshape(-1, 1))
             if i >= max_level:
                 break
         emb = sum(embs)
