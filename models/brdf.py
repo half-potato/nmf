@@ -53,10 +53,11 @@ class NormalSampler:
 class GGXSampler:
     def __init__(self, num_samples) -> None:
         self.sampler = torch.quasirandom.SobolEngine(dimension=2)
-        self.angs = self.sampler.draw(num_samples)
+        self.num_samples = num_samples
+        self.angs = self.sampler.draw(num_samples*2)
 
     def draw(self, B, num_samples):
-        angs = self.angs.reshape(1, num_samples, 2).expand(B, num_samples, 2)
+        angs = self.angs.reshape(1, 2*self.num_samples, 2)[:, :num_samples, :].expand(B, num_samples, 2)
         # add random offset
         offset = torch.rand(B, 1, 2)
         angs = (angs + offset) % 1
@@ -274,12 +275,11 @@ class MLPBRDF(torch.nn.Module):
                     ] for _ in range(num_layers)], []),
                 torch.nn.ReLU(inplace=True),
                 torch.nn.Linear(featureC, 3),
-                str2fn(activation)
             )
-            torch.nn.init.constant_(self.mlp[-2].bias, 0)
             self.mlp.apply(self.init_weights)
         else:
-            self.mlp = str2fn(activation)
+            self.mlp = torch.nn.Identity()
+        self.activation = str2fn(activation)
 
     def init_weights(self, m):
         if isinstance(m, torch.nn.Linear):
@@ -328,7 +328,9 @@ class MLPBRDF(torch.nn.Module):
             indata += [self.l_encoder(L, eroughness).reshape(B, -1), L]
 
         mlp_in = torch.cat(indata, dim=-1)
-        ref_weight = self.mlp(mlp_in).reshape(n, m, -1)
+        mlp_out = self.mlp(mlp_in).reshape(n, m, -1)
+        mlp_out[:, 0] += 1
+        ref_weight = self.activation(mlp_out)
 
         if self.mul_ggx:
             alph = matprop['roughness'][mask].reshape(-1, 1, 1)

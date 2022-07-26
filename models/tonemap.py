@@ -48,9 +48,11 @@ class LinearTonemap(torch.nn.Module):
         super().__init__()
         pass
 
-    def forward(self, img):
+    def forward(self, img, noclip=False):
         # linear to HDR
-        return img.clip(0, 1)
+        if not noclip:
+            img = img.clip(0, 1)
+        return img
 
     def inverse(self, img):
         # HDR to linear

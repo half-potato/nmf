@@ -49,9 +49,7 @@ def main(cfg: DictConfig):
     tensorf = hydra.utils.instantiate(cfg.model.arch)(aabb=torch.tensor([[-1.0, -1.0, -1.0], [1.0, 1.0, 1.0]]), grid_size=[128]*3)
     bg_sd = torch.load('log/mats360_bg.th')
     from models import render_modules
-    # bg_module = render_modules.HierarchicalBG(3, render_modules.CubeUnwrap(), bg_resolution=2*1024//4, num_levels=3, featureC=128, num_layers=0)
-    bg_module = bg_modules.HierarchicalCubeMap(3, bg_resolution=2048//2**5, num_levels=6, featureC=128, num_layers=0, activation='softplus', power=2)
-    # bg_module = render_modules.BackgroundRender(3, render_modules.PanoUnwrap(), bg_resolution=2*1024, featureC=128, num_layers=0)
+    bg_module = bg_modules.HierarchicalCubeMap(bg_resolution=2048, num_levels=3, featureC=128, activation='softplus', power=4)
     bg_module.load_state_dict(bg_sd)
     tensorf.bg_module = bg_module
     tensorf.brdf = SimplePBR(0)
@@ -189,7 +187,7 @@ def main(cfg: DictConfig):
             tint_loss = ((tint-rgb)**2).sum()
             diffuse_loss = (diffuse[..., 0]-0)**2 + (diffuse[..., 1]-0)**2 + (diffuse[..., 2]-0)**2
             property_loss = (matprop['refraction_index'] - 1.5)**2 + (matprop['reflectivity'] - 0.00)**2 + (matprop['ratio_diffuse'] - 0.10)**2 + (matprop['ambient'] + 0.1)**2 + \
-                            (matprop['roughness'] - 0.5)**2
+                            (matprop['roughness'] - 0.3)**2
             app_loss = tint_loss.mean() + diffuse_loss.mean() + property_loss.mean()
             loss = 1e-4*app_loss + world_loss
             optim.zero_grad()
