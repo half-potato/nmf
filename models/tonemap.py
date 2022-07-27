@@ -1,10 +1,16 @@
 import torch
 
-
-class SRGBTonemap(torch.nn.Module):
+class Tonemap(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        pass
+    
+    @property
+    def white(self):
+        self.tonemap(torch.tensor(1)).item()
+
+class SRGBTonemap(Tonemap):
+    def __init__(self):
+        super().__init__()
 
     def forward(self, img, noclip=False):
         # linear to SRGB
@@ -25,10 +31,9 @@ class SRGBTonemap(torch.nn.Module):
         limit = 0.04045
         return torch.where(img > limit, torch.pow((img + 0.055) / 1.055, 2.4), img / 12.92)
 
-class HDRTonemap(torch.nn.Module):
+class HDRTonemap(Tonemap):
     def __init__(self):
         super().__init__()
-        pass
 
     def forward(self, img, noclip=False):
         # linear to HDR
@@ -43,10 +48,9 @@ class HDRTonemap(torch.nn.Module):
         img = img ** 2.2
         return - img / (img-1)
 
-class LinearTonemap(torch.nn.Module):
+class LinearTonemap(Tonemap):
     def __init__(self):
         super().__init__()
-        pass
 
     def forward(self, img, noclip=False):
         # linear to HDR

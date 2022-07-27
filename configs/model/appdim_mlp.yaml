@@ -14,7 +14,7 @@ arch:
   infinity_border: False
   enable_alpha_mask: false
   appdim_noise_std: 0.1
-  world_bounce: True
+  world_bounces: 1
 
   rf:
     _partial_: True
@@ -52,7 +52,9 @@ arch:
 
   brdf:
     _target_: models.brdf.MLPBRDF
+    # _target_: models.brdf.LightTinter
     _partial_: True
+    # pbr: True
     # v_encoder:
     #   _target_: models.ish.FullISH
     #   max_degree: 3
@@ -61,10 +63,10 @@ arch:
     #   max_degree: 3
     v_encoder:
       _target_: models.ish.ListISH
-      degs: [0,1,2,4,8]
+      degs: [0,1,2,4,8,16]
     l_encoder:
       _target_: models.ish.ListISH
-      degs: [0,1,2,4,8]
+      degs: [0,1,2,4,8,16]
     num_layers: 5
     feape: 2
     featureC: 128
@@ -147,7 +149,7 @@ params:
   # bounce_n_list: [100, 1000, 10000, 20000]
   # bounce_iter_list: [9000, 12000, 14000]
 
-  bounce_n_list: [0, 20000]
+  bounce_n_list: [0, 50000]
   # bounce_iter_list: [4500]
   bounce_iter_list: [0]
 

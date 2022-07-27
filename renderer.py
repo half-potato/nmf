@@ -168,6 +168,9 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
     ssims,l_alex,l_vgg=[],[],[]
     os.makedirs(savePath, exist_ok=True)
     os.makedirs(savePath+"/rgbd", exist_ok=True)
+    os.makedirs(savePath+"/normal", exist_ok=True)
+    os.makedirs(savePath+"/err", exist_ok=True)
+    os.makedirs(savePath+"/debug", exist_ok=True)
     os.makedirs(savePath+"/envmaps", exist_ok=True)
     ic(N_samples)
 
@@ -197,6 +200,8 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
         
         normal_map = (normal_map * 127 + 128).clamp(0, 255).byte()
 
+        err_map = (rgb_map.clip(0, 1) - gt_rgb.clip(0, 1)) + 0.5
+
         depth_map, _ = visualize_depth_numpy(depth_map.numpy(),near_far)
         if gt_rgb is not None:
             loss = torch.mean((rgb_map.clip(0, 1) - gt_rgb.clip(0, 1)) ** 2)
@@ -218,6 +223,7 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
                 l_vgg.append(l_v)
 
         rgb_map = (rgb_map.clamp(0, 1).numpy() * 255).astype('uint8')
+        err_map = (err_map.clamp(0, 1).numpy() * 255).astype('uint8')
         # rgb_map = np.concatenate((rgb_map, depth_map), axis=1)
         rgb_maps.append(rgb_map)
         depth_maps.append(depth_map)
@@ -225,8 +231,9 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
             imageio.imwrite(f'{savePath}/{prtx}{idx:03d}.png', rgb_map)
             rgb_map = np.concatenate((rgb_map, depth_map), axis=1)
             imageio.imwrite(f'{savePath}/rgbd/{prtx}{idx:03d}.png', rgb_map)
-            imageio.imwrite(f'{savePath}/rgbd/{prtx}normal_{idx:03d}.png', normal_map)
-            imageio.imwrite(f'{savePath}/rgbd/{prtx}debug_{idx:03d}.png', (255*debug_map.clamp(0, 1).numpy()).astype(np.uint8))
+            imageio.imwrite(f'{savePath}/normal/{prtx}{idx:03d}.png', normal_map)
+            imageio.imwrite(f'{savePath}/err/{prtx}{idx:03d}.png', err_map)
+            imageio.imwrite(f'{savePath}/debug/{prtx}{idx:03d}.png', (255*debug_map.clamp(0, 1).numpy()).astype(np.uint8))
             imageio.imwrite(f'{savePath}/envmaps/{prtx}ref_map_{idx:03d}.png', env_map)
             imageio.imwrite(f'{savePath}/envmaps/{prtx}view_map_{idx:03d}.png', col_map)
 
