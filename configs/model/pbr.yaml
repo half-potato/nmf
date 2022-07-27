@@ -38,10 +38,10 @@ arch:
     # _target_: models.tonemap.LinearTonemap
     _target_: models.tonemap.SRGBTonemap
 
-  # brdf:
-  #   _target_: models.brdf.PBR
-  # #   # _target_: models.brdf.SimplePBR
-  #   _partial_: True
+  brdf:
+    _target_: models.brdf.PBR
+  #   # _target_: models.brdf.SimplePBR
+    _partial_: True
   # brdf:
   #   _target_: models.brdf.MLPBRDFCos
   #   _partial_: True
@@ -50,28 +50,28 @@ arch:
   #   featureC: 128
   #   activation: 'sigmoid'
 
-  brdf:
-    _target_: models.brdf.MLPBRDF
-    _partial_: True
-    # v_encoder:
-    #   _target_: models.ish.FullISH
-    #   max_degree: 3
-    # l_encoder:
-    #   _target_: models.ish.FullISH
-    #   max_degree: 3
-    v_encoder:
-      _target_: models.ish.ListISH
-      degs: [0,1,2,4,8]
-    l_encoder:
-      _target_: models.ish.ListISH
-      degs: [0,1,2,4,8]
-    num_layers: 5
-    feape: 2
-    featureC: 128
-    activation: 'softplus'
-    mul_ggx: False
-    use_roughness: true
-    lr: 1e-3
+  # brdf:
+  #   _target_: models.brdf.MLPBRDF
+  #   _partial_: True
+  #   # v_encoder:
+  #   #   _target_: models.ish.FullISH
+  #   #   max_degree: 3
+  #   # l_encoder:
+  #   #   _target_: models.ish.FullISH
+  #   #   max_degree: 3
+  #   v_encoder:
+  #     _target_: models.ish.ListISH
+  #     degs: [0,1,2,4,8]
+  #   l_encoder:
+  #     _target_: models.ish.ListISH
+  #     degs: [0,1,2,4,8]
+  #   num_layers: 5
+  #   feape: 2
+  #   featureC: 128
+  #   activation: 'softplus'
+  #   mul_ggx: False
+  #   use_roughness: true
+  #   lr: 1e-3
 
 
   bg_module:
@@ -175,5 +175,6 @@ params:
   # num_rays_per_envmap: 512
   num_rays_per_envmap: 64
   num_env_train_iters: 0
+
 
 

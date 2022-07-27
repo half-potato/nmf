@@ -124,8 +124,9 @@ class SimplePBR(torch.nn.Module):
 class PBR(torch.nn.Module):
     def __init__(self, in_channels):
         super().__init__()
+        self.lr=0
 
-    def forward(self, incoming_light, V, L, N, features, matprop, mask):
+    def forward(self, incoming_light, V, L, N, features, matprop, mask, ray_mask):
         # V: (B, 3)-viewdirs, the outgoing light direction
         # L: (B, M, 3) incoming light direction. bounce_rays
         # N: (B, 3) outward normal
@@ -151,7 +152,7 @@ class PBR(torch.nn.Module):
         k_s = schlick(f0, N.double(), half.double()).float()
 
         # diffuse vs specular intensity
-        f_d = matprop['reflectivity'].reshape(-1, 1, 1)/np.pi/M
+        # f_d = matprop['reflectivity'].reshape(-1, 1, 1)/np.pi/M
         k_d = 1-k_s
 
         # alph = 0*matprop['roughness'][mask].reshape(-1, 1, 1) + 0.1
@@ -174,7 +175,8 @@ class PBR(torch.nn.Module):
         # ic(k_d.mean(dim=1).mean(dim=0), k_s.mean(dim=1).mean(dim=0))
         # brdf = k_d*f_d + k_s*f_s
         albedo = matprop['albedo'][mask].reshape(-1, 1, 3)
-        brdf = k_d*f_d*albedo + k_s*f_s
+        brdf = k_d*albedo + k_s*f_s
+        brdf *= ray_mask
         # normalize probabilities so they sum to 1. the rgb dims represent the spectra in equal parts.
         brdf = brdf / brdf.sum(dim=1, keepdim=True).sum(dim=2, keepdim=True)
         # brdf = k_s * f_s
@@ -285,7 +287,7 @@ class MLPBRDF(torch.nn.Module):
         if isinstance(m, torch.nn.Linear):
             torch.nn.init.xavier_uniform_(m.weight, gain=np.sqrt(2))
 
-    def forward(self, incoming_light, V, L, N, features, matprop, mask):
+    def forward(self, incoming_light, V, L, N, features, matprop, mask, ray_mask):
         # V: (n, 3)-viewdirs, the outgoing light direction
         # L: (n, m, 3) incoming light direction. bounce_rays
         # N: (n, 1, 3) outward normal
@@ -342,7 +344,8 @@ class MLPBRDF(torch.nn.Module):
             ref_weight = ref_weight*D_ggx
 
         # ref_weight = ref_weight / (ref_weight.sum(dim=1, keepdim=True).mean(dim=2, keepdim=True)+1e-8)
-        ref_weight = ref_weight / m
+        # ref_weight = ref_weight / m
+        ref_weight = ref_weight * ray_mask / ray_mask.sum(dim=1, keepdim=True)
         # ref_weight = torch.softmax(ref_weight, dim=1)
         spec_color = (incoming_light * ref_weight).sum(dim=1)
         return spec_color

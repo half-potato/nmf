@@ -146,7 +146,8 @@ class HierarchicalCubeMap(torch.nn.Module):
         # miplevel = (torch.log(saSample / saTexel) / math.log(self.power) / self.power).clip(0, self.num_levels-5)
         # mip level is 0 when it wants the full image and inf when it wants just the color
         # miplevel = (torch.log(saSample / saTexel) / math.log(self.power) / 2).clip(0, self.num_levels-1)
-        miplevel = (torch.log(saSample / saTexel) / math.log(self.power) / 2).clip(0, self.max_mip)
+        miplevel = (torch.log(saSample / saTexel) / math.log(self.power))
+        miplevel = miplevel.clip(0, self.max_mip)
         # miplevel = (torch.log(saSample / saTexel) / math.log(self.power) / 2).clip(self.num_levels, self.max_mip)
         # miplevel = (torch.log(saSample / saTexel) / math.log(self.power) / 2).clip(0, 0)
         V = viewdirs.reshape(1, -1, 1, 3).contiguous()
@@ -161,19 +162,19 @@ class HierarchicalCubeMap(torch.nn.Module):
             weight = (mip - miplevel + 1).clip(0, 1).reshape(-1, 1)
             # embs.append(emb / 2**i * mask.reshape(-1, 1))
             # embs.append(emb / (i+1) * weight + (1-weight) * offset)
-            sumemb += emb * self.calc_weight(mip)
+            sumemb += emb * self.calc_weight(mip) * weight
             # embs.append(emb / 2**(i) * weight.reshape(-1, 1))
             if mip >= max_level:
                 break
         img = self.activation_fn(sumemb)
-        if miplevel.max() >= self.num_levels:
-            mask = miplevel.reshape(-1) >= self.num_levels
+        if miplevel.max() >= self.num_levels-1:
+            mask = miplevel.reshape(-1) >= self.num_levels-1
             blur_img = 0
             weights = 0
             for bg_mat, mip in self.create_pyramid():
                 weight = 1 - (mip - miplevel.reshape(-1, 1)[mask]).abs().clip(0, 1)
                 # ic(torch.cat([weight, miplevel.reshape(-1, 1)[mask]], dim=1), mip)
-                emb = nvdr.texture(bg_mat.contiguous(), V[:, mask], boundary_mode='cube')
+                emb = nvdr.texture(bg_mat.contiguous(), V[:, mask].contiguous(), boundary_mode='cube')
                 emb = emb.reshape(-1, 3)
                 blur_img += emb * weight
                 weights += weight

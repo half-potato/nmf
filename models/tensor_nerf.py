@@ -175,7 +175,7 @@ class TensorNeRF(torch.nn.Module):
         else:
             self.tonemap = tonemap
 
-        self.sampler = sampler
+        self.sampler = sampler if sampler is None else sampler(num_samples=roughness_rays)
         self.world_bounce = world_bounce
 
         self.brdf = brdf(in_channels=self.rf.app_dim) if brdf is not None else None
@@ -214,7 +214,7 @@ class TensorNeRF(torch.nn.Module):
     def device(self):
         return self.rf.units.device
 
-    def get_optparam_groups(self, lr_init_spatial=0.02, lr_init_network=0.001, lr_bg=0.01, lr_scale=1):
+    def get_optparam_groups(self, lr_init_spatial=0.02, lr_init_network=0.001, lr_bg=0.025, lr_scale=1):
         grad_vars = []
         # TODO REMOVE
         # grad_vars += self.rf.get_optparam_groups(lr_init_spatial, lr_init_network)
@@ -230,7 +230,7 @@ class TensorNeRF(torch.nn.Module):
             grad_vars += [{'params': self.brdf.parameters(),
                            'lr': self.brdf.lr}]
         # TODO REMOVE
-        if hasattr(self, 'bg_module') and isinstance(self.bg_module, torch.nn.Module):
+        if isinstance(self.bg_module, torch.nn.Module):
             grad_vars += [{'params': self.bg_module.parameters(),
                 'lr': lr_bg, 'name': 'bg'}]
         return grad_vars
@@ -726,9 +726,9 @@ class TensorNeRF(torch.nn.Module):
                         # 0.5, self.bounce_min_weight)
                         0.0, 0.0)
                 # if the bounce is not calculated, set the ratio to 0 to make sure we don't get black spots
-                if not bounce_mask.all() and not is_train:
-                    ratio_diffuse[~bounce_mask] += ratio_reflected[~bounce_mask]
-                    ratio_reflected[~bounce_mask] = 0
+                # if not bounce_mask.all() and not is_train:
+                #     ratio_diffuse[~bounce_mask] += ratio_reflected[~bounce_mask]
+                #     ratio_reflected[~bounce_mask] = 0
 
                 if bounce_mask.sum() > 0:
                     # decide how many bounces to calculate
@@ -748,6 +748,12 @@ class TensorNeRF(torch.nn.Module):
                     ], dim=-1)
                     D = bounce_rays.shape[-1]
 
+                    # ray_mask = (torch.arange(num_roughness_rays, device=device).reshape(1, -1, 1) < (roughness[bounce_mask] * num_roughness_rays).clip(min=1).reshape(-1, 1, 1))
+                    # ray_mask[:, 1:] &= ((noise_rays * brefdirs).sum(dim=-1, keepdim=True) < 0.99999)[:, 1:]
+                    ray_mask = ((noise_rays * brefdirs).sum(dim=-1, keepdim=True) < 0.99999)
+                    ray_mask[:, 0] = True
+                    # ray_mask = torch.sigmoid(torch.arange(num_roughness_rays, device=device).reshape(1, -1, 1) - (roughness[bounce_mask] * num_roughness_rays).clip(min=1).reshape(-1, 1, 1))
+
                     if recur == 0 and self.world_bounce:
                         incoming_light = torch.empty((bounce_rays.shape[0], bounce_rays.shape[1], 3), device=device)
                         with torch.no_grad():
@@ -757,16 +763,17 @@ class TensorNeRF(torch.nn.Module):
 
                         incoming_light[:, 0, :] = reflect_data['rgb_map'].reshape(-1, 3)
                         mipval = mipval.reshape(-1, num_roughness_rays)
+                        # apply ray mask
                         incoming_light[:, 1:, :] = self.render_just_bg(bounce_rays[:, 1:, :].reshape(-1, D), mipval[:, 1:].reshape(-1, 1)).reshape(-1, num_roughness_rays-1, 3)
                     else:
                         incoming_light = self.render_just_bg(bounce_rays.reshape(-1, D), mipval).reshape(-1, num_roughness_rays, 3)
-                    tinted_ref_rgb = self.brdf(incoming_light, V[bounce_mask], bounce_rays[..., 3:6], outward.reshape(-1, 1, 3), noise_app_features[bounce_mask], matprop, bounce_mask)
+                    tinted_ref_rgb = self.brdf(incoming_light, V[bounce_mask], bounce_rays[..., 3:6], outward.reshape(-1, 1, 3), noise_app_features[bounce_mask], matprop, bounce_mask, ray_mask)
                     # tinted_ref_rgb = self.brdf(incoming_light.detach(), V[bounce_mask], bounce_rays[..., 3:6], outward.reshape(-1, 1, 3).detach(), noise_app_features[bounce_mask], matprop, bounce_mask)
                     # tinted_ref_rgb = incoming_light.mean(dim=1)
 
                     # debug[full_bounce_mask] += tint * tinted_ref_rgb
                     # reflect_rgb[bounce_mask] = tint * tinted_ref_rgb
-                    debug[full_bounce_mask] += incoming_light.mean(dim=1)
+                    debug[full_bounce_mask] += (ray_mask*incoming_light).sum(dim=1) / ray_mask.sum(dim=1)
                     reflect_rgb[bounce_mask] = tint[bounce_mask] * tinted_ref_rgb
 
                     # m = full_bounce_mask.sum(dim=1) > 0
