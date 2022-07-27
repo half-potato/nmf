@@ -14,7 +14,7 @@ arch:
   infinity_border: False
   enable_alpha_mask: false
   appdim_noise_std: 0.1
-  world_bounce: true
+  world_bounce: false
 
   rf:
     _partial_: True
@@ -147,7 +147,7 @@ params:
   # bounce_n_list: [100, 1000, 10000, 20000]
   # bounce_iter_list: [9000, 12000, 14000]
 
-  bounce_n_list: [0, 100000000]
+  bounce_n_list: [0, 10000]
   # bounce_iter_list: [4500]
   bounce_iter_list: [0]
 

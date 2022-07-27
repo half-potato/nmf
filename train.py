@@ -109,6 +109,7 @@ def reconstruction(args):
     aabb = train_dataset.scene_bbox.to(device)
     reso_cur = N_to_reso(params.N_voxel_init, aabb)
     nSamples = min(args.nSamples, cal_n_samples(reso_cur,args.step_ratio))
+    lr_scale = 1
 
     tensorf = hydra.utils.instantiate(args.model.arch)(aabb=aabb, grid_size=reso_cur)
     if args.ckpt is not None:
@@ -127,7 +128,7 @@ def reconstruction(args):
     bg_sd = torch.load('log/mats360_bg.th')
     from models import bg_modules, ish
     # bg_module = render_modules.HierarchicalBG(3, render_modules.CubeUnwrap(), bg_resolution=2*1024//2, num_levels=3, featureC=128, num_layers=0)
-    bg_module = bg_modules.HierarchicalCubeMap(3, bg_resolution=2048, num_levels=3, featureC=128, num_layers=0, activation='softplus', power=4)
+    bg_module = bg_modules.HierarchicalCubeMap(bg_resolution=1600, num_levels=3, featureC=128, activation='softplus', power=4)
     # bg_module = render_modules.BackgroundRender(3, render_modules.PanoUnwrap(), bg_resolution=2*1024, featureC=128, num_layers=0)
     bg_module.load_state_dict(bg_sd, strict=False)
     tensorf.bg_module = bg_module
@@ -135,7 +136,7 @@ def reconstruction(args):
     tensorf = tensorf.to(device)
 
     lr_bg = 1e-5
-    grad_vars = tensorf.get_optparam_groups(args.lr_init, args.lr_basis, lr_bg)
+    grad_vars = tensorf.get_optparam_groups(args.lr_init, args.lr_basis, lr_bg, lr_scale)
     if args.lr_decay_iters > 0:
         lr_factor = args.lr_decay_target_ratio**(1/args.lr_decay_iters)
     else:

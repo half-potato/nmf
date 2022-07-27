@@ -71,9 +71,17 @@ def select_edge(img, direction, s, reverse_depth=False, reverse_edge=False, trim
         buf = img[..., :s]
     if trim_opposite:
         if direction == CubeEdge.DOWN or direction == CubeEdge.UP:
+            corner1 = torch.flip(buf[..., :s], dims=[-1])
+            corner2 = torch.flip(buf[..., -s:], dims=[-1])
             buf = buf[..., s:-s]
+            buf[..., :s] += corner1
+            buf[..., -s:] += corner2
         else:
+            corner1 = torch.flip(buf[..., :s, :], dims=[-2])
+            corner2 = torch.flip(buf[..., -s:, :], dims=[-2])
             buf = buf[..., s:-s, :]
+            buf[..., :s, :] += corner1
+            buf[..., -s:, :] += corner2
     if direction == CubeEdge.DOWN or direction == CubeEdge.UP:
         buf = buf.permute(0, 2, 1)
     if trim_opposite:

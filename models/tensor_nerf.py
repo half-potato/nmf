@@ -230,9 +230,9 @@ class TensorNeRF(torch.nn.Module):
             grad_vars += [{'params': self.brdf.parameters(),
                            'lr': self.brdf.lr}]
         # TODO REMOVE
-        # if hasattr(self, 'bg_module') and isinstance(self.bg_module, torch.nn.Module):
-        #     grad_vars += [{'params': self.bg_module.parameters(),
-        #         'lr': lr_bg, 'name': 'bg'}]
+        if hasattr(self, 'bg_module') and isinstance(self.bg_module, torch.nn.Module):
+            grad_vars += [{'params': self.bg_module.parameters(),
+                'lr': lr_bg, 'name': 'bg'}]
         return grad_vars
 
     def save(self, path, config):

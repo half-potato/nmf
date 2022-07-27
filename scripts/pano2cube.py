@@ -10,15 +10,16 @@ from pathlib import Path
 from models.cubemap_conv import cubemap_convolve, create_blur_pyramid
 import cv2
 
-batch_size = 4096*500
+batch_size = 4096*1000
 device = torch.device('cuda')
 epochs = 500
 
 # bg_module = render_modules.BackgroundRender(3, render_modules.PanoUnwrap(), bg_resolution=2*1024, featureC=128, num_layers=0)
 # bg_module = render_modules.BackgroundRender(3, render_modules.CubeUnwrap(), bg_resolution=2*1024, featureC=128, num_layers=0)
 tm = tonemap.LinearTonemap()
-bg_module = bg_modules.HierarchicalCubeMap(bg_resolution=2048, num_levels=3, featureC=128, activation='softplus', power=4)
-# bg_module = bg_modules.HierarchicalCubeMap(3, bg_resolution=2048, num_levels=6, featureC=128, num_layers=0, activation='softplus', power=2)
+bg_module = bg_modules.HierarchicalCubeMap(bg_resolution=1600, num_levels=3, featureC=128, activation='softplus', power=4)
+
+# bg_module = bg_modules.HierarchicalCubeMap(bg_resolution=2048, num_levels=5, featureC=128, activation='softplus', power=2)
 # bg_module = render_modules.MLPRender_FP(0, None, ish.ListISH([0,1,2,4,8,16]), -1, 256, 6)
 ic(bg_module)
 bg_module = bg_module.to(device)
@@ -117,4 +118,4 @@ for i, (convmat, mip) in enumerate(bg_module.create_pyramid()):
     im = (255*(bg_mat)).short()
     im = im.cpu().numpy()
     im = cv2.cvtColor(im.astype(np.uint8), cv2.COLOR_RGB2BGR)
-    cv2.imwrite(str(f'blur{i}.png'), im)
+    cv2.imwrite(str(f'log/cubed/blur{i}.png'), im)

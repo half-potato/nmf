@@ -71,6 +71,7 @@ class HierarchicalCubeMap(torch.nn.Module):
         ic(self.stds)
         s = max(self.stds)*4-1
         blur_kernel = create_blur_pyramid(s, self.stds)
+        ic(blur_kernel.shape)
         self.register_buffer('blur_kernel', blur_kernel)
 
         self.bg_mats = nn.ParameterList([
@@ -248,7 +249,7 @@ class HierarchicalBG(torch.nn.Module):
             #
             # emb = F.grid_sample(smooth_mat.permute(1, 0, 2, 3), x, mode='bilinear', align_corners=self.align_corners)
 
-            emb = F.grid_sample(bg_mat, x, mode='bicubic', align_corners=self.align_corners)
+            emb = F.grid_sample(bg_mat, x, mode='bilinear', align_corners=self.align_corners)
             emb = emb.reshape(self.bg_rank, -1).T
             weight = (self.num_levels - miplevel - i).clip(0, 1)
             # ic(weight, miplevel, miplevel-i, (self.num_levels - miplevel - i))
