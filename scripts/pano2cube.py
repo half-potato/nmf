@@ -10,21 +10,22 @@ from pathlib import Path
 from models.cubemap_conv import cubemap_convolve, create_blur_pyramid
 import cv2
 
-batch_size = 4096*1000
+batch_size = 4096*50
 device = torch.device('cuda')
-epochs = 500
+epochs = 5000
 
 # bg_module = render_modules.BackgroundRender(3, render_modules.PanoUnwrap(), bg_resolution=2*1024, featureC=128, num_layers=0)
 # bg_module = render_modules.BackgroundRender(3, render_modules.CubeUnwrap(), bg_resolution=2*1024, featureC=128, num_layers=0)
 tm = tonemap.LinearTonemap()
-bg_module = bg_modules.HierarchicalCubeMap(bg_resolution=1600, num_levels=3, featureC=128, activation='softplus', power=4)
+# bg_module = bg_modules.HierarchicalCubeMap(bg_resolution=1600, num_levels=3, featureC=128, activation='softplus', power=4)
+bg_module = bg_modules.HierarchicalCubeMap(bg_resolution=1600, num_levels=7, featureC=128, activation='softplus', power=2)
 
 # bg_module = bg_modules.HierarchicalCubeMap(bg_resolution=2048, num_levels=5, featureC=128, activation='softplus', power=2)
 # bg_module = render_modules.MLPRender_FP(0, None, ish.ListISH([0,1,2,4,8,16]), -1, 256, 6)
 ic(bg_module)
 bg_module = bg_module.to(device)
 pano = imageio.imread("ninomaru_teien_4k.exr")
-optim = torch.optim.Adam(bg_module.parameters(), lr=0.30)
+optim = torch.optim.Adam(bg_module.parameters(), lr=0.15)
 # optim = torch.optim.Adam(bg_module.parameters(), lr=1.0)
 # optim = torch.optim.SGD(bg_module.parameters(), lr=0.5, momentum=0.99, weight_decay=0)
 # optim = torch.optim.Adam(bg_module.parameters(), lr=0.001)

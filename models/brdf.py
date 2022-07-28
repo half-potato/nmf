@@ -116,7 +116,7 @@ class SimplePBR(torch.nn.Module):
     def __init__(self, in_channels):
         super().__init__()
 
-    def forward(self, incoming_light, V, L, N, features, matprop, mask):
+    def forward(self, incoming_light, V, L, N, features, matprop, mask, ray_mask):
         cos_lamb = (L * N).sum(dim=-1, keepdim=True).clip(min=1e-8)
         ref_weight = cos_lamb / cos_lamb.sum(dim=1, keepdim=True)
         return (ref_weight*incoming_light).sum(dim=1)

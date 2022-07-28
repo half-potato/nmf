@@ -49,7 +49,7 @@ def main(cfg: DictConfig):
     tensorf = hydra.utils.instantiate(cfg.model.arch)(aabb=torch.tensor([[-1.0, -1.0, -1.0], [1.0, 1.0, 1.0]]), grid_size=[128]*3)
     bg_sd = torch.load('log/mats360_bg.th')
     from models import render_modules
-    bg_module = bg_modules.HierarchicalCubeMap(bg_resolution=1600, num_levels=3, featureC=128, activation='softplus', power=4)
+    bg_module = bg_modules.HierarchicalCubeMap(bg_resolution=1600, num_levels=4, featureC=128, activation='softplus', power=2)
     bg_module.load_state_dict(bg_sd)
     tensorf.bg_module = bg_module
     tensorf.brdf = SimplePBR(0)

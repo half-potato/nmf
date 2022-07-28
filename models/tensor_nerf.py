@@ -750,7 +750,7 @@ class TensorNeRF(torch.nn.Module):
 
                     # ray_mask = (torch.arange(num_roughness_rays, device=device).reshape(1, -1, 1) < (roughness[bounce_mask] * num_roughness_rays).clip(min=1).reshape(-1, 1, 1))
                     # ray_mask[:, 1:] &= ((noise_rays * brefdirs).sum(dim=-1, keepdim=True) < 0.99999)[:, 1:]
-                    ray_mask = ((noise_rays * brefdirs).sum(dim=-1, keepdim=True) < 1-1e-6)
+                    ray_mask = ((noise_rays * brefdirs).sum(dim=-1, keepdim=True) < 1-5e-5)
                     ray_mask[:, 0] = True
                     # ray_mask = torch.sigmoid(torch.arange(num_roughness_rays, device=device).reshape(1, -1, 1) - (roughness[bounce_mask] * num_roughness_rays).clip(min=1).reshape(-1, 1, 1))
 
