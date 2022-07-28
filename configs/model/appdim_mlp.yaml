@@ -12,9 +12,9 @@ arch:
   max_recurs: 2
   roughness_rays: 50
   infinity_border: False
-  enable_alpha_mask: false
+  enable_alpha_mask: true
   appdim_noise_std: 0.1
-  world_bounces: 1
+  world_bounces: 0
 
   rf:
     _partial_: True
@@ -63,11 +63,17 @@ arch:
     #   max_degree: 3
     v_encoder:
       _target_: models.ish.ListISH
-      degs: [0,1,2,4,8,16]
+      degs: [0,1,2,4,8]
     l_encoder:
       _target_: models.ish.ListISH
-      degs: [0,1,2,4,8,16]
-    num_layers: 5
+      degs: [0,1,2,4,8]
+    # v_encoder:
+    #   _target_: models.ish.ListISH
+    #   degs: [0,1,2,4,8,16]
+    # l_encoder:
+    #   _target_: models.ish.ListISH
+    #   degs: [0,1,2,4,8,16]
+    num_layers: 3
     feape: 2
     featureC: 128
     activation: 'softplus'
@@ -160,7 +166,7 @@ params:
   #uplambda_list: [7000, 12000, 17000, 21000]
   #uplambda_list: [7000, 12000, 17000]
   uplambda_list: [7000, 10000, 12000]
-  update_AlphaMask_list: [4000, 7000]
+  update_AlphaMask_list: [8000]
   L1_weight_inital: 8e-5
   L1_weight_rest: 4e-5
 
@@ -177,5 +183,4 @@ params:
   # num_rays_per_envmap: 512
   num_rays_per_envmap: 64
   num_env_train_iters: 0
-
-
+  n_iters: 30000

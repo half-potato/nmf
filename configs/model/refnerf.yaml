@@ -23,8 +23,8 @@ arch:
     _partial_: True
     _target_: models.tensoRF.TensorVMSplit
     density_n_comp: 16
-    appearance_n_comp: 48
-    app_dim: 48
+    appearance_n_comp: 24
+    app_dim: 24
     step_ratio: 0.5
     density_res_multi: 1
     contract_space: False
@@ -149,5 +149,6 @@ params:
   # num_rays_per_envmap: 512
   num_rays_per_envmap: 64
   num_env_train_iters: 0
+  n_iters: 120000
 
 

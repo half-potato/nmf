@@ -124,7 +124,6 @@ class AlphaGridMask(torch.nn.Module):
 
         aabbSize = self.aabb[1] - self.aabb[0]
         invgrid_size = 1.0/aabbSize * 2
-        alpha_volume = alpha_volume.view(1, 1, *alpha_volume.shape[-3:])
         grid_size = torch.LongTensor(
             [alpha_volume.shape[-1], alpha_volume.shape[-2], alpha_volume.shape[-3]])
         self.register_buffer('grid_size', grid_size)
@@ -133,8 +132,13 @@ class AlphaGridMask(torch.nn.Module):
 
     def sample_alpha(self, xyz_sampled, contract_space=False):
         xyz_sampled = self.normalize_coord(xyz_sampled, contract_space)
-        alpha_vals = F.grid_sample(self.alpha_volume, xyz_sampled[..., :3].view(
-            1, -1, 1, 1, 3), align_corners=False).view(-1)
+        H, W, D = self.alpha_volume.shape
+        i = ((xyz_sampled[..., 0]/2+0.5)*(H-1)).long()
+        j = ((xyz_sampled[..., 1]/2+0.5)*(W-1)).long()
+        k = ((xyz_sampled[..., 2]/2+0.5)*(D-1)).long()
+        alpha_vals = self.alpha_volume[i, j, k]
+        # alpha_vals = F.grid_sample(self.alpha_volume, xyz_sampled[..., :3].view(
+        #     1, -1, 1, 1, 3), align_corners=False).view(-1)
 
         return alpha_vals
 
@@ -217,10 +221,10 @@ class TensorNeRF(torch.nn.Module):
     def get_optparam_groups(self, lr_init_spatial=0.02, lr_init_network=0.001, lr_bg=0.025, lr_scale=1):
         grad_vars = []
         # TODO REMOVE
-        # grad_vars += self.rf.get_optparam_groups(lr_init_spatial, lr_init_network)
-        # if isinstance(self.normal_module, torch.nn.Module):
-        #     grad_vars += [{'params': self.normal_module.parameters(),
-        #                    'lr': self.normal_module.lr*lr_scale}]
+        grad_vars += self.rf.get_optparam_groups(lr_init_spatial, lr_init_network)
+        if isinstance(self.normal_module, torch.nn.Module):
+            grad_vars += [{'params': self.normal_module.parameters(),
+                           'lr': self.normal_module.lr*lr_scale}]
         if self.ref_module is not None:
             grad_vars += [{'params': list(self.ref_module.parameters()), 'lr': lr_scale*self.ref_module.lr}]
         if isinstance(self.diffuse_module, torch.nn.Module):
@@ -368,7 +372,7 @@ class TensorNeRF(torch.nn.Module):
         # alpha[alpha >= self.alphaMask_thres] = 1
         # alpha[alpha < self.alphaMask_thres] = 0
 
-        self.alphaMask = AlphaGridMask(self.rf.aabb, alpha).to(self.device)
+        self.alphaMask = AlphaGridMask(self.rf.aabb, alpha > self.alphaMask_thres).to(self.device)
 
         valid_xyz = dense_xyz[alpha > 0.0]
         if valid_xyz.shape[0] < 1:
@@ -413,8 +417,8 @@ class TensorNeRF(torch.nn.Module):
                 xyz_sampled, _, _, _ = self.sample_ray(
                     rays_o, rays_d, focal, N_samples=N_samples, is_train=False)
                 # Issue: calculate size
-                mask_inbbox = (self.alphaMask.sample_alpha(
-                    xyz_sampled).reshape(xyz_sampled.shape[:-1]) > self.alphaMask_thres).any(-1)
+                mask_inbbox = self.alphaMask.sample_alpha(
+                        xyz_sampled).reshape(xyz_sampled.shape[:-1]).any(-1)
 
             mask_filtered.append(mask_inbbox.cpu())
 
@@ -588,17 +592,15 @@ class TensorNeRF(torch.nn.Module):
         flip = ior_i_full > self.min_refraction
 
         # sample alphas and cull samples from the ray
-        alphas = torch.zeros(xyz_sampled_shape[:-1], device=device)
+        alpha_mask = torch.zeros(xyz_sampled_shape[:-1], device=device, dtype=bool)
         if self.alphaMask is not None and self.enable_alpha_mask and not flip.any():
-            alphas[ray_valid] = self.alphaMask.sample_alpha(
+            alpha_mask[ray_valid] = self.alphaMask.sample_alpha(
                 xyz_sampled[ray_valid], contract_space=self.rf.contract_space)
 
             # T = torch.cumprod(torch.cat([
             #     torch.ones(alphas.shape[0], 1, device=alphas.device),
             #     1. - alphas + 1e-10
             # ], dim=-1), dim=-1)[:, :-1]
-            
-            alpha_mask = (alphas > self.alphaMask_thres)# & (T > 0)
             # ray_invalid = ~ray_valid
             # ray_invalid |= (~alpha_mask)
             ray_valid ^= alpha_mask
@@ -661,11 +663,12 @@ class TensorNeRF(torch.nn.Module):
         app_mask = (weight > self.rayMarch_weight_thres)
 
         # debug = torch.zeros((B, n_samples, 3), dtype=torch.short, device=device)
-        debug = torch.zeros((B, n_samples, 3), dtype=torch.float, device=device)
+        debug = torch.zeros((B, n_samples, 3), dtype=torch.float, device=device, requires_grad=False)
         recur_depth = z_vals.clone()
         depth_map = torch.sum(weight * recur_depth, 1)
         acc_map = bg_weight #torch.sum(weight, 1)
         depth_map = depth_map + (1. - acc_map) * rays_chunk[..., -1]
+        bounce_count = 0
 
         if app_mask.any():
             #  Compute normals for app mask
@@ -775,12 +778,6 @@ class TensorNeRF(torch.nn.Module):
                     ray_mask = ray_mask | True
 
                     tinted_ref_rgb = self.brdf(incoming_light, V[bounce_mask], bounce_rays[..., 3:6], outward.reshape(-1, 1, 3), noise_app_features[bounce_mask], matprop, bounce_mask, ray_mask)
-                    # tinted_ref_rgb = self.brdf(incoming_light.detach(), V[bounce_mask], bounce_rays[..., 3:6], outward.reshape(-1, 1, 3).detach(), noise_app_features[bounce_mask], matprop, bounce_mask)
-                    # tinted_ref_rgb = incoming_light.mean(dim=1)
-
-                    # debug[full_bounce_mask] += tint * tinted_ref_rgb
-                    # reflect_rgb[bounce_mask] = tint * tinted_ref_rgb
-                    # debug[full_bounce_mask] += (ray_mask*incoming_light).sum(dim=1) / ray_mask.sum(dim=1)
                     debug[full_bounce_mask] += incoming_light.mean(dim=1)
                     # reflect_rgb[bounce_mask] = tint[bounce_mask] * tinted_ref_rgb
                     reflect_rgb[bounce_mask] = tinted_ref_rgb
@@ -804,6 +801,7 @@ class TensorNeRF(torch.nn.Module):
                         debug[inv_full_bounce_mask] += tint[~bounce_mask]*matprop['ambient'][~bounce_mask]
 
             # this is a modified rendering equation where the emissive light and light under the integral is all multiplied by the base color
+            bounce_count = bounce_mask.sum()
             # in addition, the light is interpolated between emissive and reflective
             reflectivity = matprop['reflectivity']
             # rgb[app_mask] = tint * ((1-reflectivity)*matprop['ambient'] + reflectivity * reflect_rgb)
@@ -844,13 +842,13 @@ class TensorNeRF(torch.nn.Module):
                 viewdirs[:, 0],
                 -rays_up[:, 0],
             ], dim=1)
-            p_world_normal_map = torch.sum(weight[..., None] * p_world_normal, 1)
-            p_world_normal_map = p_world_normal_map / \
-                (torch.norm(p_world_normal_map, dim=-1, keepdim=True)+1e-8)
-            d_world_normal_map = torch.sum(weight[..., None] * world_normal, 1)
-            d_world_normal_map = d_world_normal_map / (torch.linalg.norm(d_world_normal_map, dim=-1, keepdim=True)+1e-8)
+            # p_world_normal_map = torch.sum(weight[..., None] * p_world_normal, 1)
+            # p_world_normal_map = p_world_normal_map / \
+            #     (torch.norm(p_world_normal_map, dim=-1, keepdim=True)+1e-8)
+            # d_world_normal_map = torch.sum(weight[..., None] * world_normal, 1)
+            # d_world_normal_map = d_world_normal_map / (torch.linalg.norm(d_world_normal_map, dim=-1, keepdim=True)+1e-8)
             v_world_normal_map = torch.sum(weight[..., None] * v_world_normal, 1)
-            v_world_normal_map = v_world_normal_map / (torch.linalg.norm(d_world_normal_map, dim=-1, keepdim=True)+1e-8)
+            v_world_normal_map = v_world_normal_map / (torch.linalg.norm(v_world_normal_map, dim=-1, keepdim=True)+1e-8)
             # d_normal_map = torch.matmul(row_basis, d_world_normal_map.unsqueeze(-1)).squeeze(-1)
             # p_normal_map = torch.matmul(
             #     row_basis, p_world_normal_map.unsqueeze(-1)).squeeze(-1)
@@ -896,4 +894,6 @@ class TensorNeRF(torch.nn.Module):
             backwards_rays_loss=backwards_rays_loss,
             termination_xyz=termination_xyz.cpu(),
             floater_loss=floater_loss,
+            color_count=app_mask.sum(),
+            bounce_count=bounce_count,
         )

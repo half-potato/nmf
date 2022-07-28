@@ -476,7 +476,7 @@ class LightTinter(torch.nn.Module):
             brdf = k_d*albedo + k_s*f_s
             brdf *= ray_mask
             # normalize probabilities so they sum to 1. the rgb dims represent the spectra in equal parts.
-            brdf = brdf / brdf.sum(dim=1, keepdim=True).mean(dim=2, keepdim=True)
+            # brdf = brdf / brdf.sum(dim=1, keepdim=True).mean(dim=2, keepdim=True)
             # brdf = k_s * f_s
 
             # cos_refl = (noise_rays * refdirs[full_bounce_mask].reshape(-1, 1, 3)).sum(dim=-1, keepdim=True).clip(min=0)

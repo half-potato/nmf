@@ -1,4 +1,3 @@
-n_iters: 60000
 render_mode: center
 
 defaults:

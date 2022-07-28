@@ -175,6 +175,4 @@ params:
   # num_rays_per_envmap: 512
   num_rays_per_envmap: 64
   num_env_train_iters: 0
-
-
-
+  n_iters: 30000

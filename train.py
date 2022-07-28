@@ -141,8 +141,8 @@ def reconstruction(args):
     if args.lr_decay_iters > 0:
         lr_factor = args.lr_decay_target_ratio**(1/args.lr_decay_iters)
     else:
-        args.lr_decay_iters = args.n_iters
-        lr_factor = args.lr_decay_target_ratio**(1/args.n_iters)
+        args.lr_decay_iters = params.n_iters
+        lr_factor = args.lr_decay_target_ratio**(1/params.n_iters)
 
     print("lr decay", args.lr_decay_target_ratio, args.lr_decay_iters)
     
@@ -247,7 +247,7 @@ def reconstruction(args):
             space_optim.step()
 
 
-    pbar = tqdm(range(args.n_iters), miniters=args.progress_refresh_rate, file=sys.stdout)
+    pbar = tqdm(range(params.n_iters), miniters=args.progress_refresh_rate, file=sys.stdout)
     old_decay = False
     T_max = 30000
     scheduler1 = lr_scheduler.CosineAnnealingLR(optimizer, T_max=T_max)
@@ -256,7 +256,7 @@ def reconstruction(args):
             lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=10000, T_mult=1)
     ])
     scheduler = lr_scheduler.SequentialLR(optimizer, schedulers=[scheduler1, scheduler2], milestones=[3000])
-    scheduler = lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=10000, T_mult=1)
+    scheduler = lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=30000, T_mult=1)
     if True:
     # with torch.autograd.detect_anomaly():
         for iteration in pbar:
@@ -285,7 +285,7 @@ def reconstruction(args):
             #rgb_map, alphas_map, depth_map, weights, uncertainty
             with torch.cuda.amp.autocast(enabled=args.fp16):
                 data = renderer(rays_train, tensorf,
-                        keys = ['rgb_map', 'floater_loss', 'normal_loss', 'backwards_rays_loss', 'termination_xyz', 'normal_map', 'diffuse_reg'],
+                        keys = ['rgb_map', 'floater_loss', 'normal_loss', 'backwards_rays_loss', 'termination_xyz', 'normal_map', 'diffuse_reg', 'bounce_count', 'color_count'],
                         focal=focal, output_alpha=alpha_train, chunk=args.batch_size,
                         N_samples=nSamples, white_bg = white_bg, ndc_ray=ndc_ray, is_train=True)
 
@@ -342,6 +342,8 @@ def reconstruction(args):
             summary_writer.add_scalar('train/floater_loss', floater_loss.detach().item(), global_step=iteration)
             summary_writer.add_scalar('train/normal_loss', normal_loss.detach().item(), global_step=iteration)
             summary_writer.add_scalar('train/diffuse_loss', diffuse_reg.detach().item(), global_step=iteration)
+            summary_writer.add_scalar('train/color_count', data['color_count'].mean(), global_step=iteration)
+            summary_writer.add_scalar('train/bounce_count', data['bounce_count'].mean(), global_step=iteration)
 
             if old_decay:
                 for param_group in optimizer.param_groups:
@@ -390,9 +392,9 @@ def reconstruction(args):
                     print("continuing L1_reg_weight", L1_reg_weight)
 
 
-                if not ndc_ray and iteration == update_AlphaMask_list[1] and args.filter_rays:
+                if not ndc_ray and iteration == update_AlphaMask_list[-1] and args.filter_rays:
                     # filter rays outside the bbox
-                    allrays,allrgbs,mask = tensorf.filtering_rays(allrays, allrgbs, focal)
+                    allrays, allrgbs, mask = tensorf.filtering_rays(allrays, allrgbs, focal)
                     trainingSampler = SimpleSampler(allrays.shape[0], args.batch_size)
 
             if iteration in params.smoothing_list:
