@@ -52,6 +52,11 @@ class BlenderDataset(Dataset):
             self.white_bg = self.meta['white_bg']
         else:
             self.white_bg = True
+        if 'w' not in self.meta:
+            self.meta['w'] = 800
+        if 'h' not in self.meta:
+            self.meta['h'] = 800
+
         w, h = int(self.meta['w']/self.downsample), int(self.meta['h']/self.downsample)
         self.img_wh = [w,h]
         print(f"Original Image size: {self.meta['w']} x {self.meta['h']}")

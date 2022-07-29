@@ -112,14 +112,24 @@ class GGXSampler:
 
         return L, mipval
 
-class SimplePBR(torch.nn.Module):
+class Phong(torch.nn.Module):
     def __init__(self, in_channels):
         super().__init__()
 
     def forward(self, incoming_light, V, L, N, features, matprop, mask, ray_mask):
-        cos_lamb = (L * N).sum(dim=-1, keepdim=True).clip(min=1e-8)
-        ref_weight = cos_lamb / cos_lamb.sum(dim=1, keepdim=True)
-        return (ref_weight*incoming_light).sum(dim=1)
+        B, M, _ = L.shape
+        refdir = L[:, 0:1, :]
+        RdotV = (refdir * V).sum(dim=-1, keepdim=True).clip(min=1e-8)
+        LdotN = (L * N).sum(dim=-1, keepdim=True).clip(min=1e-8)
+        tint = matprop['tint'][mask].reshape(-1, 1, 3)
+        f0 = matprop['f0'][mask].reshape(-1, 1, 3)
+        alpha = matprop['reflectivity'][mask].reshape(-1, 1, 1)
+        albedo = matprop['albedo'][mask].reshape(-1, 3)
+        diffuse = tint * LdotN
+        specular = f0 * RdotV**alpha
+        output = albedo + ((diffuse + specular) * incoming_light).sum(dim=1) / M
+
+        return output
 
 class PBR(torch.nn.Module):
     def __init__(self, in_channels):
@@ -195,6 +205,7 @@ class MLPBRDFCos(torch.nn.Module):
         self.in_mlpC = 2*feape*in_channels + in_channels + 4
         self.lr = lr
         self.feape = feape
+        self.activation = str2fn(activation)
         if num_layers > 0:
             self.mlp = torch.nn.Sequential(
                 torch.nn.Linear(self.in_mlpC, featureC),
@@ -207,14 +218,13 @@ class MLPBRDFCos(torch.nn.Module):
                         # torch.nn.BatchNorm1d(featureC)
                     ] for _ in range(num_layers)], []),
                 torch.nn.ReLU(inplace=True),
-                torch.nn.Linear(featureC, 3),
-                str2fn(activation)
+                torch.nn.Linear(featureC, 6),
             )
             # self.mlp.apply(self.init_weights)
         else:
-            self.mlp = str2fn(activation)
+            self.mlp = torch.nn.Identity()
 
-    def forward(self, incoming_light, V, L, N, features, matprop, mask):
+    def forward(self, incoming_light, V, L, N, features, matprop, mask, ray_mask):
         roughness = matprop['roughness'][mask]
         D = features.shape[-1]
         n, m, _ = L.shape
@@ -234,21 +244,26 @@ class MLPBRDFCos(torch.nn.Module):
             indata += [positional_encoding(features, self.feape)]
 
         mlp_in = torch.cat(indata, dim=-1)
-        ref_weight = self.mlp(mlp_in).reshape(n, m, -1)
+        mlp_out = self.mlp(mlp_in).reshape(n, m, -1)
+        mlp_out = self.activation(mlp_out)
+        ref_weight = mlp_out[:, :, :3]
+        offset = mlp_out[:, :, 3:6]
 
         ref_weight = ref_weight / m
         # ref_weight = torch.softmax(ref_weight, dim=1)
-        spec_color = (incoming_light * ref_weight).sum(dim=1)
+        offset = offset / m
+        spec_color = (ray_mask * incoming_light * ref_weight + offset).sum(dim=1) / ray_mask.sum(dim=1)
         return spec_color
 
 
 class MLPBRDF(torch.nn.Module):
     def __init__(self, in_channels, v_encoder=None, n_encoder=None, l_encoder=None, feape=6, featureC=128, num_layers=2,
-                 mul_ggx=False, activation='sigmoid', use_roughness=False, lr=1e-4):
+                 mul_ggx=False, activation='sigmoid', use_roughness=False, lr=1e-4, detach_roughness=False):
         super().__init__()
 
         self.in_channels = in_channels
         self.use_roughness = use_roughness
+        self.detach_roughness = detach_roughness
         self.mul_ggx = mul_ggx
         self.in_mlpC = 2*feape*in_channels + in_channels + (1 if use_roughness else 0) + 3
         self.v_encoder = v_encoder
@@ -310,6 +325,8 @@ class MLPBRDF(torch.nn.Module):
         # v = a/(cos_half.reshape(-1, 1).abs()+a)
         indata = [features, cos_lamb.reshape(-1, 1), cos_view.reshape(-1, 1), cos_half.reshape(-1, 1).abs()]
         # indata = [features]
+        if self.detach_roughness:
+            eroughness = eroughness.detach()
         if self.use_roughness:
             indata.append(eroughness)
 
@@ -343,10 +360,9 @@ class MLPBRDF(torch.nn.Module):
             ref_weight = ref_weight*D_ggx
 
         # ref_weight = ref_weight / (ref_weight.sum(dim=1, keepdim=True).mean(dim=2, keepdim=True)+1e-8)
+        # ref_weight = ref_weight * ray_mask / ray_mask.sum(dim=1, keepdim=True)
         ref_weight = ref_weight / m
         offset = offset / m
-        # ref_weight = ref_weight * ray_mask / ray_mask.sum(dim=1, keepdim=True)
-        # ref_weight = torch.softmax(ref_weight, dim=1)
         spec_color = (ray_mask * incoming_light * ref_weight + offset).sum(dim=1) / ray_mask.sum(dim=1)
         return spec_color
 

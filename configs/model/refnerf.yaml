@@ -12,7 +12,7 @@ arch:
   max_recurs: 0
   infinity_border: False
   enable_alpha_mask: false
-  appdim_noise_std: 0.15
+  appdim_noise_std: 0.0
 
   tonemap:
     # _target_: models.tonemap.HDRTonemap
@@ -60,7 +60,7 @@ arch:
   ref_module:
     _partial_: True
     _target_: models.render_modules.MLPRender_FP
-    feape: 2
+    feape: 0
     lr: 1e-4
     # view_encoder:
     #   _target_: models.ish.FullISH
@@ -81,7 +81,7 @@ arch:
     # activation: 'softplus'
     activation: 'sigmoid'
     featureC: 256
-    num_layers: 6
+    num_layers: 8
 
   # normal_module:
   #   _partial_: True
@@ -101,7 +101,7 @@ arch:
 
 params:
   smoothing_start: 1.5
-  smoothing_end: 0.5
+  smoothing_end: 1.5
   lambda_start: 0.0
   lambda_end: 0.0
   smoothing_list: [10000, 15000, 20000]
@@ -138,10 +138,10 @@ params:
 
   TV_weight_density: 0.0
   TV_weight_app: 0.0
-  normal_lambda: 3e-2
-  diffuse_lambda: 1e-5
+  normal_lambda: 3e-4
+  diffuse_lambda: 0
   backwards_rays_lambda: 1
-  floater_lambda: 0.001
+  floater_lambda: 0.000
   charbonier_eps: 0.001
   ortho_weight: 0
 
@@ -149,6 +149,6 @@ params:
   # num_rays_per_envmap: 512
   num_rays_per_envmap: 64
   num_env_train_iters: 0
-  n_iters: 120000
+  n_iters: 30000
 
 

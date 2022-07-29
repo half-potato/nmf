@@ -224,7 +224,7 @@ class MLPDiffuse(torch.nn.Module):
 
         ambient = F.softplus(mlp_out[..., 6:7])
         refraction_index = F.softplus(mlp_out[..., 7:8]-1) + self.min_refraction_index
-        reflectivity = torch.sigmoid(mlp_out[..., 8:9])
+        reflectivity = F.softplus(mlp_out[..., 8:9])
         # roughness = F.softplus(mlp_out[..., 10:11])
         roughness = torch.sigmoid(mlp_out[..., 10:11])
         f0 = torch.sigmoid(mlp_out[..., 11:14])
