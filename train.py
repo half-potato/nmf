@@ -285,7 +285,7 @@ def reconstruction(args):
             #rgb_map, alphas_map, depth_map, weights, uncertainty
             with torch.cuda.amp.autocast(enabled=args.fp16):
                 data = renderer(rays_train, tensorf,
-                        keys = ['rgb_map', 'floater_loss', 'normal_loss', 'backwards_rays_loss', 'termination_xyz', 'normal_map', 'diffuse_reg', 'bounce_count', 'color_count'],
+                        keys = ['rgb_map', 'floater_loss', 'normal_loss', 'backwards_rays_loss', 'termination_xyz', 'normal_map', 'diffuse_reg', 'bounce_count', 'color_count', 'roughness'],
                         focal=focal, output_alpha=alpha_train, chunk=args.batch_size,
                         N_samples=nSamples, white_bg = white_bg, ndc_ray=ndc_ray, is_train=True)
 
@@ -356,7 +356,7 @@ def reconstruction(args):
                     f'Iteration {iteration:05d}:'
                     + f' train_psnr = {float(np.mean(PSNRs)):.2f}'
                     + f' test_psnr = {float(np.mean(PSNRs_test)):.2f}'
-                    # + f' normal_loss = {normal_loss:.5f}'
+                    + f' roughness = {data["roughness"].mean().item():.5f}'
                     + f' backnormal_loss = {backwards_rays_loss:.5f}'
                     + f' floater_loss = {floater_loss:.6f}'
                     + f' mse = {photo_loss:.6f}'

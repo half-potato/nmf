@@ -183,11 +183,14 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
     W, H = test_dataset.img_wh
     focal = (test_dataset.focal[0] if ndc_ray else test_dataset.focal)
     brender = BundleRender(renderer, render_mode, H, W, focal)
-    env_map, col_map = tensorf.recover_envmap(512, xyz=torch.tensor([-0.3042,  0.8466,  0.8462,  0.0027], device='cuda:0'))
-    env_map = (env_map.clamp(0, 1).detach().cpu().numpy() * 255).astype('uint8')
-    col_map = (col_map.clamp(0, 1).detach().cpu().numpy() * 255).astype('uint8')
-    imageio.imwrite(f'{savePath}/envmaps/{prtx}view_map.png', col_map)
-    imageio.imwrite(f'{savePath}/envmaps/{prtx}ref_map.png', env_map)
+
+    if tensorf.ref_module is not None:
+        env_map, col_map = tensorf.recover_envmap(512, xyz=torch.tensor([-0.3042,  0.8466,  0.8462,  0.0027], device='cuda:0'))
+        env_map = (env_map.clamp(0, 1).detach().cpu().numpy() * 255).astype('uint8')
+        col_map = (col_map.clamp(0, 1).detach().cpu().numpy() * 255).astype('uint8')
+        imageio.imwrite(f'{savePath}/envmaps/{prtx}view_map.png', col_map)
+        imageio.imwrite(f'{savePath}/envmaps/{prtx}ref_map.png', env_map)
+
     print(f"Using {render_mode} render mode")
     tensorf.eval()
     for idx, rays, gt_rgb in iterator():
@@ -202,7 +205,7 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
 
         err_map = (rgb_map.clip(0, 1) - gt_rgb.clip(0, 1)) + 0.5
 
-        depth_map, _ = visualize_depth_numpy(depth_map.numpy(),near_far)
+        vis_depth_map, _ = visualize_depth_numpy(depth_map.numpy(),near_far)
         if gt_rgb is not None:
             loss = torch.mean((rgb_map.clip(0, 1) - gt_rgb.clip(0, 1)) ** 2)
             PSNRs.append(-10.0 * np.log(loss.item()) / np.log(10.0))
@@ -211,7 +214,7 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
             # axs[0, 0].imshow(rgb_map)
             # axs[1, 0].imshow(gt_rgb)
             # axs[0, 1].imshow(rgb_map-gt_rgb)
-            # axs[1, 1].imshow(normal_map)
+            # axs[1, 1].imshow(depth_map)
             # plt.show()
 
             if compute_extra_metrics:
@@ -226,16 +229,17 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
         err_map = (err_map.clamp(0, 1).numpy() * 255).astype('uint8')
         # rgb_map = np.concatenate((rgb_map, depth_map), axis=1)
         rgb_maps.append(rgb_map)
-        depth_maps.append(depth_map)
+        depth_maps.append(vis_depth_map)
         if savePath is not None:
             imageio.imwrite(f'{savePath}/{prtx}{idx:03d}.png', rgb_map)
-            rgb_map = np.concatenate((rgb_map, depth_map), axis=1)
+            rgb_map = np.concatenate((rgb_map, vis_depth_map), axis=1)
             imageio.imwrite(f'{savePath}/rgbd/{prtx}{idx:03d}.png', rgb_map)
             imageio.imwrite(f'{savePath}/normal/{prtx}{idx:03d}.png', normal_map)
             imageio.imwrite(f'{savePath}/err/{prtx}{idx:03d}.png', err_map)
             imageio.imwrite(f'{savePath}/debug/{prtx}{idx:03d}.png', (255*debug_map.clamp(0, 1).numpy()).astype(np.uint8))
-            imageio.imwrite(f'{savePath}/envmaps/{prtx}ref_map_{idx:03d}.png', env_map)
-            imageio.imwrite(f'{savePath}/envmaps/{prtx}view_map_{idx:03d}.png', col_map)
+            if tensorf.ref_module is not None:
+                imageio.imwrite(f'{savePath}/envmaps/{prtx}ref_map_{idx:03d}.png', env_map)
+                imageio.imwrite(f'{savePath}/envmaps/{prtx}view_map_{idx:03d}.png', col_map)
 
     tensorf.train()
     imageio.mimwrite(f'{savePath}/{prtx}video.mp4', np.stack(rgb_maps), fps=30, quality=10)

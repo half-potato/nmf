@@ -60,7 +60,7 @@ arch:
   ref_module:
     _partial_: True
     _target_: models.render_modules.MLPRender_FP
-    feape: 2
+    feape: 0
     lr: 1e-4
     # view_encoder:
     #   _target_: models.ish.FullISH

@@ -14,7 +14,7 @@ arch:
   infinity_border: False
   enable_alpha_mask: false
   appdim_noise_std: 0.1
-  world_bounces: 0
+  world_bounces: 1
 
   rf:
     _partial_: True
@@ -61,12 +61,14 @@ arch:
     # l_encoder:
     #   _target_: models.ish.FullISH
     #   max_degree: 3
+
     v_encoder:
       _target_: models.ish.ListISH
       degs: [0,1,2,4,8]
     l_encoder:
       _target_: models.ish.ListISH
       degs: [0,1,2,4,8]
+
     # v_encoder:
     #   _target_: models.ish.ListISH
     #   degs: [0,1,2,4,8,16]
@@ -79,6 +81,7 @@ arch:
     activation: 'softplus'
     mul_ggx: False
     use_roughness: true
+    detach_roughness: false
     lr: 1e-3
 
 
