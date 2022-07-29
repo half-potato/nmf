@@ -548,7 +548,7 @@ class TensorNeRF(torch.nn.Module):
         if rays_chunk.shape[0] == 0:
             return torch.empty((0, 3), device=rays_chunk.device)
         viewdirs = rays_chunk[:, 3:6]
-        bg = self.bg_module(viewdirs[:, :], roughness)
+        bg = self.bg_module(viewdirs[:, :], roughness.detach())
         return bg.reshape(-1, 3)
 
     def forward(self, rays_chunk, focal,
@@ -785,6 +785,7 @@ class TensorNeRF(torch.nn.Module):
                     # m = full_bounce_mask.sum(dim=1) > 0
                     # LOGGER.log_rays(rays_chunk[m].reshape(-1, D), recur, dict(depth_map=depth_map.detach()[m]))
                     # LOGGER.log_rays(bounce_rays.reshape(-1, D), recur+1, reflect_data)
+                bounce_count = bounce_mask.sum()
 
                 if inv_full_bounce_mask.any():
                     if self.ref_module is not None:
@@ -801,7 +802,6 @@ class TensorNeRF(torch.nn.Module):
                         debug[inv_full_bounce_mask] += tint[~bounce_mask]*matprop['ambient'][~bounce_mask]
 
             # this is a modified rendering equation where the emissive light and light under the integral is all multiplied by the base color
-            bounce_count = bounce_mask.sum()
             # in addition, the light is interpolated between emissive and reflective
             reflectivity = matprop['reflectivity']
             # rgb[app_mask] = tint * ((1-reflectivity)*matprop['ambient'] + reflectivity * reflect_rgb)
@@ -883,17 +883,17 @@ class TensorNeRF(torch.nn.Module):
         debug_map = (weight[..., None]*debug).sum(dim=1)
         return dict(
             rgb_map=rgb_map,
-            depth_map=depth_map,
-            debug_map=debug_map,
-            normal_map=v_normal_map.cpu(),
+            depth_map=depth_map.detach().cpu(),
+            debug_map=debug_map.detach().cpu(),
+            normal_map=v_normal_map.detach().cpu(),
             # normal_map=v_world_normal_map.cpu(),
             recur=recur,
-            acc_map=acc_map,
+            acc_map=acc_map.detach().cpu(),
             diffuse_reg=roughness.mean() - reflectivity.mean() + diffuse.mean(),# + ((tint_brightness-0.5)**2).mean(),
             normal_loss=normal_loss,
             backwards_rays_loss=backwards_rays_loss,
-            termination_xyz=termination_xyz.cpu(),
+            termination_xyz=termination_xyz.detach().cpu(),
             floater_loss=floater_loss,
-            color_count=app_mask.sum(),
+            color_count=app_mask.detach().sum(),
             bounce_count=bounce_count,
         )

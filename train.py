@@ -342,8 +342,8 @@ def reconstruction(args):
             summary_writer.add_scalar('train/floater_loss', floater_loss.detach().item(), global_step=iteration)
             summary_writer.add_scalar('train/normal_loss', normal_loss.detach().item(), global_step=iteration)
             summary_writer.add_scalar('train/diffuse_loss', diffuse_reg.detach().item(), global_step=iteration)
-            summary_writer.add_scalar('train/color_count', data['color_count'].mean(), global_step=iteration)
-            summary_writer.add_scalar('train/bounce_count', data['bounce_count'].mean(), global_step=iteration)
+            summary_writer.add_scalar('train/color_count', data['color_count'].sum(), global_step=iteration)
+            summary_writer.add_scalar('train/bounce_count', data['bounce_count'], global_step=iteration)
 
             if old_decay:
                 for param_group in optimizer.param_groups:
