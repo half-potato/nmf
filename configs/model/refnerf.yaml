@@ -141,7 +141,7 @@ params:
   normal_lambda: 3e-4
   diffuse_lambda: 0
   backwards_rays_lambda: 1
-  floater_lambda: 0.000
+  floater_lambda: 0
   charbonier_eps: 0.001
   ortho_weight: 0
 

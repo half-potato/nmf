@@ -12,6 +12,7 @@ from tqdm import tqdm
 from models.sh import eval_sh_bases
 #  import tinycudann as tcnn
 from pathlib import Path
+import math
 
 device = torch.device('cuda')
 #  pano_paths = [
@@ -37,7 +38,7 @@ featureC = 256
 #  pano_feat_dim = 128
 pano_feat_dim = 27*3
 #  num_layers = 3
-num_layers = 6
+num_layers = 8
 
 epochs = 500
 
@@ -91,7 +92,8 @@ def init_weights(m):
         torch.nn.init.xavier_uniform_(m.weight, gain=np.sqrt(2))
 
 mlp = torch.nn.Sequential(
-    torch.nn.Linear(ish.dim()+pano_feat_dim, featureC),
+    torch.nn.Linear(ish.dim(), featureC),
+    # torch.nn.Linear(ish.dim()+pano_feat_dim, featureC),
     *sum([[
             torch.nn.ReLU(inplace=True),
             torch.nn.Linear(featureC, featureC, bias=False)
@@ -148,7 +150,8 @@ class SimpleSampler:
         return ids
 
 sampler = SimpleSampler(N, batch_size)
-for i in tqdm(range(epochs)):
+pbar = tqdm(range(epochs))
+for i in pbar:
     inds = sampler.nextids()
     samp = colors[inds]
     samp_vecs = vecs[inds % M]
@@ -159,7 +162,7 @@ for i in tqdm(range(epochs)):
     enc = ish(samp_vecs, roughness)
     enc = enc.reshape(batch_size, -1)
     feats = get_features(inds)
-    enc = torch.cat([enc, feats], dim=-1)
+    # enc = torch.cat([enc, feats], dim=-1)
     #  enc = torch.cat([enc, eval_sh_bases(4, samp_vecs)], dim=-1)
     output = mlp(enc)
 
@@ -170,6 +173,7 @@ for i in tqdm(range(epochs)):
     loss.backward()
     optim.step()
     optim.zero_grad()
+    pbar.set_description(f"loss: {-10 * math.log(loss.item())/math.log(10)}")
 ic(loss)
 
 # kappa = torch.tensor(20, device=device)
@@ -186,7 +190,7 @@ with torch.no_grad():
             enc = ish(samp_vecs, roughness).reshape(-1, ish.dim())
             #  enc = torch.cat([enc, eval_sh_bases(4, samp_vecs)], dim=-1)
             feats = get_features(inds)
-            enc = torch.cat([enc, feats], dim=-1)
+            # enc = torch.cat([enc, feats], dim=-1)
             output = mlp(enc)
 
             #  output = mlp(samp_vecs)
