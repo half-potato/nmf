@@ -712,7 +712,7 @@ class TensorNeRF(torch.nn.Module):
                     xyz_normed[app_mask], viewdirs[app_mask],
                     noise_app_features, refdirs=refdirs,
                     roughness=roughness, viewdotnorm=viewdotnorm)
-                reflect_rgb = ref_col
+                reflect_rgb = tint * ref_col
                 debug[app_mask] += ref_col
             else:
                 num_roughness_rays = self.roughness_rays // 2 if recur > 0 else self.roughness_rays
