@@ -712,7 +712,7 @@ class TensorNeRF(torch.nn.Module):
                     xyz_normed[app_mask], viewdirs[app_mask],
                     noise_app_features, refdirs=refdirs,
                     roughness=roughness, viewdotnorm=viewdotnorm)
-                reflect_rgb = ref_col
+                reflect_rgb = tint * ref_col
                 debug[app_mask] += ref_col
             else:
                 num_roughness_rays = self.roughness_rays // 2 if recur > 0 else self.roughness_rays
@@ -838,10 +838,10 @@ class TensorNeRF(torch.nn.Module):
 
             # view dependent normal map
             # N, 3, 3
-            row_basis = torch.stack([
-                torch.cross(viewdirs[:, 0], rays_up[:, 0]),
+            row_basis = -torch.stack([
+                -torch.linalg.cross(viewdirs[:, 0], rays_up[:, 0], dim=-1),
                 viewdirs[:, 0],
-                -rays_up[:, 0],
+                rays_up[:, 0],
             ], dim=1)
             # p_world_normal_map = torch.sum(weight[..., None] * p_world_normal, 1)
             # p_world_normal_map = p_world_normal_map / \
@@ -886,7 +886,7 @@ class TensorNeRF(torch.nn.Module):
             rgb_map=rgb_map,
             depth_map=depth_map.detach().cpu(),
             debug_map=debug_map.detach().cpu(),
-            normal_map=v_normal_map.detach().cpu(),
+            normal_map=v_world_normal_map.detach().cpu(),
             recur=recur,
             acc_map=acc_map.detach().cpu(),
             roughness=roughness.mean(),

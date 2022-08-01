@@ -59,10 +59,10 @@ def render_test(args):
     if args.render_train:
         os.makedirs(f'{logfolder}/imgs_train_all', exist_ok=True)
         train_dataset = dataset(os.path.join(args.datadir, args.dataset.scenedir), split='train', downsample=args.dataset.downsample_train, is_stack=True)
-        PSNRs_test = evaluation(train_dataset,tensorf, args, renderer, f'{logfolder}/imgs_train_all/',
+        test_res = evaluation(train_dataset,tensorf, args, renderer, f'{logfolder}/imgs_train_all/',
                                 N_vis=-1, N_samples=-1, white_bg = white_bg, ndc_ray=ndc_ray,device=device,
                                 render_mode=args.render_mode)
-        print(f'======> {args.expname} train all psnr: {np.mean(PSNRs_test)} <========================')
+        print(f'======> {args.expname} train all psnr: {np.mean(test_res["psnrs"])} <========================')
 
     if args.render_test:
         folder = f'{logfolder}/imgs_test_all'
@@ -250,13 +250,13 @@ def reconstruction(args):
     pbar = tqdm(range(params.n_iters), miniters=args.progress_refresh_rate, file=sys.stdout)
     old_decay = False
     T_max = 30000
-    scheduler1 = lr_scheduler.CosineAnnealingLR(optimizer, T_max=T_max)
-    scheduler2 = lr_scheduler.ChainedScheduler([
-            lr_scheduler.ConstantLR(optimizer, factor=0.25, total_iters=600000),
-            lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=10000, T_mult=1)
-    ])
-    scheduler = lr_scheduler.SequentialLR(optimizer, schedulers=[scheduler1, scheduler2], milestones=[3000])
-    scheduler = lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=30000, T_mult=1)
+    # scheduler1 = lr_scheduler.CosineAnnealingLR(optimizer, T_max=T_max)
+    # scheduler2 = lr_scheduler.ChainedScheduler([
+    #         lr_scheduler.ConstantLR(optimizer, factor=0.25, total_iters=600000),
+    #         lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=10000, T_mult=1)
+    # ])
+    # scheduler = lr_scheduler.SequentialLR(optimizer, schedulers=[scheduler1, scheduler2], milestones=[3000])
+    scheduler = lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=params.n_iters, T_mult=1, eta_min=1e-4)
     if True:
     # with torch.autograd.detect_anomaly():
         for iteration in pbar:
@@ -366,10 +366,12 @@ def reconstruction(args):
 
             if iteration % args.vis_every == args.vis_every - 1 and args.N_vis!=0:
                 # tensorf.save(f'{logfolder}/{args.expname}_{iteration}.th', args.model.arch)
-                PSNRs_test = evaluation(test_dataset,tensorf, args, renderer, f'{logfolder}/imgs_vis/', N_vis=args.N_vis,
+                test_res = evaluation(test_dataset,tensorf, args, renderer, f'{logfolder}/imgs_vis/', N_vis=args.N_vis,
                                         prtx=f'{iteration:06d}_', N_samples=nSamples, white_bg = white_bg, ndc_ray=ndc_ray,
                                         compute_extra_metrics=False, render_mode=args.render_mode)
-                summary_writer.add_scalar('test/psnr', np.mean(PSNRs_test), global_step=iteration)
+                PSNRs_test = test_res['psnrs']
+                summary_writer.add_scalar('test/psnr', np.mean(test_res['psnrs']), global_step=iteration)
+                summary_writer.add_scalar('test/norm_err', np.mean(test_res['norm_errs']), global_step=iteration)
                 if tensorf.bg_module is not None:
                     tensorf.bg_module.save(Path('log/bg'))
                 if args.save_often:
@@ -425,16 +427,16 @@ def reconstruction(args):
     if args.render_train:
         os.makedirs(f'{logfolder}/imgs_train_all', exist_ok=True)
         train_dataset = dataset(args.datadir, split='train', downsample=args.downsample_train, is_stack=True)
-        PSNRs_test = evaluation(train_dataset,tensorf, args, renderer, f'{logfolder}/imgs_train_all/',
+        test_res = evaluation(train_dataset,tensorf, args, renderer, f'{logfolder}/imgs_train_all/',
                                 N_vis=-1, N_samples=-1, white_bg = white_bg, ndc_ray=ndc_ray,device=device, render_mode=args.render_mode)
-        print(f'======> {args.expname} test all psnr: {np.mean(PSNRs_test)} <========================')
+        print(f'======> {args.expname} test all psnr: {np.mean(test_res["psnrs"])} <========================')
 
     if args.render_test:
         os.makedirs(f'{logfolder}/imgs_test_all', exist_ok=True)
-        PSNRs_test = evaluation(test_dataset,tensorf, args, renderer, f'{logfolder}/imgs_test_all/',
+        test_res = evaluation(test_dataset,tensorf, args, renderer, f'{logfolder}/imgs_test_all/',
                                 N_vis=-1, N_samples=-1, white_bg = white_bg, ndc_ray=ndc_ray,device=device, render_mode=args.render_mode)
-        summary_writer.add_scalar('test/psnr_all', np.mean(PSNRs_test), global_step=iteration)
-        print(f'======> {args.expname} test all psnr: {np.mean(PSNRs_test)} <========================')
+        summary_writer.add_scalar('test/psnr_all', np.mean(test_res["psnrs"]), global_step=iteration)
+        print(f'======> {args.expname} test all psnr: {np.mean(test_res["psnrs"])} <========================')
 
     if args.render_path:
         c2ws = test_dataset.render_path

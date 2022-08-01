@@ -71,12 +71,15 @@ class BlenderDataset(Dataset):
 
         # ray directions for all pixels, same for all images (same H, W, focal)
         self.directions = get_ray_directions(h, w, [self.focal,self.focal])  # (h, w, 3)
-        self.rays_up = -torch.stack([
-            torch.zeros_like(self.directions[..., 0]),
-            self.directions[..., 2],
-            -self.directions[..., 1],
-        ], dim=2)
-        self.rays_up /= torch.norm(self.rays_up, dim=2, keepdim=True)
+        cam_right = torch.tensor([1.0, 0.0, 0.0]).reshape(1, -1)
+        # self.rays_up = torch.linalg.cross(self.directions.reshape(-1, 3), cam_right, dim=-1).reshape(h, w, 3)
+        self.rays_up = torch.tensor([0.0, 1.0, 0.0]).reshape(1, 1, 3).expand(h, w, 3)
+        # self.rays_up = -torch.stack([
+        #     torch.zeros_like(self.directions[..., 0]),
+        #     self.directions[..., 2],
+        #     -self.directions[..., 1],
+        # ], dim=2)
+        # self.rays_up /= torch.norm(self.rays_up, dim=2, keepdim=True)
         self.directions = self.directions / torch.norm(self.directions, dim=-1, keepdim=True)
         self.intrinsics = torch.tensor([[self.focal,0,w/2],[0,self.focal,h/2],[0,0,1]]).float()
 
@@ -86,6 +89,7 @@ class BlenderDataset(Dataset):
         self.all_rgbs = []
         self.all_masks = []
         self.all_depth = []
+        self.normal_paths = []
 
         img_eval_interval = 1 if self.N_vis < 0 else len(self.meta['frames']) // self.N_vis
         idxs = list(range(0, len(self.meta['frames']), img_eval_interval))
@@ -97,7 +101,9 @@ class BlenderDataset(Dataset):
             self.poses += [c2w]
 
             image_path = os.path.join(self.root_dir, f"{frame['file_path']}{ext}")
+            normal_path = os.path.join(self.root_dir, f"{frame['file_path']}_normal{ext}")
             self.image_paths += [image_path]
+            self.normal_paths += [normal_path]
             # img = Image.open(image_path)
             img = imageio.imread(image_path)
             
@@ -145,6 +151,13 @@ class BlenderDataset(Dataset):
         
     def __len__(self):
         return len(self.all_rgbs)
+
+    def get_normal(self, idx):
+        norms = imageio.imread(self.normal_paths[idx])
+        norms = torch.as_tensor(norms)[..., :3].float()
+        norms = (norms - 128)/127
+        norms = norms / torch.linalg.norm(norms, dim=-1, keepdim=True)
+        return norms
 
     def __getitem__(self, idx):
 

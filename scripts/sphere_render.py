@@ -1,13 +1,11 @@
 import os
 from torch.nn.modules import activation
 from tqdm.auto import tqdm
-from models.tensor_nerf import TensorNeRF
-from models.brdf import PBR, SimplePBR
+from models.brdf import PBR
 from renderer import *
 from utils import *
-from torch.utils.tensorboard import SummaryWriter
 import datetime
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig
 from models import bg_modules
 
 from dataLoader import dataset_dict
@@ -49,10 +47,10 @@ def main(cfg: DictConfig):
     tensorf = hydra.utils.instantiate(cfg.model.arch)(aabb=torch.tensor([[-1.0, -1.0, -1.0], [1.0, 1.0, 1.0]]), grid_size=[128]*3)
     bg_sd = torch.load('log/mats360_bg.th')
     from models import render_modules
-    bg_module = bg_modules.HierarchicalCubeMap(bg_resolution=1600, num_levels=4, featureC=128, activation='softplus', power=2)
+    bg_module = bg_modules.HierarchicalCubeMap(bg_resolution=1600, num_levels=7, featureC=128, activation='softplus', power=2)
     bg_module.load_state_dict(bg_sd)
     tensorf.bg_module = bg_module
-    tensorf.brdf = SimplePBR(0)
+    tensorf.brdf = PBR(0)
     tensorf.rf.set_smoothing(1.5)
     tensorf = tensorf.to(device)
     ic(tensorf)
@@ -86,7 +84,7 @@ def main(cfg: DictConfig):
 
     # train shape
     optim = torch.optim.Adam(tensorf.parameters(), lr=0.1, betas=(0.9,0.99))
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optim, T_max=500)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optim, T_max=500, eta_min=1e-3)
     with torch.enable_grad():
         # TODO REMOVE
         pbar = tqdm(range(500))
@@ -104,7 +102,7 @@ def main(cfg: DictConfig):
             # sigma = 1-torch.exp(-sigma_feat * 0.025 * 25)
             sigma = 1-torch.exp(-sigma_feat)
             # sigma = sigma_feat
-            loss = (sigma[mask]-1).abs().mean() + sigma[~mask].abs().mean()
+            loss = (sigma[mask]-1).abs().mean() + 100*sigma[~mask].abs().mean()
             # loss = (-sigma[mask].clip(max=1).sum() + sigma[~mask].clip(min=1e-8).sum())
             pbar.set_description(f"Shape loss: {loss.detach().item():.06f} LR: {scheduler.get_last_lr()}")
             optim.zero_grad()

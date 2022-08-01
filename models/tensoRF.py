@@ -22,8 +22,8 @@ class TensorVMSplit(TensorBase):
         self.sizes = self.convolver.sizes
 
         # num_levels x num_outputs
-        self.interp_mode = 'bilinear'
-        # self.interp_mode = 'bicubic'
+        # self.interp_mode = 'bilinear'
+        self.interp_mode = 'bicubic'
         self.align_corners = False
 
         self.density_plane, self.density_line = self.init_one_svd(self.density_n_comp, [int(self.density_res_multi*g) for g in self.grid_size], 0.1, -0)

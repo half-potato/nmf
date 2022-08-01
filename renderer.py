@@ -38,7 +38,7 @@ def chunk_renderer(rays, tensorf, focal, keys=['rgb_map'], chunk=4096, **kwargs)
     return data
 
 class BundleRender:
-    def __init__(self, base_renderer, render_mode, H, W, focal, bundle_size=1, chunk=1*512, scale_normal=False):
+    def __init__(self, base_renderer, render_mode, H, W, focal, bundle_size=1, chunk=3*512, scale_normal=False):
         self.render_mode = render_mode
         self.base_renderer = base_renderer
         self.bundle_size = bundle_size
@@ -165,10 +165,12 @@ def depth_to_normals(depth, focal):
 def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N_samples=-1,
                white_bg=False, ndc_ray=False, compute_extra_metrics=True, device='cuda', bundle_size=1, render_mode='decimate'):
     PSNRs, rgb_maps, depth_maps = [], [], []
+    norm_errs = []
     ssims,l_alex,l_vgg=[],[],[]
     os.makedirs(savePath, exist_ok=True)
     os.makedirs(savePath+"/rgbd", exist_ok=True)
     os.makedirs(savePath+"/normal", exist_ok=True)
+    os.makedirs(savePath+"/normal_err", exist_ok=True)
     os.makedirs(savePath+"/err", exist_ok=True)
     os.makedirs(savePath+"/debug", exist_ok=True)
     os.makedirs(savePath+"/envmaps", exist_ok=True)
@@ -191,6 +193,17 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
         imageio.imwrite(f'{savePath}/envmaps/{prtx}view_map.png', col_map)
         imageio.imwrite(f'{savePath}/envmaps/{prtx}ref_map.png', env_map)
 
+    T2 = torch.tensor([
+        [0.0, 0.0, -1.0],
+        [0.0, 1.0, 0.0],
+        [1.0, 0.0, 0.0],
+    ])
+    T = torch.tensor([
+        [1.0, 0.0, 0.0],
+        [0.0, -1.0, 0.0],
+        [0.0, 0.0, 1.0],
+    ])
+
     print(f"Using {render_mode} render mode")
     tensorf.eval()
     for idx, rays, gt_rgb in iterator():
@@ -200,13 +213,39 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
         # rgb_map = rgb_map.clamp(0.0, 1.0)
         rgb_map, depth_map, debug_map, normal_map, env_map, col_map = brender(
                 rays, tensorf, N_samples=N_samples, ndc_ray=ndc_ray, white_bg = white_bg)
-        
-        normal_map = (normal_map * 127 + 128).clamp(0, 255).byte()
+
+        pose = test_dataset.poses[idx]
+        H, W, _ = normal_map.shape
+        # normal_map = -normal_map.reshape(-1, 3) @ T @ pose[:3, :3]
+        # normal_map = normal_map.reshape(-1, 3) @ T2 @ pose[:3, :3] @ T
+        normal_map = normal_map.reshape(-1, 3)# @ pose[:3, :3]# @ T
+        normal_map = normal_map.reshape(H, W, 3)
+        # bottom of the sphere is green
+        # top is blue
+        vis_normal_map = (normal_map * 127 + 128).clamp(0, 255).byte()
+        # vis_normal_map = (normal_map * 255).clamp(0, 255).byte()
 
         err_map = (rgb_map.clip(0, 1) - gt_rgb.clip(0, 1)) + 0.5
 
         vis_depth_map, _ = visualize_depth_numpy(depth_map.numpy(),near_far)
         if gt_rgb is not None:
+            try:
+                gt_normal_map = test_dataset.get_normal(idx)
+                # vis_gt_normal_map = (gt_normal_map * 127 + 128).clamp(0, 255).byte()
+                # X = normal_map.reshape(-1, 3)
+                # Y = gt_normal_map.reshape(-1, 3)
+                # u, d, vh = torch.linalg.svd(X.T @ Y)
+                # ic(u @ vh)
+                mask = (gt_normal_map[..., 0] == 1) & (gt_normal_map[..., 1] == 1) & (gt_normal_map[..., 2] == 1)
+                gt_normal_map[mask] = 0
+                norm_err = torch.linalg.norm(normal_map - gt_normal_map, dim=-1)
+                norm_errs.append(norm_err.mean())
+                if savePath is not None:
+                    imageio.imwrite(f'{savePath}/normal_err/{prtx}{idx:03d}.png', (norm_err*256/np.sqrt(2)).numpy().astype(np.uint8))
+                    # imageio.imwrite(f'{savePath}/normal_err/{prtx}{idx:03d}.png', vis_gt_normal_map)
+            except:
+                pass
+                # traceback.print_exc()
             loss = torch.mean((rgb_map.clip(0, 1) - gt_rgb.clip(0, 1)) ** 2)
             PSNRs.append(-10.0 * np.log(loss.item()) / np.log(10.0))
 
@@ -234,7 +273,7 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
             imageio.imwrite(f'{savePath}/{prtx}{idx:03d}.png', rgb_map)
             rgb_map = np.concatenate((rgb_map, vis_depth_map), axis=1)
             imageio.imwrite(f'{savePath}/rgbd/{prtx}{idx:03d}.png', rgb_map)
-            imageio.imwrite(f'{savePath}/normal/{prtx}{idx:03d}.png', normal_map)
+            imageio.imwrite(f'{savePath}/normal/{prtx}{idx:03d}.png', vis_normal_map)
             imageio.imwrite(f'{savePath}/err/{prtx}{idx:03d}.png', err_map)
             imageio.imwrite(f'{savePath}/debug/{prtx}{idx:03d}.png', (255*debug_map.clamp(0, 1).numpy()).astype(np.uint8))
             if tensorf.ref_module is not None:
@@ -257,6 +296,11 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
 
     if PSNRs:
         psnr = np.mean(np.asarray(PSNRs))
+        if len(norm_errs) > 0:
+            norm_err = float(np.mean(np.asarray(norm_errs)))
+        else:
+            norm_err = 0
+        print(f"Norm err: {norm_err}")
         if compute_extra_metrics:
             ssim = np.mean(np.asarray(ssims))
             l_a = np.mean(np.asarray(l_alex))
@@ -266,7 +310,7 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
             np.savetxt(f'{savePath}/{prtx}mean.txt', np.asarray([psnr]))
 
 
-    return PSNRs
+    return dict(psnrs=PSNRs, norm_errs=norm_errs)
 
 # @torch.no_grad()
 def evaluation(test_dataset,tensorf, unused, renderer, *args, N_vis=5, device='cuda', **kwargs):

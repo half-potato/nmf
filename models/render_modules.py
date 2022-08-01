@@ -119,7 +119,7 @@ class MLPRender_FP(torch.nn.Module):
                     torch.nn.ReLU(inplace=True),
                     torch.nn.Linear(featureC, featureC),
                     # torch.nn.BatchNorm1d(featureC),
-                ] for _ in range(num_layers)], []),
+                ] for _ in range(num_layers-2)], []),
             torch.nn.ReLU(inplace=True),
             torch.nn.Linear(featureC, 3)
         )
@@ -327,7 +327,8 @@ class MLPNormal(torch.nn.Module):
                     torch.nn.ReLU(inplace=True),
                     torch.nn.Linear(featureC, featureC),
                 ] for _ in range(num_layers)], []),
-            torch.nn.ReLU(inplace=True),
+            # torch.nn.ReLU(inplace=True),
+            torch.nn.Tanh(),
             torch.nn.Linear(featureC, 3, bias=False)
         )
 

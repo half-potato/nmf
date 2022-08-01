@@ -40,7 +40,7 @@ pano_feat_dim = 27*3
 #  num_layers = 3
 num_layers = 8
 
-epochs = 500
+epochs = 5000
 
 num_panos = len(pano_paths)
 colors = []
@@ -88,7 +88,7 @@ def get_features(inds):
     return pano_features[pano_ind]
 
 def init_weights(m):
-    if isinstance(m, torch.nn.Linear):# and m.weight.shape[1] > 200:
+    if isinstance(m, torch.nn.Linear):
         torch.nn.init.xavier_uniform_(m.weight, gain=np.sqrt(2))
 
 mlp = torch.nn.Sequential(
@@ -131,7 +131,9 @@ mlp = torch.nn.Sequential(
 
 mlp.apply(init_weights)
 
-optim = torch.optim.Adam(mlp.parameters(), lr=5e-4)
+optim = torch.optim.Adam(mlp.parameters(), lr=2e-3)
+scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optim, T_max=epochs, eta_min=1e-2)
+# scheduler = torch.optim.lr_scheduler.StepLR(optim, 30, gamma=0.99)
 
 class SimpleSampler:
     def __init__(self, total, batch):
@@ -173,7 +175,8 @@ for i in pbar:
     loss.backward()
     optim.step()
     optim.zero_grad()
-    pbar.set_description(f"loss: {-10 * math.log(loss.item())/math.log(10)}")
+    scheduler.step()
+    pbar.set_description(f"loss: {-10 * math.log(loss.item())/math.log(10)} lr: {scheduler.get_last_lr()}")
 ic(loss)
 
 # kappa = torch.tensor(20, device=device)
