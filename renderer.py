@@ -206,7 +206,7 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
 
     print(f"Using {render_mode} render mode")
     tensorf.eval()
-    for idx, rays, gt_rgb in iterator():
+    for idx, im_idx, rays, gt_rgb in iterator():
 
         # rgb_map, _, depth_map, _, _ = renderer(rays, tensorf, chunk=4096, N_samples=N_samples,
         #                                 ndc_ray=ndc_ray, white_bg = white_bg, device=device)
@@ -214,7 +214,6 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
         rgb_map, depth_map, debug_map, normal_map, env_map, col_map = brender(
                 rays, tensorf, N_samples=N_samples, ndc_ray=ndc_ray, white_bg = white_bg)
 
-        pose = test_dataset.poses[idx]
         H, W, _ = normal_map.shape
         # normal_map = -normal_map.reshape(-1, 3) @ T @ pose[:3, :3]
         # normal_map = normal_map.reshape(-1, 3) @ T2 @ pose[:3, :3] @ T
@@ -230,7 +229,7 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
         vis_depth_map, _ = visualize_depth_numpy(depth_map.numpy(),near_far)
         if gt_rgb is not None:
             try:
-                gt_normal_map = test_dataset.get_normal(idx)
+                gt_normal_map = test_dataset.get_normal(im_idx)
                 # vis_gt_normal_map = (gt_normal_map * 127 + 128).clamp(0, 255).byte()
                 # X = normal_map.reshape(-1, 3)
                 # Y = gt_normal_map.reshape(-1, 3)
@@ -324,9 +323,9 @@ def evaluation(test_dataset,tensorf, unused, renderer, *args, N_vis=5, device='c
             rays = samples.view(-1,samples.shape[-1]).to(device)
             if len(test_dataset.all_rgbs):
                 gt_rgb = test_dataset.all_rgbs[idxs[idx]].view(H, W, 3)
-                yield idx, rays, gt_rgb
+                yield idx, idxs[idx], rays, gt_rgb
             else:
-                yield idx, rays, None
+                yield idx, idxs[idx], rays, None
     return evaluate(iterator, test_dataset, tensorf, renderer, *args, device=device, **kwargs)
 
 # @torch.no_grad()
@@ -341,5 +340,5 @@ def evaluation_path(test_dataset,tensorf, c2ws, renderer, *args, device='cuda', 
             if ndc_ray:
                 rays_o, rays_d = ndc_rays_blender(H, W, test_dataset.focal[0], 1.0, rays_o, rays_d)
             rays = torch.cat([rays_o, rays_d], 1)  # (h*w, 6)
-            yield idx, rays, None
+            yield idx, idx, rays, None
     return evaluate(iterator, test_dataset, tensorf, renderer, *args, ndc_ray=ndc_ray, **kwargs)
