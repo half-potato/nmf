@@ -14,7 +14,7 @@ arch:
   infinity_border: False
   enable_alpha_mask: false
   appdim_noise_std: 0.1
-  world_bounce: True
+  world_bounces: 0
 
   rf:
     _partial_: True

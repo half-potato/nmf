@@ -512,11 +512,11 @@ class TensorNeRF(torch.nn.Module):
         # roughness = 1/np.pi*torch.ones((app_features.shape[0], 1), dtype=xyz.dtype, device=xyz.device)
             roughness = matprop['roughness'] if roughness is None else roughness * torch.ones((app_features.shape[0], 1), dtype=xyz.dtype, device=xyz.device)
             viewdotnorm = torch.ones((app_features.shape[0], 1), dtype=xyz.dtype, device=xyz.device)
-            envmap = self.ref_module(xyz_samp, staticdir, app_features, refdirs=ang_vecs.reshape(
+            envmap = tint * self.ref_module(xyz_samp, staticdir, app_features, refdirs=ang_vecs.reshape(
                 -1, 3), roughness=roughness, viewdotnorm=viewdotnorm).reshape(res, 2*res, 3)
         else:
             envmap = torch.zeros(res, 2*res, 3)
-        color = (color+tint).reshape(res, 2*res, 3)/2
+        color = (color).reshape(res, 2*res, 3)/2
         
         return self.tonemap(envmap).clamp(0, 1), self.tonemap(color).clamp(0, 1)
 
@@ -712,7 +712,7 @@ class TensorNeRF(torch.nn.Module):
                     xyz_normed[app_mask], viewdirs[app_mask],
                     noise_app_features, refdirs=refdirs,
                     roughness=roughness, viewdotnorm=viewdotnorm)
-                reflect_rgb = ref_col
+                reflect_rgb = tint * ref_col
                 debug[app_mask] += ref_col
             else:
                 num_roughness_rays = self.roughness_rays // 2 if recur > 0 else self.roughness_rays
@@ -810,8 +810,8 @@ class TensorNeRF(torch.nn.Module):
             # rgb[app_mask] = tint * reflectivity * reflect_rgb + (1-reflectivity)*matprop['diffuse']
             # rgb[app_mask] = tint * (ambient + reflectivity * reflect_rgb)
 
-            # align_world_loss = (1-(p_world_normal * world_normal).sum(dim=-1))
-            align_world_loss = torch.linalg.norm(p_world_normal - world_normal, dim=-1)
+            align_world_loss = (1-(p_world_normal * world_normal).sum(dim=-1).clamp(max=self.max_normal_similarity))
+            # align_world_loss = torch.linalg.norm(p_world_normal - world_normal, dim=-1)
             normal_loss = (weight * align_world_loss).sum(dim=-1).mean()
             tint_brightness = tint.mean(dim=-1)
         else:

@@ -235,12 +235,12 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
                 # Y = gt_normal_map.reshape(-1, 3)
                 # u, d, vh = torch.linalg.svd(X.T @ Y)
                 # ic(u @ vh)
-                mask = (gt_normal_map[..., 0] == 1) & (gt_normal_map[..., 1] == 1) & (gt_normal_map[..., 2] == 1)
-                gt_normal_map[mask] = 0
+                # mask = (gt_normal_map[..., 0] == 1) & (gt_normal_map[..., 1] == 1) & (gt_normal_map[..., 2] == 1)
+                # gt_normal_map[mask] = 0
                 norm_err = torch.linalg.norm(normal_map - gt_normal_map, dim=-1)
                 norm_errs.append(norm_err.mean())
                 if savePath is not None:
-                    imageio.imwrite(f'{savePath}/normal_err/{prtx}{idx:03d}.png', (norm_err*256/np.sqrt(2)).numpy().astype(np.uint8))
+                    imageio.imwrite(f'{savePath}/normal_err/{prtx}{idx:03d}.png', (norm_err*256/norm_err.max()).numpy().astype(np.uint8))
                     # imageio.imwrite(f'{savePath}/normal_err/{prtx}{idx:03d}.png', vis_gt_normal_map)
             except:
                 pass

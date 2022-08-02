@@ -10,11 +10,12 @@ arch:
   fea2denseAct: 'softplus_shift'
   # fea2denseAct: 'relu_shift'
   max_recurs: 2
-  roughness_rays: 50
+  roughness_rays: 25
   infinity_border: False
   enable_alpha_mask: false
   appdim_noise_std: 0.1
-  world_bounces: 1
+  world_bounces: 0
+  max_normal_similarity: 1.0
 
   rf:
     _partial_: True
@@ -187,3 +188,4 @@ params:
   num_rays_per_envmap: 64
   num_env_train_iters: 0
   n_iters: 30000
+  charbonier_loss: false

@@ -115,11 +115,14 @@ class GGXSampler:
 class Phong(torch.nn.Module):
     def __init__(self, in_channels):
         super().__init__()
+        self.lr = 0
 
     def forward(self, incoming_light, V, L, N, features, matprop, mask, ray_mask):
         B, M, _ = L.shape
-        refdir = L[:, 0:1, :]
-        RdotV = (refdir * V).sum(dim=-1, keepdim=True).clip(min=1e-8)
+        # refdir = L[:, 0:1, :]
+        refdir = 2*(N * L).sum(dim=-1, keepdim=True) * N - L
+        RdotV = (refdir * V.reshape(-1, 1, 3)).sum(dim=-1, keepdim=True).clip(min=1e-8)#.reshape(-1, 1, 1)
+        # ic(RdotV, V, refdir)
         LdotN = (L * N).sum(dim=-1, keepdim=True).clip(min=1e-8)
         tint = matprop['tint'][mask].reshape(-1, 1, 3)
         f0 = matprop['f0'][mask].reshape(-1, 1, 3)

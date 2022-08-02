@@ -116,6 +116,9 @@ def reconstruction(args):
         ckpt = torch.load(args.ckpt)
         # tensorf = TensorNeRF.load(ckpt)
         # TODO REMOVE PRIORITY
+        del ckpt['state_dict']['bg_module.bg_mats.0']
+        del ckpt['state_dict']['bg_module.bg_mats.1']
+        del ckpt['state_dict']['bg_module.bg_mats.2']
         tensorf2 = TensorNeRF.load(ckpt, strict=False)
         tensorf.normal_module = tensorf2.normal_module
         tensorf.rf = tensorf2.rf
@@ -172,6 +175,7 @@ def reconstruction(args):
         ind = [i for i, d in enumerate(grad_vars) if 'name' in d and d['name'] == 'bg'][0]
         grad_vars[ind]['params'] = tensorf.bg_module.parameters()
         grad_vars[ind]['lr'] = lr_bg
+    # optimizer = torch.optim.Adam(grad_vars, betas=(0.9, 0.999), weight_decay=0, eps=1e-6)
     optimizer = torch.optim.Adam(grad_vars, betas=(0.9, 0.99), weight_decay=0)
     # optimizer = torch.optim.SGD(grad_vars, momentum=0.9, weight_decay=0)
     # optimizer = torch.optim.RMSprop(grad_vars, alpha=0.99, eps=1e-08, weight_decay=0, momentum=0)
@@ -294,7 +298,10 @@ def reconstruction(args):
                 floater_loss = data['floater_loss'].mean()
                 diffuse_reg = data['diffuse_reg'].mean()
                 rgb_map = data['rgb_map']
-                loss = torch.sqrt((rgb_map - rgb_train) ** 2 + params.charbonier_eps**2).mean()
+                if params.charbonier_loss:
+                    loss = torch.sqrt((rgb_map - rgb_train) ** 2 + params.charbonier_eps**2).mean()
+                else:
+                    loss = ((rgb_map - rgb_train) ** 2).mean()
                 # ic(F.huber_loss(rgb_map, rgb_train, delta=1, reduction='none'))
                 # loss = torch.sqrt(F.huber_loss(rgb_map, rgb_train, delta=1, reduction='none') + params.charbonier_eps**2).mean()
                 photo_loss = ((rgb_map.clip(0, 1) - rgb_train.clip(0, 1)) ** 2).mean().detach()

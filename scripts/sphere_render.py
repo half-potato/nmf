@@ -1,7 +1,7 @@
 import os
 from torch.nn.modules import activation
 from tqdm.auto import tqdm
-from models.brdf import PBR
+from models import brdf
 from renderer import *
 from utils import *
 import datetime
@@ -50,7 +50,8 @@ def main(cfg: DictConfig):
     bg_module = bg_modules.HierarchicalCubeMap(bg_resolution=1600, num_levels=7, featureC=128, activation='softplus', power=2)
     bg_module.load_state_dict(bg_sd)
     tensorf.bg_module = bg_module
-    tensorf.brdf = PBR(0)
+    # tensorf.brdf = brdf.PBR(0)
+    tensorf.brdf = brdf.Phong(0)
     tensorf.rf.set_smoothing(1.5)
     tensorf = tensorf.to(device)
     ic(tensorf)

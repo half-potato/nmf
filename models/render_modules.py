@@ -190,7 +190,7 @@ class MLPDiffuse(torch.nn.Module):
                         torch.nn.ReLU(inplace=True),
                         torch.nn.Linear(featureC, featureC),
                         # torch.nn.BatchNorm1d(featureC)
-                    ] for _ in range(num_layers)], []),
+                    ] for _ in range(num_layers-2)], []),
                 torch.nn.ReLU(inplace=True),
                 torch.nn.Linear(featureC, 20),
             )
@@ -224,9 +224,9 @@ class MLPDiffuse(torch.nn.Module):
 
         ambient = F.softplus(mlp_out[..., 6:7])
         refraction_index = F.softplus(mlp_out[..., 7:8]-1) + self.min_refraction_index
-        reflectivity = F.softplus(mlp_out[..., 8:9])
-        # roughness = F.softplus(mlp_out[..., 10:11])
-        roughness = torch.sigmoid(mlp_out[..., 10:11])
+        reflectivity = 50*F.softplus(mlp_out[..., 8:9])
+        roughness = F.softplus(mlp_out[..., 10:11]-1)
+        # roughness = torch.sigmoid(mlp_out[..., 10:11])
         f0 = torch.sigmoid(mlp_out[..., 11:14])
         albedo = torch.sigmoid(mlp_out[..., 14:17])
         # ambient = torch.sigmoid(mlp_out[..., 9:10])
@@ -279,7 +279,7 @@ class DeepMLPNormal(torch.nn.Module):
             *sum([[
                     torch.nn.ReLU(inplace=True),
                     torch.nn.Linear(featureC, featureC),
-                ] for _ in range(num_layers)], []),
+                ] for _ in range(num_layers-2)], []),
             torch.nn.Tanh(),
             torch.nn.Linear(featureC, 3),
         )
@@ -326,9 +326,9 @@ class MLPNormal(torch.nn.Module):
             *sum([[
                     torch.nn.ReLU(inplace=True),
                     torch.nn.Linear(featureC, featureC),
-                ] for _ in range(num_layers)], []),
-            # torch.nn.ReLU(inplace=True),
-            torch.nn.Tanh(),
+                ] for _ in range(num_layers-2)], []),
+            torch.nn.ReLU(inplace=True),
+            # torch.nn.Tanh(),
             torch.nn.Linear(featureC, 3, bias=False)
         )
 
