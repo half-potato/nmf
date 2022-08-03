@@ -236,7 +236,7 @@ class TensorNeRF(torch.nn.Module):
         # TODO REMOVE
         if isinstance(self.bg_module, torch.nn.Module):
             grad_vars += [{'params': self.bg_module.parameters(),
-                'lr': lr_bg, 'name': 'bg'}]
+                'lr': self.bg_module.lr, 'name': 'bg'}]
         return grad_vars
 
     def save(self, path, config):
@@ -651,13 +651,17 @@ class TensorNeRF(torch.nn.Module):
         #     ic(torch.sum(weight * z_vals, 1).mean())
         #     ic(weight.sum(dim=1).mean())
 
-        if white_bg:
-            floater_loss = -torch.einsum('...j,...k->...', weight.reshape(B, -1), weight.reshape(B, -1)).mean()
-            floater_loss = (weight**2).sum(dim=1).mean()
-        else:
-            full_weight = torch.cat([weight, bg_weight], dim=1)
-            floater_loss = -torch.einsum('...j,...k->...', full_weight.reshape(B, -1), full_weight.reshape(B, -1)).mean()
-            floater_loss = (full_weight**2).sum(dim=1).mean()
+        # if white_bg:
+        #     # floater_loss = -torch.einsum('...j,...k->...', weight.reshape(B, -1), weight.reshape(B, -1)).mean()
+        #     full_weight = weight
+        # else:
+        full_weight = torch.cat([weight, bg_weight], dim=1)
+
+        S = torch.linspace(0, 1, n_samples+1, device=device).reshape(-1, 1)
+        fweight = (S - S.T).abs()
+
+        floater_loss = torch.einsum('bj,bk,jk', full_weight.reshape(B, -1), full_weight.reshape(B, -1), fweight)
+        floater_loss = (floater_loss + (full_weight**2).sum(dim=1).mean()).clip(min=6)
 
         # app stands for appearance
         app_mask = (weight > self.rayMarch_weight_thres)
@@ -713,7 +717,7 @@ class TensorNeRF(torch.nn.Module):
                     noise_app_features, refdirs=refdirs,
                     roughness=roughness, viewdotnorm=viewdotnorm)
                 reflect_rgb = tint * ref_col
-                debug[app_mask] += ref_col
+                debug[app_mask] += ref_col / (ref_col + 1)
             else:
                 num_roughness_rays = self.roughness_rays // 2 if recur > 0 else self.roughness_rays
                 # num_roughness_rays = self.roughness_rays# if is_train else 100
@@ -778,7 +782,9 @@ class TensorNeRF(torch.nn.Module):
                     ray_mask = ray_mask | True
 
                     tinted_ref_rgb = self.brdf(incoming_light, V[bounce_mask], bounce_rays[..., 3:6], outward.reshape(-1, 1, 3), noise_app_features[bounce_mask], matprop, bounce_mask, ray_mask)
-                    debug[full_bounce_mask] += incoming_light.mean(dim=1)
+                    # s = incoming_light.mean(dim=1)
+                    s = incoming_light[:, 0]
+                    debug[full_bounce_mask] += s / (s+1)
                     # reflect_rgb[bounce_mask] = tint[bounce_mask] * tinted_ref_rgb
                     reflect_rgb[bounce_mask] = tinted_ref_rgb
 

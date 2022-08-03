@@ -76,7 +76,7 @@ arch:
     # l_encoder:
     #   _target_: models.ish.ListISH
     #   degs: [0,1,2,4,8,16]
-    num_layers: 3
+    num_layers: 5
     feape: 2
     featureC: 128
     activation: 'softplus'
@@ -87,19 +87,14 @@ arch:
 
 
   bg_module:
-    # _target_: models.bg_modules.BackgroundRender
-    _target_: models.bg_modules.HierarchicalBG
-    bg_rank: 3
-    num_levels: 3
-    num_layers: 0
-    unwrap_fn:
-      # _target_: models.bg_modules.PanoUnwrap
-      _target_: models.bg_modules.CubeUnwrap
-    # view_encoder:
-    #   _target_: models.ish.ISH
-    #   max_degree: 6
-    # bg_resolution: [4096, 2048]
-    bg_resolution: 256
+    _target_: models.bg_modules.HierarchicalCubeMap
+    bg_resolution: 1600
+    num_levels: 7
+    activation: 'softplus'
+    power: 2
+    stds: [1, 2]
+    lr: 0.01
+    convolve: false
 
   diffuse_module:
     _partial_: True
@@ -146,7 +141,7 @@ arch:
     num_layers: 3
 
 params:
-  smoothing_start: 2.0
+  smoothing_start: 1.5
   smoothing_end: 1.5
   lambda_start: 0.0
   lambda_end: 0.0
@@ -179,7 +174,7 @@ params:
   normal_lambda: 3e-4
   diffuse_lambda: 0
   backwards_rays_lambda: 1
-  floater_lambda: 0.001
+  floater_lambda: 1e-4
   charbonier_eps: 0.001
   ortho_weight: 0
 

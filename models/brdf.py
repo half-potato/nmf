@@ -219,7 +219,7 @@ class MLPBRDFCos(torch.nn.Module):
                         torch.nn.ReLU(inplace=True),
                         torch.nn.Linear(featureC, featureC),
                         # torch.nn.BatchNorm1d(featureC)
-                    ] for _ in range(num_layers)], []),
+                    ] for _ in range(num_layers-2)], []),
                 torch.nn.ReLU(inplace=True),
                 torch.nn.Linear(featureC, 6),
             )
@@ -291,7 +291,7 @@ class MLPBRDF(torch.nn.Module):
                         torch.nn.ReLU(inplace=True),
                         torch.nn.Linear(featureC, featureC),
                         # torch.nn.BatchNorm1d(featureC)
-                    ] for _ in range(num_layers)], []),
+                    ] for _ in range(num_layers-2)], []),
                 torch.nn.ReLU(inplace=True),
                 torch.nn.Linear(featureC, 6),
             )
@@ -366,7 +366,7 @@ class MLPBRDF(torch.nn.Module):
         # ref_weight = ref_weight * ray_mask / ray_mask.sum(dim=1, keepdim=True)
         ref_weight = ref_weight / m
         offset = offset / m
-        spec_color = (ray_mask * incoming_light * ref_weight + offset).sum(dim=1) / ray_mask.sum(dim=1)
+        spec_color = (ray_mask * incoming_light * ref_weight).sum(dim=1) / ray_mask.sum(dim=1)
         return spec_color
 
 class LightTinter(torch.nn.Module):
@@ -400,7 +400,7 @@ class LightTinter(torch.nn.Module):
                         torch.nn.ReLU(inplace=True),
                         torch.nn.Linear(featureC, featureC),
                         # torch.nn.BatchNorm1d(featureC)
-                    ] for _ in range(num_layers)], []),
+                    ] for _ in range(num_layers-2)], []),
                 torch.nn.ReLU(inplace=True),
                 torch.nn.Linear(featureC, 6),
             )

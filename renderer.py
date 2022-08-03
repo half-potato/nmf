@@ -4,12 +4,14 @@ from tqdm.auto import tqdm
 from dataLoader.ray_utils import get_rays
 from utils import *
 from dataLoader.ray_utils import ndc_rays_blender
+from models import tonemap
 
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
 from icecream import ic
 from models.tensor_nerf import LOGGER
 import traceback
+from pathlib import Path
 
 def chunk_renderer(rays, tensorf, focal, keys=['rgb_map'], chunk=4096, **kwargs):
 
@@ -174,7 +176,12 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
     os.makedirs(savePath+"/err", exist_ok=True)
     os.makedirs(savePath+"/debug", exist_ok=True)
     os.makedirs(savePath+"/envmaps", exist_ok=True)
-    ic(N_samples)
+
+    if tensorf.bg_module is not None:
+        tm = tonemap.HDRTonemap()
+        bg_path = Path(savePath) / 'bg'
+        bg_path.mkdir(exist_ok=True, parents=True)
+        tensorf.bg_module.save(bg_path, prefix=prtx, tonemap=tm)
 
     try:
         tqdm._instances.clear()

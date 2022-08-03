@@ -135,7 +135,7 @@ def reconstruction(args):
     bg_module = bg_modules.HierarchicalCubeMap(bg_resolution=1600, num_levels=7, featureC=128, activation='softplus', power=2)
     # bg_module = render_modules.BackgroundRender(3, render_modules.PanoUnwrap(), bg_resolution=2*1024, featureC=128, num_layers=0)
     bg_module.load_state_dict(bg_sd, strict=False)
-    tensorf.bg_module = bg_module
+    # tensorf.bg_module = bg_module
 
     tensorf = tensorf.to(device)
 
@@ -261,6 +261,7 @@ def reconstruction(args):
     # ])
     # scheduler = lr_scheduler.SequentialLR(optimizer, schedulers=[scheduler1, scheduler2], milestones=[3000])
     scheduler = lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=params.n_iters, T_mult=1, eta_min=1e-3)
+    # scheduler = lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=1000, T_mult=1, eta_min=1e-3)
     if True:
     # with torch.autograd.detect_anomaly():
         for iteration in pbar:
@@ -379,8 +380,6 @@ def reconstruction(args):
                 PSNRs_test = test_res['psnrs']
                 summary_writer.add_scalar('test/psnr', np.mean(test_res['psnrs']), global_step=iteration)
                 summary_writer.add_scalar('test/norm_err', np.mean(test_res['norm_errs']), global_step=iteration)
-                if tensorf.bg_module is not None:
-                    tensorf.bg_module.save(Path('log/bg'))
                 if args.save_often:
                     tensorf.save(f'{logfolder}/{args.expname}_{iteration:06d}.th', args.model.arch)
 
