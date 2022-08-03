@@ -167,7 +167,8 @@ class TensorNeRF(torch.nn.Module):
                  max_normal_similarity=1, infinity_border=False, min_refraction=1.1, enable_refraction=True,
                  density_shift=-10, alphaMask_thres=0.001, distance_scale=25, rayMarch_weight_thres=0.0001,
                  max_bounce_rays=4000, roughness_rays=3, bounce_min_weight=0.001, appdim_noise_std=0.0,
-                 world_bounces=0, fea2denseAct='softplus', enable_alpha_mask=True, **kwargs):
+                 world_bounces=0, fea2denseAct='softplus', enable_alpha_mask=True, 
+                 max_floater_loss=6, **kwargs):
         super(TensorNeRF, self).__init__()
         self.rf = rf(aabb=aabb, grid_size=grid_size)
         self.ref_module = ref_module(in_channels=self.rf.app_dim) if ref_module is not None else None
@@ -187,7 +188,7 @@ class TensorNeRF(torch.nn.Module):
         self.alphaMask = alphaMask
         self.infinity_border = infinity_border
         self.enable_alpha_mask = enable_alpha_mask
-
+        self.max_floater_loss = max_floater_loss
         self.density_shift = density_shift
         self.alphaMask_thres = alphaMask_thres
         self.distance_scale = distance_scale
@@ -661,7 +662,7 @@ class TensorNeRF(torch.nn.Module):
         fweight = (S - S.T).abs()
 
         floater_loss = torch.einsum('bj,bk,jk', full_weight.reshape(B, -1), full_weight.reshape(B, -1), fweight)
-        floater_loss = (floater_loss + (full_weight**2).sum(dim=1).mean()).clip(min=6)
+        floater_loss = (floater_loss + (full_weight**2).sum(dim=1).mean()).clip(min=self.max_floater_loss)
 
         # app stands for appearance
         app_mask = (weight > self.rayMarch_weight_thres)

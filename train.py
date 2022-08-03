@@ -128,13 +128,10 @@ def reconstruction(args):
         tensorf.rf.update_stepSize(grid_size)
         nSamples = min(args.nSamples, cal_n_samples(grid_size,args.step_ratio))
     # TODO REMOVE
-    bg_sd = torch.load('log/mats360_bg.th')
-    from models import bg_modules, ish
-    # bg_module = render_modules.HierarchicalBG(3, render_modules.CubeUnwrap(), bg_resolution=2*1024//2, num_levels=3, featureC=128, num_layers=0)
-    # bg_module = bg_modules.HierarchicalCubeMap(bg_resolution=1600, num_levels=3, featureC=128, activation='softplus', power=4)
-    bg_module = bg_modules.HierarchicalCubeMap(bg_resolution=1600, num_levels=7, featureC=128, activation='softplus', power=2)
-    # bg_module = render_modules.BackgroundRender(3, render_modules.PanoUnwrap(), bg_resolution=2*1024, featureC=128, num_layers=0)
-    bg_module.load_state_dict(bg_sd, strict=False)
+    # bg_sd = torch.load('log/mats360_bg.th')
+    # from models import bg_modules
+    # bg_module = bg_modules.HierarchicalCubeMap(bg_resolution=1600, num_levels=7, featureC=128, activation='softplus', power=2)
+    # bg_module.load_state_dict(bg_sd, strict=False)
     # tensorf.bg_module = bg_module
 
     tensorf = tensorf.to(device)

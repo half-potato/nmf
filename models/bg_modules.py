@@ -60,7 +60,7 @@ class CubeUnwrap(torch.nn.Module):
 
 class HierarchicalCubeMap(torch.nn.Module):
     def __init__(self, bg_resolution=512, num_levels=2, featureC=128, activation='identity', power=4,
-                 stds = [1, 2, 4, 8], mipbias=-0, interp_pyramid=True, lr=0.15, convolve=True):
+                 stds = [1, 2, 4, 8], mipbias=-0, interp_pyramid=True, lr=0.15):
         super().__init__()
         self.num_levels = num_levels
         self.interp_pyramid = interp_pyramid
@@ -69,15 +69,18 @@ class HierarchicalCubeMap(torch.nn.Module):
         self.smoothing = 1
         self.mipbias = mipbias
         self.lr=lr
-        self.convolve = convolve
+        start_mip = self.num_levels - 1
+        self.max_mip = start_mip
 
         self.stds = stds
-        self.stds.sort(reverse=True)
         ic(self.stds)
-        s = max(self.stds)*4-1
-        blur_kernel = create_blur_pyramid(s, self.stds)
-        ic(blur_kernel.shape)
-        self.register_buffer('blur_kernel', blur_kernel)
+        if len(self.stds) > 0:
+            self.stds.sort(reverse=True)
+            s = max(self.stds)*4-1
+            blur_kernel = create_blur_pyramid(s, self.stds)
+            ic(blur_kernel.shape)
+            self.register_buffer('blur_kernel', blur_kernel)
+            self.max_mip += math.log(2*max(self.stds)) / math.log(self.power)
 
         self.bg_mats = nn.ParameterList([
             nn.Parameter(0.5 * torch.randn((1, 6, bg_resolution // self.power**i , bg_resolution // self.power**i, 3)) - 2)
@@ -85,8 +88,6 @@ class HierarchicalCubeMap(torch.nn.Module):
             for i in range(num_levels-1, -1, -1)])
         self.activation_fn = str2fn(activation)
 
-        start_mip = self.num_levels - 1
-        self.max_mip = start_mip + math.log(2*max(self.stds)) / math.log(self.power)
 
     def calc_weight(self, mip):
         # return 1/2**(self.num_levels-mip)
@@ -106,7 +107,8 @@ class HierarchicalCubeMap(torch.nn.Module):
         if self.interp_pyramid:
             bg_mat = 0
             bg_resolution = self.bg_mats[0].shape[2]
-            for i, mat in enumerate(self.bg_mats[:2]):
+            # for i, mat in enumerate(self.bg_mats[:2]):
+            for i, mat in enumerate(self.bg_mats):
                 interp = F.interpolate(mat.squeeze(0).permute(0, 3, 1, 2), size=(bg_resolution, bg_resolution), mode='bilinear', align_corners=self.align_corners) / (i+2)
                 bg_mat += interp
         else:
@@ -175,7 +177,7 @@ class HierarchicalCubeMap(torch.nn.Module):
             if mip >= max_level:
                 break
         img = self.activation_fn(sumemb)
-        if miplevel.max() >= self.num_levels-1 and self.convolve:
+        if miplevel.max() >= self.num_levels-1 and len(self.stds) > 0:
             mask = miplevel.reshape(-1) >= self.num_levels-1
             blur_img = 0
             weights = 0
