@@ -661,8 +661,13 @@ class TensorNeRF(torch.nn.Module):
         S = torch.linspace(0, 1, n_samples+1, device=device).reshape(-1, 1)
         fweight = (S - S.T).abs()
 
-        floater_loss = torch.einsum('bj,bk,jk', full_weight.reshape(B, -1), full_weight.reshape(B, -1), fweight)
-        floater_loss = (floater_loss + (full_weight**2).sum(dim=1).mean()).clip(min=self.max_floater_loss)
+        floater_loss_1 = torch.einsum('bj,bk,jk', full_weight.reshape(B, -1), full_weight.reshape(B, -1), fweight).clip(min=self.max_floater_loss)
+        floater_loss_2 = (full_weight**2).sum(dim=1).sum()/3/n_samples
+
+        # this one consumes too much memory
+        # floater_loss_1 = torch.einsum('bj,bk,jk->b', full_weight.reshape(B, -1), full_weight.reshape(B, -1), fweight).clip(min=self.max_floater_loss).sum()
+        # ic(floater_loss_1, floater_loss_2)
+        floater_loss = (floater_loss_1 + floater_loss_2)#.clip(min=self.max_floater_loss)
 
         # app stands for appearance
         app_mask = (weight > self.rayMarch_weight_thres)
@@ -813,7 +818,8 @@ class TensorNeRF(torch.nn.Module):
             # in addition, the light is interpolated between emissive and reflective
             reflectivity = matprop['reflectivity']
             # rgb[app_mask] = tint * ((1-reflectivity)*matprop['ambient'] + reflectivity * reflect_rgb)
-            rgb[app_mask] = reflect_rgb + matprop['diffuse']
+            # rgb[app_mask] = reflect_rgb + matprop['diffuse']
+            rgb[app_mask] = reflect_rgb# + matprop['diffuse']
             # rgb[app_mask] = tint * reflectivity * reflect_rgb + (1-reflectivity)*matprop['diffuse']
             # rgb[app_mask] = tint * (ambient + reflectivity * reflect_rgb)
 

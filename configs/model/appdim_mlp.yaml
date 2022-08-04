@@ -57,19 +57,20 @@ arch:
     # _target_: models.brdf.LightTinter
     _partial_: True
     # pbr: True
-    # v_encoder:
-    #   _target_: models.ish.FullISH
-    #   max_degree: 3
-    # l_encoder:
-    #   _target_: models.ish.FullISH
-    #   max_degree: 3
 
     v_encoder:
       _target_: models.ish.ListISH
-      degs: [0,1,2,4,8]
+      degs: [0,1,2,4]
     l_encoder:
       _target_: models.ish.ListISH
-      degs: [0,1,2,4,8]
+      degs: [0,1,2,4]
+
+    # v_encoder:
+    #   _target_: models.ish.ListISH
+    #   degs: [0,1,2,4,8]
+    # l_encoder:
+    #   _target_: models.ish.ListISH
+    #   degs: [0,1,2,4,8]
 
     # v_encoder:
     #   _target_: models.ish.ListISH
@@ -94,7 +95,7 @@ arch:
     activation: 'softplus'
     power: 2
     stds: []
-    lr: 0.01
+    lr: 0.30
 
   diffuse_module:
     _partial_: True
@@ -175,7 +176,7 @@ params:
   diffuse_lambda: 0
   backwards_rays_lambda: 1
   floater_lambda: 1e-4
-  charbonier_eps: 0.001
+  charbonier_eps: 1e-3
   ortho_weight: 0
 
   envmap_train_start: 20

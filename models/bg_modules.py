@@ -83,15 +83,18 @@ class HierarchicalCubeMap(torch.nn.Module):
             self.max_mip += math.log(2*max(self.stds)) / math.log(self.power)
 
         self.bg_mats = nn.ParameterList([
-            nn.Parameter(0.5 * torch.randn((1, 6, bg_resolution // self.power**i , bg_resolution // self.power**i, 3)) - 2)
+            nn.Parameter(0.5 * torch.randn((1, 6, bg_resolution // self.power**i , bg_resolution // self.power**i, 3)))
             # nn.Parameter(0.1 * torch.ones((1, 6, bg_resolution // self.power**i , bg_resolution // self.power**i, 3)))
             for i in range(num_levels-1, -1, -1)])
-        self.activation_fn = str2fn(activation)
+        # self.activation_fn = torch.nn.Softplus(beta=3)
 
+    def activation_fn(self, x):
+        return F.softplus(x-10, beta=0.2)
 
     def calc_weight(self, mip):
         # return 1/2**(self.num_levels-mip)
-        return 1/(self.num_levels-mip)
+        # return 1/(self.num_levels-mip)
+        return 1
         # return 1/(self.num_levels-mip)**2
 
     def calc_mip(self, i):
@@ -177,18 +180,18 @@ class HierarchicalCubeMap(torch.nn.Module):
             if mip >= max_level:
                 break
         img = self.activation_fn(sumemb)
-        if miplevel.max() >= self.num_levels-1 and len(self.stds) > 0:
-            mask = miplevel.reshape(-1) >= self.num_levels-1
-            blur_img = 0
-            weights = 0
-            for bg_mat, mip in self.create_pyramid():
-                weight = 1 - (mip - miplevel.reshape(-1, 1)[mask]).abs().clip(0, 1)
-                # ic(torch.cat([weight, miplevel.reshape(-1, 1)[mask]], dim=1), mip)
-                emb = nvdr.texture(bg_mat.contiguous(), V[:, mask].contiguous(), boundary_mode='cube')
-                emb = emb.reshape(-1, 3)
-                blur_img += emb * weight
-                weights += weight
-            img[mask] = blur_img / (weights+1e-8)
+        # if miplevel.max() >= self.num_levels-1 and len(self.stds) > 0:
+        #     mask = miplevel.reshape(-1) >= self.num_levels-1
+        #     blur_img = 0
+        #     weights = 0
+        #     for bg_mat, mip in self.create_pyramid():
+        #         weight = 1 - (mip - miplevel.reshape(-1, 1)[mask]).abs().clip(0, 1)
+        #         # ic(torch.cat([weight, miplevel.reshape(-1, 1)[mask]], dim=1), mip)
+        #         emb = nvdr.texture(bg_mat.contiguous(), V[:, mask].contiguous(), boundary_mode='cube')
+        #         emb = emb.reshape(-1, 3)
+        #         blur_img += emb * weight
+        #         weights += weight
+        #     img[mask] = blur_img / (weights+1e-8)
 
         return img
 
