@@ -58,12 +58,12 @@ arch:
     _partial_: True
     # pbr: True
 
-    v_encoder:
-      _target_: models.ish.ListISH
-      degs: [0,1,2,4]
-    l_encoder:
-      _target_: models.ish.ListISH
-      degs: [0,1,2,4]
+    # v_encoder:
+    #   _target_: models.ish.ListISH
+    #   degs: [0,1,2,4]
+    # l_encoder:
+    #   _target_: models.ish.ListISH
+    #   degs: [0,1,2,4]
 
     # v_encoder:
     #   _target_: models.ish.ListISH
@@ -87,6 +87,14 @@ arch:
     detach_roughness: false
     lr: 1e-3
 
+  # bg_module:
+  #   _target_: models.bg_modules.HierarchicalCubeMap
+  #   bg_resolution: 1600
+  #   num_levels: 7
+  #   activation: 'softplus'
+  #   power: 2
+  #   stds: []
+  #   lr: 0.30
 
   bg_module:
     _target_: models.bg_modules.HierarchicalCubeMap
@@ -95,7 +103,8 @@ arch:
     activation: 'softplus'
     power: 2
     stds: []
-    lr: 0.30
+    # lr: 0.30
+    lr: 0.05
 
   diffuse_module:
     _partial_: True
@@ -106,7 +115,7 @@ arch:
     #   _target_: models.ish.FullISH
     #   max_degree: 4
     featureC: 128
-    num_layers: 2
+    num_layers: 3
 
   # ref_module:
   #   _partial_: True
@@ -155,7 +164,7 @@ params:
   # bounce_n_list: [100, 1000, 10000, 20000]
   # bounce_iter_list: [9000, 12000, 14000]
 
-  bounce_n_list: [0, 50000]
+  bounce_n_list: [0, 100000]
   # bounce_iter_list: [4500]
   bounce_iter_list: [0]
 
@@ -185,3 +194,4 @@ params:
   num_env_train_iters: 0
   n_iters: 30000
   charbonier_loss: false
+  start_density: 1e-3

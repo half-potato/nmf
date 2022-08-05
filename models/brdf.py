@@ -90,9 +90,9 @@ class GGXSampler:
         # note: it's free to expand
         z_up = torch.tensor([0.0, 0.0, 1.0], device=device).reshape(1, 3).expand(B, 3)
         x_up = torch.tensor([1.0, 0.0, 0.0], device=device).reshape(1, 3).expand(B, 3)
-        up = torch.where(normal[:, 2:3] < 0.9999, z_up, x_up)
-        tangent = torch.linalg.cross(up, normal)
-        bitangent = torch.linalg.cross(normal, tangent)
+        up = torch.where(normal[:, 2:3] < 0.9, z_up, x_up)
+        tangent = normalize(torch.linalg.cross(up, normal))
+        bitangent = normalize(torch.linalg.cross(normal, tangent))
 
         sampleVec = tangent.unsqueeze(1) * H[..., 0:1] + bitangent.unsqueeze(1) * H[..., 1:2] + normal.unsqueeze(1) * H[..., 2:3]
         sampleVec = normalize(sampleVec)

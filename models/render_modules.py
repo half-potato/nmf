@@ -172,7 +172,7 @@ class MLPDiffuse(torch.nn.Module):
     def __init__(self, in_channels, pospe=12, view_encoder=None, feape=6, featureC=128, num_layers=0, unlit_tint=False):
         super().__init__()
 
-        self.in_mlpC = 2*pospe*3 + 3 + 2*feape*in_channels + in_channels
+        self.in_mlpC = 2*pospe*3 + 3 + 2*max(feape, 0)*in_channels + in_channels if feape >= 0 else 0
         self.unlit_tint = unlit_tint
 
         self.view_encoder = view_encoder
@@ -211,9 +211,12 @@ class MLPDiffuse(torch.nn.Module):
         B = pts.shape[0]
         size = pts[..., 3:4].expand(pts[..., :3].shape)
         pts = pts[..., :3]
-        indata = [features, pts]
+        indata = [pts]
         if self.pospe > 0:
             indata += [safemath.integrated_pos_enc((pts, size), 0, self.pospe)]
+
+        if self.feape >= 0:
+            indata.append(features)
         if self.feape > 0:
             indata += [positional_encoding(features, self.feape)]
         if self.view_encoder is not None:
@@ -316,7 +319,7 @@ class MLPNormal(torch.nn.Module):
     def __init__(self, in_channels, pospe=6, feape=6, featureC=128, num_layers=2, lr=1e-4):
         super().__init__()
 
-        self.in_mlpC = 2*pospe*3 + 2*max(feape, 0)*in_channels + 3 + in_channels
+        self.in_mlpC = 2*pospe*3 + 2*max(feape, 0)*in_channels + 3 + in_channels if feape >= 0 else 0
         self.pospe = pospe
         self.feape = feape
         self.lr = lr

@@ -115,7 +115,8 @@ class BlenderDataset(Dataset):
 
             rays_o, rays_d = get_rays(self.directions, c2w)  # both (h*w, 3)
             _, rays_up = get_rays(self.rays_up, c2w)  # both (h*w, 3)
-            rays = torch.cat([rays_o, rays_d, rays_up], 1)
+            # rays = torch.cat([rays_o, rays_d, rays_up], 1)
+            rays = torch.cat([rays_o, rays_d], 1)
 
             c = img.shape[1]
             if c == 4:
@@ -156,7 +157,7 @@ class BlenderDataset(Dataset):
         norms = imageio.imread(self.normal_paths[idx])
         norms = torch.as_tensor(norms)[..., :3].float()
         norms = (norms - 128)/127
-        norms = norms / torch.linalg.norm(norms, dim=-1, keepdim=True)
+        # norms = norms / torch.linalg.norm(norms, dim=-1, keepdim=True)
         return norms
 
     def __getitem__(self, idx):

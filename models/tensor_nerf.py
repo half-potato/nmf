@@ -513,8 +513,8 @@ class TensorNeRF(torch.nn.Module):
         # roughness = 1/np.pi*torch.ones((app_features.shape[0], 1), dtype=xyz.dtype, device=xyz.device)
             roughness = matprop['roughness'] if roughness is None else roughness * torch.ones((app_features.shape[0], 1), dtype=xyz.dtype, device=xyz.device)
             viewdotnorm = torch.ones((app_features.shape[0], 1), dtype=xyz.dtype, device=xyz.device)
-            envmap = tint * self.ref_module(xyz_samp, staticdir, app_features, refdirs=ang_vecs.reshape(
-                -1, 3), roughness=roughness, viewdotnorm=viewdotnorm).reshape(res, 2*res, 3)
+            envmap = (tint.reshape(-1, 3) * self.ref_module(xyz_samp, staticdir, app_features, refdirs=ang_vecs.reshape(
+                -1, 3), roughness=roughness, viewdotnorm=viewdotnorm)).reshape(res, 2*res, 3)
         else:
             envmap = torch.zeros(res, 2*res, 3)
         color = (color).reshape(res, 2*res, 3)/2
@@ -549,7 +549,7 @@ class TensorNeRF(torch.nn.Module):
         if rays_chunk.shape[0] == 0:
             return torch.empty((0, 3), device=rays_chunk.device)
         viewdirs = rays_chunk[:, 3:6]
-        bg = self.bg_module(viewdirs[:, :], roughness.detach())
+        bg = self.bg_module(viewdirs[:, :], roughness)
         return bg.reshape(-1, 3)
 
     def forward(self, rays_chunk, focal,
@@ -584,8 +584,8 @@ class TensorNeRF(torch.nn.Module):
         device = xyz_sampled.device
 
         viewdirs = viewdirs.view(-1, 1, 3).expand(xyz_sampled_shape)
-        rays_up = rays_chunk[:, 6:9]
-        rays_up = rays_up.view(-1, 1, 3).expand(xyz_sampled_shape)
+        # rays_up = rays_chunk[:, 6:9]
+        # rays_up = rays_up.view(-1, 1, 3).expand(xyz_sampled_shape)
         B = xyz_sampled.shape[0]
         n_samples = xyz_sampled_shape[1]
 
@@ -702,7 +702,7 @@ class TensorNeRF(torch.nn.Module):
                 p_world_normal[app_mask] = self.normal_module(xyz_normed[app_mask], app_features)
                 l = self.l# if is_train else 1
                 v_world_normal = ((1-l)*p_world_normal + l*world_normal)
-                v_world_normal = v_world_normal / (v_world_normal.norm(dim=-1, keepdim=True) + 1e-8)
+                v_world_normal = v_world_normal / (v_world_normal.norm(dim=-1, keepdim=True) + 1e-20)
             else:
                 v_world_normal = world_normal
 
@@ -757,7 +757,7 @@ class TensorNeRF(torch.nn.Module):
                     bounce_rays = torch.cat([
                         xyz_sampled[full_bounce_mask][..., :3].reshape(-1, 1, 3).expand(noise_rays.shape),
                         noise_rays,
-                        rays_up[full_bounce_mask].reshape(-1, 1, 3).expand(noise_rays.shape)
+                        # rays_up[full_bounce_mask].reshape(-1, 1, 3).expand(noise_rays.shape)
                     ], dim=-1)
                     D = bounce_rays.shape[-1]
 
@@ -790,7 +790,8 @@ class TensorNeRF(torch.nn.Module):
                     tinted_ref_rgb = self.brdf(incoming_light, V[bounce_mask], bounce_rays[..., 3:6], outward.reshape(-1, 1, 3), noise_app_features[bounce_mask], matprop, bounce_mask, ray_mask)
                     # s = incoming_light.mean(dim=1)
                     s = incoming_light[:, 0]
-                    debug[full_bounce_mask] += s / (s+1)
+                    # debug[full_bounce_mask] += s / (s+1)
+                    debug[full_bounce_mask] += bounce_rays[:, 0, 3:6]/2 + 0.5
                     # reflect_rgb[bounce_mask] = tint[bounce_mask] * tinted_ref_rgb
                     reflect_rgb[bounce_mask] = tinted_ref_rgb
 
@@ -851,11 +852,11 @@ class TensorNeRF(torch.nn.Module):
 
             # view dependent normal map
             # N, 3, 3
-            row_basis = -torch.stack([
-                -torch.linalg.cross(viewdirs[:, 0], rays_up[:, 0], dim=-1),
-                viewdirs[:, 0],
-                rays_up[:, 0],
-            ], dim=1)
+            # row_basis = -torch.stack([
+            #     -torch.linalg.cross(viewdirs[:, 0], rays_up[:, 0], dim=-1),
+            #     viewdirs[:, 0],
+            #     rays_up[:, 0],
+            # ], dim=1)
             # p_world_normal_map = torch.sum(weight[..., None] * p_world_normal, 1)
             # p_world_normal_map = p_world_normal_map / \
             #     (torch.norm(p_world_normal_map, dim=-1, keepdim=True)+1e-8)
@@ -866,7 +867,7 @@ class TensorNeRF(torch.nn.Module):
             # d_normal_map = torch.matmul(row_basis, d_world_normal_map.unsqueeze(-1)).squeeze(-1)
             # p_normal_map = torch.matmul(
             #     row_basis, p_world_normal_map.unsqueeze(-1)).squeeze(-1)
-            v_normal_map = torch.matmul(row_basis, v_world_normal_map.unsqueeze(-1)).squeeze(-1)
+            # v_normal_map = torch.matmul(row_basis, v_world_normal_map.unsqueeze(-1)).squeeze(-1)
             # v_normal_map = v_normal_map / (torch.linalg.norm(d_normal_map, dim=-1, keepdim=True)+1e-8)
             v_world_normal_map = acc_map[..., None] * v_world_normal_map + (1 - acc_map[..., None])
 

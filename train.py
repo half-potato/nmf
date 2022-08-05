@@ -208,7 +208,7 @@ def reconstruction(args):
     print(tensorf)
     # TODO REMOVE
     if tensorf.bg_module is not None and not white_bg:
-        if False:
+        if True:
             pbar = tqdm(range(args.n_bg_iters), miniters=args.progress_refresh_rate, file=sys.stdout)
             # warm up by training bg
             for _ in pbar:
@@ -219,7 +219,8 @@ def reconstruction(args):
                     alpha_train = rgba_train[..., 3]
                 else:
                     alpha_train = None
-                rgb = tensorf.render_just_bg(rays_train)
+                roughness = 1e-16*torch.ones(rays_train.shape[0], 1, device=device)
+                rgb = tensorf.render_just_bg(rays_train, roughness)
                 loss = torch.sqrt((rgb - rgb_train) ** 2 + params.charbonier_eps**2).mean()
                 optimizer.zero_grad()
                 loss.backward()
@@ -240,7 +241,7 @@ def reconstruction(args):
             sigma = 1-torch.exp(-sigma_feat)
             # sigma = sigma_feat
             # loss = (sigma-torch.rand_like(sigma)*args.start_density).abs().mean()
-            loss = (sigma-args.start_density).abs().mean()
+            loss = (sigma-params.start_density).abs().mean()
             # loss = (-sigma[mask].clip(max=1).sum() + sigma[~mask].clip(min=1e-8).sum())
             pbar.set_description(f"Mean sigma: {sigma.detach().mean().item():.06f}")
             space_optim.zero_grad()
@@ -287,7 +288,7 @@ def reconstruction(args):
             #rgb_map, alphas_map, depth_map, weights, uncertainty
             with torch.cuda.amp.autocast(enabled=args.fp16):
                 data = renderer(rays_train, tensorf,
-                        keys = ['rgb_map', 'floater_loss', 'normal_loss', 'backwards_rays_loss', 'termination_xyz', 'normal_map', 'diffuse_reg', 'bounce_count', 'color_count', 'roughness'],
+                        keys = ['rgb_map', 'floater_loss', 'normal_loss', 'backwards_rays_loss', 'diffuse_reg', 'bounce_count', 'color_count', 'roughness'],
                         focal=focal, output_alpha=alpha_train, chunk=args.batch_size,
                         N_samples=nSamples, white_bg = white_bg, ndc_ray=ndc_ray, is_train=True)
 
