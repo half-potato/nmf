@@ -60,7 +60,7 @@ class CubeUnwrap(torch.nn.Module):
 
 class HierarchicalCubeMap(torch.nn.Module):
     def __init__(self, bg_resolution=512, num_levels=2, featureC=128, activation='identity', power=4,
-                 stds = [1, 2, 4, 8], mipbias=-0, interp_pyramid=True, lr=0.15):
+                 stds = [1, 2, 4, 8], mipbias=+0, interp_pyramid=True, lr=0.15):
         super().__init__()
         self.num_levels = num_levels
         self.interp_pyramid = interp_pyramid
@@ -93,8 +93,8 @@ class HierarchicalCubeMap(torch.nn.Module):
 
     def calc_weight(self, mip):
         # return 1/2**(self.num_levels-mip)
-        # return 1/(self.num_levels-mip)
-        return 1
+        return 1/(self.num_levels-mip)
+        # return 1
         # return 1/(self.num_levels-mip)**2
 
     def calc_mip(self, i):
@@ -150,10 +150,8 @@ class HierarchicalCubeMap(torch.nn.Module):
     @torch.no_grad()
     def upsample(self, bg_resolution):
         return
-        
-    def forward(self, viewdirs, saSample, max_level=None):
-        B = viewdirs.shape[0]
-        max_level = self.num_levels if max_level is None else max_level
+
+    def sa2mip(self, saSample):
         res = self.bg_mats[-1].shape[-2]
         saTexel = 4 * math.pi / (6*res*res)
         # miplevel = (torch.log(saSample / saTexel) / math.log(self.power) / self.power).clip(0, self.num_levels-5)
@@ -163,7 +161,13 @@ class HierarchicalCubeMap(torch.nn.Module):
         miplevel = miplevel.clip(0, self.max_mip-1)
         # miplevel = (torch.log(saSample / saTexel) / math.log(self.power) / 2).clip(self.num_levels, self.max_mip)
         # miplevel = (torch.log(saSample / saTexel) / math.log(self.power) / 2).clip(0, 0)
+        return miplevel
+        
+    def forward(self, viewdirs, saSample, max_level=None):
+        B = viewdirs.shape[0]
+        max_level = self.num_levels if max_level is None else max_level
         V = viewdirs.reshape(1, -1, 1, 3).contiguous()
+        miplevel = self.sa2mip(saSample)
 
         sumemb = 0
         for bg_mat, mip in self.iter_levels():

@@ -540,10 +540,12 @@ class TensorNeRF(torch.nn.Module):
 
             # compute normal
             grad_outputs = torch.ones_like(validsigma)
-            g = grad(validsigma, xyz_g, grad_outputs=grad_outputs, create_graph=True, allow_unused=True)
+            # TODO REMOVE
+            # g = grad(validsigma, xyz_g, grad_outputs=grad_outputs, create_graph=True, allow_unused=True)
+            g = grad(validsigma, xyz_g, grad_outputs=grad_outputs, create_graph=False, allow_unused=True)
             norms = -g[0][:, :3]
             norms = norms / (torch.linalg.norm(norms, dim=-1, keepdim=True) + 1e-8)
-            return norms
+            return norms.detach()
 
     def render_just_bg(self, rays_chunk, roughness, white_bg=True):
         if rays_chunk.shape[0] == 0:
@@ -783,15 +785,18 @@ class TensorNeRF(torch.nn.Module):
                             ).reshape(-1, num_roughness_rays-self.world_bounces, 3)
                     else:
                         incoming_light = self.render_just_bg(bounce_rays.reshape(-1, D), mipval).reshape(-1, num_roughness_rays, 3)
+                    # miplevel = self.bg_module.sa2mip(mipval)
+                    # debug[full_bounce_mask][..., 0] += miplevel.mean(dim=1) / (self.bg_module.max_mip-1)
+                    
 
                     incoming_light = ray_mask * incoming_light + (~ray_mask) * incoming_light[:, 0:1, :]
                     ray_mask = ray_mask | True
 
                     tinted_ref_rgb = self.brdf(incoming_light, V[bounce_mask], bounce_rays[..., 3:6], outward.reshape(-1, 1, 3), noise_app_features[bounce_mask], matprop, bounce_mask, ray_mask)
-                    # s = incoming_light.mean(dim=1)
-                    s = incoming_light[:, 0]
-                    # debug[full_bounce_mask] += s / (s+1)
-                    debug[full_bounce_mask] += bounce_rays[:, 0, 3:6]/2 + 0.5
+                    s = incoming_light.mean(dim=1)
+                    # s = incoming_light[:, 0]
+                    debug[full_bounce_mask] += s / (s+1)
+                    # debug[full_bounce_mask] += bounce_rays[:, 0, 3:6]/2 + 0.5
                     # reflect_rgb[bounce_mask] = tint[bounce_mask] * tinted_ref_rgb
                     reflect_rgb[bounce_mask] = tinted_ref_rgb
 
@@ -809,10 +814,10 @@ class TensorNeRF(torch.nn.Module):
                             noise_app_features[~bounce_mask], refdirs=refdirs[~bounce_mask],
                             roughness=roughness[~bounce_mask], viewdotnorm=viewdotnorm)
                         reflect_rgb[~bounce_mask] = tint[~bounce_mask] * ref_col
-                        debug[inv_full_bounce_mask] += ref_col
+                        # debug[inv_full_bounce_mask] += ref_col
                     else:
                         reflect_rgb[~bounce_mask] = tint[~bounce_mask]*matprop['ambient'][~bounce_mask]
-                        debug[inv_full_bounce_mask] += tint[~bounce_mask]*matprop['ambient'][~bounce_mask]
+                        # debug[inv_full_bounce_mask] += tint[~bounce_mask]*matprop['ambient'][~bounce_mask]
 
                 bounce_count = bounce_mask.sum()
             # this is a modified rendering equation where the emissive light and light under the integral is all multiplied by the base color

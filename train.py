@@ -231,7 +231,7 @@ def reconstruction(args):
 
     if args.ckpt is None:
         space_optim = torch.optim.Adam(tensorf.parameters(), lr=0.02, betas=(0.9,0.99))
-        pbar = tqdm(range(500))
+        pbar = tqdm(range(5000))
         for _ in pbar:
             xyz = torch.rand(5000, 3, device=device)*2-1
             feat = tensorf.rf.compute_densityfeature(xyz)

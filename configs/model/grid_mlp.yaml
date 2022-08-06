@@ -22,15 +22,13 @@ arch:
 
   rf:
     _partial_: True
-    _target_: models.tensoRF.TensorVMSplit
-    density_n_comp: 16
-    appearance_n_comp: 24
+    _target_: models.grid.Grid
     app_dim: 24
     step_ratio: 0.5
     density_res_multi: 1
     contract_space: False
-    # num_levels: 1
-    hier_sizes: [1]
+    density_n_comp: 16
+    appearance_n_comp: 24
 
   bg_module:
     _target_: models.bg_modules.HierarchicalCubeMap
@@ -147,3 +145,4 @@ params:
   num_env_train_iters: 0
   n_iters: 30000
   charbonier_loss: false
+  start_density: 1e-3
