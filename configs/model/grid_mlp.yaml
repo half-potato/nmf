@@ -2,7 +2,7 @@ arch:
   _target_: models.tensor_nerf.TensorNeRF
   _partial_: True
 
-  density_shift: -10
+  density_shift: 0
   alphaMask_thres: 0.0001
   distance_scale: 25
   rayMarch_weight_thres: 0.0001
@@ -12,7 +12,7 @@ arch:
   max_recurs: 0
   infinity_border: False
   enable_alpha_mask: false
-  appdim_noise_std: 0.0
+  appdim_noise_std: 0.1
   max_normal_similarity: 1.0
 
   tonemap:
@@ -133,8 +133,8 @@ params:
   L1_weight_inital: 8e-5
   L1_weight_rest: 4e-5
 
-  TV_weight_density: 1e-3
-  TV_weight_app: 0.0
+  TV_weight_density: 1e-4
+  TV_weight_app: 0
   normal_lambda: 3e-4
   diffuse_lambda: 0
   backwards_rays_lambda: 1

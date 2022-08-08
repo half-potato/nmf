@@ -23,7 +23,7 @@ class Grid(TensorBase):
 
 
     def set_smoothing(self, sm):
-        pass
+        self.smoothing = sm
 
     def init_one_svd(self, n_component, grid_size, scale, shift):
         pass
@@ -48,9 +48,12 @@ class Grid(TensorBase):
         return reg(self.app_grid)
 
     def compute_densityfeature(self, xyz_sampled):
-        # a = F.grid_sample(self.density_grid, xyz_sampled.reshape(1, 1, 1, -1, xyz_sampled.shape[-1])[..., :3], mode=self.interp_mode,
-        #     align_corners=self.align_corners).view(-1, *xyz_sampled.shape[:1])
-        # return a.reshape(-1)
+        # a = grid_sample(
+        #         self.density_grid,
+        #         xyz_sampled.reshape(1, 1, 1, -1, xyz_sampled.shape[-1])[..., :3],
+        #         mode=self.interp_mode,
+        #         align_corners=self.align_corners,
+        #         smoothing=self.smoothing).view(-1, *xyz_sampled.shape[:1])
         a = grid_sample_3d(
                 self.density_grid,
                 xyz_sampled.reshape(1, 1, 1, -1, xyz_sampled.shape[-1])[..., :3]).view(-1, *xyz_sampled.shape[:1])

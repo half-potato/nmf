@@ -530,8 +530,7 @@ class TensorNeRF(torch.nn.Module):
     def calculate_normals(self, xyz):
         with torch.enable_grad():
             xyz_g = xyz.clone()
-            if not xyz_g.requires_grad:
-                xyz_g.requires_grad = True
+            xyz_g.requires_grad = True
 
             # compute sigma
             xyz_g_normed = self.rf.normalize_coord(xyz_g)

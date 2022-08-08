@@ -173,8 +173,6 @@ class TensorVMSplit(TensorBase):
         # line_kerns = [self.norm_line_kernels[0][0:1]]
         plane_kerns, line_kerns = [[None]], [[None]]
         for idx_plane in range(len(self.app_plane)):
-            # plane_coef_point.append(self.convolver.multi_size_plane(self.app_plane[idx_plane], coordinate_plane[[idx_plane]], size_weights, convs=plane_kerns))
-            # line_coef_point.append(self.convolver.multi_size_line(self.app_line[idx_plane], coordinate_line[[idx_plane]], size_weights, convs=line_kerns))
             plane_coef_point.append(
                     F.grid_sample(self.app_plane[idx_plane], coordinate_plane[[idx_plane]], mode=self.interp_mode,
                         align_corners=self.align_corners).view(-1, *xyz_sampled.shape[:1]))

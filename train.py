@@ -322,6 +322,7 @@ def reconstruction(args):
                     total_loss += L1_reg_weight*loss_reg_L1
                     summary_writer.add_scalar('train/reg_l1', loss_reg_L1.detach().item(), global_step=iteration)
 
+                loss_tv = 0
                 if TV_weight_density>0:
                     TV_weight_density *= lr_factor
                     loss_tv = tensorf.rf.TV_loss_density(tvreg) * TV_weight_density
@@ -359,13 +360,12 @@ def reconstruction(args):
             # Print the current values of the losses.
             if iteration % args.progress_refresh_rate == 0:
                 pbar.set_description(
-                    f'Iteration {iteration:05d}:'
-                    + f' train_psnr = {float(np.mean(PSNRs)):.2f}'
+                    f'train_psnr = {float(np.mean(PSNRs)):.2f}'
                     + f' test_psnr = {float(np.mean(PSNRs_test)):.2f}'
                     + f' roughness = {data["roughness"].mean().item():.5f}'
-                    + f' backnormal_loss = {backwards_rays_loss:.5f}'
-                    + f' floater_loss = {floater_loss:.6f}'
-                    + f' mse = {photo_loss:.6f}'
+                    # + f' backnormal_loss = {backwards_rays_loss:.5f}'
+                    + f' floater_loss = {floater_loss:.1f}'
+                    # + f' mse = {photo_loss:.6f}'
                 )
                 PSNRs = []
                 

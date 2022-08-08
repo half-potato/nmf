@@ -49,6 +49,22 @@ def combine_kernels2d(kernel1, kernel2):
     kernelf = -F.conv2d(kernel1, kernel2, stride=1, padding=p)
     return kernelf
 
+def combine_kernels3d(kernel1, kernel2):
+    if kernel2 is None:
+        return kernel1
+    if kernel1 is None:
+        return kernel2
+    
+    s1 = kernel1.shape[-1]
+    s2 = kernel2.shape[-1]
+    sf = s1 + s2 - 1
+    p = (sf - s1) // 2 + 1
+    kernel1 = kernel1.reshape(1, 1, s1, s1, s1)
+    kernel2 = kernel2.reshape(1, 1, s2, s2, s2)
+    # place kernel1 at center
+    kernelf = -F.conv3d(kernel1, kernel2, stride=1, padding=p)
+    return kernelf
+
 class GridSampler2D(torch.autograd.Function):
     @staticmethod
     def forward(ctx, input, grid, mode='bilinear', padding_mode='zeros', align_corners=None, smoothing=0):
@@ -65,29 +81,52 @@ class GridSampler2D(torch.autograd.Function):
     def backward(ctx, grad_output):
         input, grid = ctx.saved_tensors
         grad_grid = None
+        is_3d = len(grid.shape) == 5
         if ctx.needs_input_grad[1]:
-            # f_blur = torch.tensor([0, 1, 0], device=grid.device)
-            # f_edge = torch.tensor([1, 0, -1], device=grid.device) / 2
-
             f_blur = torch.tensor([0.5, 0.5], device=grid.device)
             f_edge = SIGN*torch.tensor([1, -1], device=grid.device) / 2
             l = len(f_blur)
-            dy_filter = (f_blur[None, :] * f_edge[:, None]).reshape(1, 1, l, l)
-            dx_filter = dy_filter.permute(0, 1, 3, 2)
+            kernlen = 2*int(ctx.smoothing)+1
+            if is_3d:
+                dy_filter = (f_blur[None, :, None] * f_edge[:, None, None] * f_blur[None, None, :]).reshape(1, 1, l, l, l)
+                dx_filter = dy_filter.permute(0, 1, 3, 2, 4)
+                dz_filter = dy_filter.permute(0, 1, 2, 4, 3)
 
-            smooth_kern = gkern(2*int(ctx.smoothing)+1, std=ctx.smoothing+1e-8, device=grad_output.device)
-            sm_dx_filter = combine_kernels2d(smooth_kern, dx_filter)
-            sm_dy_filter = combine_kernels2d(smooth_kern, dy_filter)
-            s = sm_dx_filter.shape[-1]
+                g1 = gaussian_fn(kernlen, std=ctx.smoothing+1e-8, device=grad_output.device)
+                smooth_kern = g1[:, None, None] * g1[None, :, None] * g1[None, None, :]
+                smooth_kern /= smooth_kern.sum()
+                sm_dx_filter = combine_kernels3d(smooth_kern, dx_filter)
+                sm_dy_filter = combine_kernels3d(smooth_kern, dy_filter)
+                sm_dz_filter = combine_kernels3d(smooth_kern, dz_filter)
+                s = sm_dx_filter.shape[-1]
 
-            dx_input = F.conv2d(input.permute(1, 0, 2, 3), sm_dx_filter.reshape(1, -1, s, s), stride=1, padding=s//2)
-            dy_input = F.conv2d(input.permute(1, 0, 2, 3), sm_dy_filter.reshape(1, -1, s, s), stride=1, padding=s//2)
+                pinput = input.permute(1, 0, 2, 3, 4)
+                dx_input = F.conv3d(pinput, sm_dx_filter.reshape(1, 1, s, s, s), stride=1, padding=s//2)
+                dy_input = F.conv3d(pinput, sm_dy_filter.reshape(1, 1, s, s, s), stride=1, padding=s//2)
+                dz_input = F.conv3d(pinput, sm_dz_filter.reshape(1, 1, s, s, s), stride=1, padding=s//2)
 
-            dx = F.grid_sample(dx_input.permute(1, 0, 2, 3), grid, mode=ctx.mode, padding_mode=ctx.padding_mode, align_corners=ctx.align_corners)
-            dy = F.grid_sample(dy_input.permute(1, 0, 2, 3), grid, mode=ctx.mode, padding_mode=ctx.padding_mode, align_corners=ctx.align_corners)
+                dx = F.grid_sample(dx_input.permute(1, 0, 2, 3, 4), grid, mode=ctx.mode, padding_mode=ctx.padding_mode, align_corners=ctx.align_corners)
+                dy = F.grid_sample(dy_input.permute(1, 0, 2, 3, 4), grid, mode=ctx.mode, padding_mode=ctx.padding_mode, align_corners=ctx.align_corners)
+                dz = F.grid_sample(dy_input.permute(1, 0, 2, 3, 4), grid, mode=ctx.mode, padding_mode=ctx.padding_mode, align_corners=ctx.align_corners)
 
-            grad_grid = torch.stack([(grad_output*dx).sum(dim=1), (grad_output*dy).sum(dim=1)], dim=-1)
-            # grad_grid = torch.stack([(grad_output*dy).sum(dim=1), (grad_output*dx).sum(dim=1)], dim=-1)
+                grad_grid = torch.stack([(grad_output*dx).sum(dim=1), (grad_output*dy).sum(dim=1), (grad_output*dz).sum(dim=1)], dim=-1)
+            else:
+                dy_filter = (f_blur[None, :] * f_edge[:, None]).reshape(1, 1, l, l)
+                dx_filter = dy_filter.permute(0, 1, 3, 2)
+
+                smooth_kern = gkern(2*int(ctx.smoothing)+1, std=ctx.smoothing+1e-8, device=grad_output.device)
+                smooth_kern /= smooth_kern.sum()
+                sm_dx_filter = combine_kernels2d(smooth_kern, dx_filter)
+                sm_dy_filter = combine_kernels2d(smooth_kern, dy_filter)
+                s = sm_dx_filter.shape[-1]
+
+                dx_input = F.conv2d(input.permute(1, 0, 2, 3), sm_dx_filter.reshape(1, -1, s, s), stride=1, padding=s//2)
+                dy_input = F.conv2d(input.permute(1, 0, 2, 3), sm_dy_filter.reshape(1, -1, s, s), stride=1, padding=s//2)
+
+                dx = F.grid_sample(dx_input.permute(1, 0, 2, 3), grid, mode=ctx.mode, padding_mode=ctx.padding_mode, align_corners=ctx.align_corners)
+                dy = F.grid_sample(dy_input.permute(1, 0, 2, 3), grid, mode=ctx.mode, padding_mode=ctx.padding_mode, align_corners=ctx.align_corners)
+
+                grad_grid = torch.stack([(grad_output*dx).sum(dim=1), (grad_output*dy).sum(dim=1)], dim=-1)
 
         grad_input = None
         if ctx.needs_input_grad[0]:
@@ -105,9 +144,13 @@ class GridSampler2D(torch.autograd.Function):
                 padding_mode_enum = 1
             else:  # padding_mode == 'reflection'
                 padding_mode_enum = 2
-            op = torch._C._jit_get_operation('aten::grid_sampler_2d_backward')
+            if is_3d:
+                op = torch._C._jit_get_operation('aten::grid_sampler_3d_backward')
+                grad_input, _ = op(grad_output, input, grid, mode_enum, padding_mode_enum, ctx.align_corners)
+            else:
+                op = torch._C._jit_get_operation('aten::grid_sampler_2d_backward')
+                grad_input, _ = op(grad_output, input, grid, mode_enum, padding_mode_enum, ctx.align_corners, (ctx.needs_input_grad[0], False))
 
-            grad_input, _ = op(grad_output, input, grid, mode_enum, padding_mode_enum, ctx.align_corners, (ctx.needs_input_grad[0], False))
         return grad_input, grad_grid, None, None, None, None
 
 class GridSampler1D(torch.autograd.Function):
@@ -169,12 +212,10 @@ class GridSampler1D(torch.autograd.Function):
 def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', align_corners=None, smoothing=0):
     # plane.shape: 1, n_comp, grid_size, 1
     # grid: (1, N, 1, 2)
-    if grid.shape[-1] == 2:
+    if grid.shape[-1] == 2 or grid.shape[-1] == 3:
         return GridSampler2D.apply(input, grid, mode, padding_mode, align_corners, smoothing)
-    elif grid.shape[-1] == 1:
-        return GridSampler1D.apply(input, grid, mode, padding_mode, align_corners, smoothing)
     else:
-        raise NotImplementedError("GridSampler only implemented for 1D/2D inputs")
+        raise NotImplementedError("GridSampler only implemented for 2D/3D inputs")
     
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
