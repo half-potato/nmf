@@ -4,6 +4,7 @@ import torch.nn.functional as F
 from icecream import ic
 from .convolver import Convolver
 from .grid_sample_Cinf import grid_sample
+from .grid_sample3d import grid_sample_3d
 import random
 import math
 
@@ -13,7 +14,7 @@ class Grid(TensorBase):
 
         # num_levels x num_outputs
         self.interp_mode = 'bilinear'
-        self.align_corners = False
+        self.align_corners = True
 
         density_grid = torch.rand(1, 1, *grid_size)
         app_grid = torch.rand(1, self.app_dim, *grid_size)
@@ -47,8 +48,12 @@ class Grid(TensorBase):
         return reg(self.app_grid)
 
     def compute_densityfeature(self, xyz_sampled):
-        a = F.grid_sample(self.density_grid, xyz_sampled.reshape(1, 1, 1, -1, xyz_sampled.shape[-1])[..., :3], mode=self.interp_mode,
-            align_corners=self.align_corners).view(-1, *xyz_sampled.shape[:1])
+        # a = F.grid_sample(self.density_grid, xyz_sampled.reshape(1, 1, 1, -1, xyz_sampled.shape[-1])[..., :3], mode=self.interp_mode,
+        #     align_corners=self.align_corners).view(-1, *xyz_sampled.shape[:1])
+        # return a.reshape(-1)
+        a = grid_sample_3d(
+                self.density_grid,
+                xyz_sampled.reshape(1, 1, 1, -1, xyz_sampled.shape[-1])[..., :3]).view(-1, *xyz_sampled.shape[:1])
         return a.reshape(-1)
 
     def compute_appfeature(self, xyz_sampled):
@@ -58,10 +63,13 @@ class Grid(TensorBase):
 
     @torch.no_grad()
     def upsample_volume_grid(self, res_target):
-        return
         density_target = [int(self.density_res_multi*g) for g in res_target]
-        self.app_plane, self.app_line = self.up_sampling_VM(self.app_plane, self.app_line, res_target)
-        self.density_plane, self.density_line = self.up_sampling_VM(self.density_plane, self.density_line, density_target)
+        self.app_grid = torch.nn.Parameter(
+            F.interpolate(self.app_grid.data, size=res_target, mode='trilinear',
+                          align_corners=self.align_corners))
+        self.density_grid = torch.nn.Parameter(
+            F.interpolate(self.density_grid.data, size=density_target, mode='trilinear',
+                          align_corners=self.align_corners))
 
         self.update_stepSize(res_target)
         print(f'upsampling to {res_target}. upsampling density to {density_target}')

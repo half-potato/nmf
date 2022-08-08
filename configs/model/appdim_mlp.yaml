@@ -207,3 +207,4 @@ params:
   n_iters: 30000
   charbonier_loss: false
   start_density: 1e-3
+  lr_init: 0.02

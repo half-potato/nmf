@@ -137,7 +137,7 @@ params:
   normal_lambda: 3e-4
   diffuse_lambda: 0
   backwards_rays_lambda: 1
-  floater_lambda: 0
+  floater_lambda: 0.0001
   charbonier_eps: 0.001
   ortho_weight: 0
 
@@ -147,3 +147,5 @@ params:
   num_env_train_iters: 0
   n_iters: 30000
   charbonier_loss: false
+  start_density: 1e-3
+  lr_init: 0.02

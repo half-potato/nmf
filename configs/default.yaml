@@ -25,7 +25,7 @@ rm_weight_mask_thre: 1e-4
 step_ratio: 0.5
 ckpt: NULL
 
-lr_init: .05
+lr_init: .01
 # lr_init: 0.02
 lr_basis: 1e-3
 lr_decay_iters: -1

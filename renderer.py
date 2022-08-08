@@ -219,7 +219,7 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
         #                                 ndc_ray=ndc_ray, white_bg = white_bg, device=device)
         # rgb_map = rgb_map.clamp(0.0, 1.0)
         rgb_map, depth_map, debug_map, normal_map, env_map, col_map = brender(
-                rays, tensorf, N_samples=N_samples, ndc_ray=ndc_ray, white_bg = white_bg)
+                rays, tensorf, N_samples=N_samples, ndc_ray=ndc_ray, white_bg = white_bg, is_train=True)
 
         H, W, _ = normal_map.shape
         # normal_map = -normal_map.reshape(-1, 3) @ T @ pose[:3, :3]

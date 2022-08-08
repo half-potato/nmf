@@ -137,7 +137,7 @@ def reconstruction(args):
     tensorf = tensorf.to(device)
 
     lr_bg = 1e-5
-    grad_vars = tensorf.get_optparam_groups(args.lr_init, args.lr_basis, lr_bg, lr_scale)
+    grad_vars = tensorf.get_optparam_groups(params.lr_init, args.lr_basis, lr_bg, lr_scale)
     if args.lr_decay_iters > 0:
         lr_factor = args.lr_decay_target_ratio**(1/args.lr_decay_iters)
     else:
@@ -230,7 +230,7 @@ def reconstruction(args):
         # tensorf.bg_module.save('test.png')
 
     if args.ckpt is None:
-        space_optim = torch.optim.Adam(tensorf.parameters(), lr=0.02, betas=(0.9,0.99))
+        space_optim = torch.optim.Adam(tensorf.parameters(), lr=0.1, betas=(0.9,0.99))
         pbar = tqdm(range(5000))
         for _ in pbar:
             xyz = torch.rand(5000, 3, device=device)*2-1
@@ -372,6 +372,7 @@ def reconstruction(args):
 
             if iteration % args.vis_every == args.vis_every - 1 and args.N_vis!=0:
                 # tensorf.save(f'{logfolder}/{args.expname}_{iteration}.th', args.model.arch)
+                ic(nSamples)
                 test_res = evaluation(test_dataset,tensorf, args, renderer, f'{logfolder}/imgs_vis/', N_vis=args.N_vis,
                                         prtx=f'{iteration:06d}_', N_samples=nSamples, white_bg = white_bg, ndc_ray=ndc_ray,
                                         compute_extra_metrics=False, render_mode=args.render_mode)
@@ -419,7 +420,7 @@ def reconstruction(args):
 
                 # upscaling deregisters the parameter, so we need to reregister it
                 lr_scale = 1
-                new_grad_vars = tensorf.get_optparam_groups(args.lr_init*lr_scale, args.lr_basis*lr_scale, lr_bg=lr_bg, lr_scale=lr_scale)
+                new_grad_vars = tensorf.get_optparam_groups(params.lr_init*lr_scale, args.lr_basis*lr_scale, lr_bg=lr_bg, lr_scale=lr_scale)
                 for param_group, new_param_group in zip(optimizer.param_groups, new_grad_vars):
                     param_group['params'] = new_param_group['params']
     # prof.export_chrome_trace('trace.json')

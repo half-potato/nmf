@@ -541,11 +541,11 @@ class TensorNeRF(torch.nn.Module):
             # compute normal
             grad_outputs = torch.ones_like(validsigma)
             # TODO REMOVE
-            # g = grad(validsigma, xyz_g, grad_outputs=grad_outputs, create_graph=True, allow_unused=True)
-            g = grad(validsigma, xyz_g, grad_outputs=grad_outputs, create_graph=False, allow_unused=True)
+            g = grad(validsigma, xyz_g, grad_outputs=grad_outputs, create_graph=True, allow_unused=True)
+            # g = grad(validsigma, xyz_g, grad_outputs=grad_outputs, create_graph=False, allow_unused=True)
             norms = -g[0][:, :3]
             norms = norms / (torch.linalg.norm(norms, dim=-1, keepdim=True) + 1e-8)
-            return norms.detach()
+            return norms
 
     def render_just_bg(self, rays_chunk, roughness, white_bg=True):
         if rays_chunk.shape[0] == 0:
