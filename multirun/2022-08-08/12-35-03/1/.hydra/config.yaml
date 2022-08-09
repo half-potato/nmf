@@ -1,0 +1,144 @@
+render_mode: center
+basedir: ./log
+filter_rays: false
+batch_size: 4096
+expname: ball_refnerf_grid_searchdensity
+datadir: /data
+render_only: false
+render_train: false
+render_test: false
+render_path: false
+add_timestamp: false
+nSamples: 1000000.0
+N_vis: 5
+vis_every: 10000
+progress_refresh_rate: 10
+rm_weight_mask_thre: 0.0001
+step_ratio: 0.5
+ckpt: null
+lr_init: 0.01
+lr_basis: 0.001
+lr_decay_iters: -1
+lr_decay_target_ratio: 0.1
+lr_upsample_reset: 1
+fp16: false
+n_bg_iters: 1000
+save_often: false
+dataset:
+  scenedir: nerf_synthetic/ball
+  dataset_name: blender
+  downsample_train: 1
+  downsample_test: 1
+  ndc_ray: false
+  near_far:
+  - 0.1
+  - 6
+model:
+  arch:
+    _target_: models.tensor_nerf.TensorNeRF
+    _partial_: true
+    density_shift: 0
+    alphaMask_thres: 0.0001
+    distance_scale: 25
+    rayMarch_weight_thres: 0.0001
+    nEnvSamples: 0
+    fea2denseAct: softplus_shift
+    max_recurs: 0
+    infinity_border: false
+    enable_alpha_mask: false
+    appdim_noise_std: 0.1
+    max_normal_similarity: 1.0
+    tonemap:
+      _target_: models.tonemap.SRGBTonemap
+    rf:
+      _partial_: true
+      _target_: models.grid.Grid
+      app_dim: 24
+      step_ratio: 0.5
+      density_res_multi: 1
+      contract_space: false
+      density_n_comp: 16
+      appearance_n_comp: 24
+    bg_module:
+      _target_: models.bg_modules.HierarchicalCubeMap
+      bg_resolution: 1600
+      num_levels: 7
+      activation: softplus
+      power: 2
+      stds: []
+      lr: 0.05
+    diffuse_module:
+      _partial_: true
+      _target_: models.render_modules.MLPDiffuse
+      pospe: 0
+      feape: 2
+      featureC: 128
+      num_layers: 3
+    ref_module:
+      _partial_: true
+      _target_: models.render_modules.MLPRender_FP
+      feape: 0
+      lr: 0.0001
+      ref_encoder:
+        _target_: models.ish.ListISH
+        degs:
+        - 0
+        - 1
+        - 2
+        - 4
+        - 8
+        - 16
+      activation: sigmoid
+      featureC: 256
+      num_layers: 8
+    normal_module:
+      _partial_: true
+      _target_: models.render_modules.MLPNormal
+      lr: 0.003
+      pospe: 16
+      feape: 2
+      featureC: 128
+      num_layers: 5
+  params:
+    smoothing_start: 1.5
+    smoothing_end: 1.5
+    lambda_start: 0.0
+    lambda_end: 0.0
+    smoothing_list:
+    - 10000
+    - 15000
+    - 20000
+    N_voxel_init: 2097156
+    N_voxel_final: 2097156
+    bounce_n_list:
+    - 4000
+    - 4000
+    bounce_iter_list:
+    - 0
+    num_bw_iters: 0
+    upsamp_list:
+    - 100000
+    uplambda_list:
+    - 7000
+    - 10000
+    - 12000
+    update_AlphaMask_list:
+    - 4000
+    - 7000
+    L1_weight_inital: 8.0e-05
+    L1_weight_rest: 4.0e-05
+    TV_weight_density: 0.0001
+    TV_weight_app: 0
+    normal_lambda: 0.0003
+    diffuse_lambda: 0
+    backwards_rays_lambda: 1
+    floater_lambda: 0.0001
+    charbonier_eps: 0.001
+    ortho_weight: 0
+    envmap_train_start: 20
+    num_rays_per_envmap: 64
+    num_env_train_iters: 0
+    n_iters: 30000
+    charbonier_loss: false
+    start_density: 0.001
+    lr_init: 0.2

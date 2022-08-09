@@ -13,6 +13,8 @@ import sys
 import hydra
 from omegaconf import OmegaConf
 from pathlib import Path
+from loguru import logger
+
 
 # from torch.profiler import profile, record_function, ProfilerActivity
 
@@ -42,7 +44,7 @@ class SimpleSampler:
 def render_test(args):
     params = args.model.params
     if not os.path.exists(args.ckpt):
-        print('the ckpt path does not exists!!')
+        logger.info('the ckpt path does not exists!!')
         return
 
     ckpt = torch.load(args.ckpt)
@@ -62,12 +64,12 @@ def render_test(args):
         test_res = evaluation(train_dataset,tensorf, args, renderer, f'{logfolder}/imgs_train_all/',
                                 N_vis=-1, N_samples=-1, white_bg = white_bg, ndc_ray=ndc_ray,device=device,
                                 render_mode=args.render_mode)
-        print(f'======> {args.expname} train all psnr: {np.mean(test_res["psnrs"])} <========================')
+        logger.info(f'======> {args.expname} train all psnr: {np.mean(test_res["psnrs"])} <========================')
 
     if args.render_test:
         folder = f'{logfolder}/imgs_test_all'
         os.makedirs(folder, exist_ok=True)
-        print(f"Saving test to {folder}")
+        logger.info(f"Saving test to {folder}")
         evaluation(test_dataset,tensorf, args, renderer, folder,
                    N_vis=-1, N_samples=-1, white_bg = white_bg, ndc_ray=ndc_ray,device=device,
                    render_mode=args.render_mode)
@@ -96,6 +98,7 @@ def reconstruction(args):
         logfolder = f'{args.basedir}/{args.expname}{datetime.datetime.now().strftime("-%Y%m%d-%H%M%S")}'
     else:
         logfolder = f'{args.basedir}/{args.expname}'
+    logger.add(logfolder + "/{time}.log", level="INFO", rotation="100 MB")
     
 
     # init log file
@@ -144,7 +147,7 @@ def reconstruction(args):
         args.lr_decay_iters = params.n_iters
         lr_factor = args.lr_decay_target_ratio**(1/params.n_iters)
 
-    print("lr decay", args.lr_decay_target_ratio, args.lr_decay_iters)
+    logger.info("lr decay", args.lr_decay_target_ratio, args.lr_decay_iters)
     
     # Set up schedule
     upsamp_list = params.upsamp_list
@@ -167,7 +170,7 @@ def reconstruction(args):
     if upsamp_bg:
         res = params.bg_upsamp_res.pop(0)
         lr_bg = params.bg_upsamp_lr.pop(0)
-        print(f"Upsampling bg to {res}")
+        logger.info(f"Upsampling bg to {res}")
         tensorf.bg_module.upsample(res)
         ind = [i for i, d in enumerate(grad_vars) if 'name' in d and d['name'] == 'bg'][0]
         grad_vars[ind]['params'] = tensorf.bg_module.parameters()
@@ -191,13 +194,13 @@ def reconstruction(args):
 
 
     ortho_reg_weight = params.ortho_weight
-    print("initial ortho_reg_weight", ortho_reg_weight)
+    logger.info("initial ortho_reg_weight", ortho_reg_weight)
 
     L1_reg_weight = params.L1_weight_inital
-    print("initial L1_reg_weight", L1_reg_weight)
+    logger.info("initial L1_reg_weight", L1_reg_weight)
     TV_weight_density, TV_weight_app = params.TV_weight_density, params.TV_weight_app
     tvreg = TVLoss()
-    print(f"initial TV_weight density: {TV_weight_density} appearance: {TV_weight_app}")
+    logger.info(f"initial TV_weight density: {TV_weight_density} appearance: {TV_weight_app}")
 
     allrgbs = allrgbs.to(device)
     allrays = allrays.to(device)
@@ -205,7 +208,7 @@ def reconstruction(args):
     focal = (train_dataset.focal[0] if ndc_ray else train_dataset.focal)
     # / train_dataset.img_wh[0]
     # with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], with_stack=True, record_shapes=True) as prof:
-    print(tensorf)
+    logger.info(tensorf)
     # TODO REMOVE
     if tensorf.bg_module is not None and not white_bg:
         if True:
@@ -357,7 +360,7 @@ def reconstruction(args):
                     param_group['lr'] = param_group['lr'] * lr_factor
             summary_writer.add_scalar('train/lr', list(optimizer.param_groups)[0]['lr'], global_step=iteration)
 
-            # Print the current values of the losses.
+            # logger.info the current values of the losses.
             if iteration % args.progress_refresh_rate == 0:
                 pbar.set_description(
                     f'train_psnr = {float(np.mean(PSNRs)):.2f}'
@@ -372,19 +375,19 @@ def reconstruction(args):
 
             if iteration % args.vis_every == args.vis_every - 1 and args.N_vis!=0:
                 # tensorf.save(f'{logfolder}/{args.expname}_{iteration}.th', args.model.arch)
-                ic(nSamples)
                 test_res = evaluation(test_dataset,tensorf, args, renderer, f'{logfolder}/imgs_vis/', N_vis=args.N_vis,
                                         prtx=f'{iteration:06d}_', N_samples=nSamples, white_bg = white_bg, ndc_ray=ndc_ray,
                                         compute_extra_metrics=False, render_mode=args.render_mode)
                 PSNRs_test = test_res['psnrs']
                 summary_writer.add_scalar('test/psnr', np.mean(test_res['psnrs']), global_step=iteration)
                 summary_writer.add_scalar('test/norm_err', np.mean(test_res['norm_errs']), global_step=iteration)
+                logger.info(f'test_psnr = {float(np.mean(PSNRs_test)):.2f}')
                 if args.save_often:
                     tensorf.save(f'{logfolder}/{args.expname}_{iteration:06d}.th', args.model.arch)
 
 
             if iteration in params.bounce_iter_list:
-                print(f"Max bounces {tensorf.max_bounce_rays} -> {bounce_n_list[0]}")
+                logger.info(f"Max bounces {tensorf.max_bounce_rays} -> {bounce_n_list[0]}")
                 tensorf.max_bounce_rays = bounce_n_list.pop(0)
             if iteration in update_AlphaMask_list:
 
@@ -396,7 +399,7 @@ def reconstruction(args):
                     tensorf.shrink(new_aabb, apply_correction)
                     # tensorVM.alphaMask = None
                     L1_reg_weight = params.L1_weight_rest
-                    print("continuing L1_reg_weight", L1_reg_weight)
+                    logger.info("continuing L1_reg_weight", L1_reg_weight)
 
 
                 if not ndc_ray and iteration == update_AlphaMask_list[-1] and args.filter_rays:
@@ -404,13 +407,13 @@ def reconstruction(args):
                     allrays, allrgbs, mask = tensorf.filtering_rays(allrays, allrgbs, focal)
                     trainingSampler = SimpleSampler(allrays.shape[0], args.batch_size)
 
-            if iteration in params.smoothing_list:
-                sval = smoothing_vals.pop(0)
-                tensorf.rf.set_smoothing(sval)
+            # if iteration in params.smoothing_list:
+            #     sval = smoothing_vals.pop(0)
+            #     tensorf.rf.set_smoothing(sval)
 
             if iteration in uplambda_list:
                 tensorf.l = l_list.pop(0)
-                print(f"Setting normal lambda to {tensorf.l}")
+                logger.info(f"Setting normal lambda to {tensorf.l}")
 
             if iteration in upsamp_list:
                 n_voxels = N_voxel_list.pop(0)
@@ -434,19 +437,19 @@ def reconstruction(args):
         train_dataset = dataset(args.datadir, split='train', downsample=args.downsample_train, is_stack=True)
         test_res = evaluation(train_dataset,tensorf, args, renderer, f'{logfolder}/imgs_train_all/',
                                 N_vis=-1, N_samples=-1, white_bg = white_bg, ndc_ray=ndc_ray,device=device, render_mode=args.render_mode)
-        print(f'======> {args.expname} test all psnr: {np.mean(test_res["psnrs"])} <========================')
+        logger.info(f'======> {args.expname} test all psnr: {np.mean(test_res["psnrs"])} <========================')
 
     if args.render_test:
         os.makedirs(f'{logfolder}/imgs_test_all', exist_ok=True)
         test_res = evaluation(test_dataset,tensorf, args, renderer, f'{logfolder}/imgs_test_all/',
                                 N_vis=-1, N_samples=-1, white_bg = white_bg, ndc_ray=ndc_ray,device=device, render_mode=args.render_mode)
         summary_writer.add_scalar('test/psnr_all', np.mean(test_res["psnrs"]), global_step=iteration)
-        print(f'======> {args.expname} test all psnr: {np.mean(test_res["psnrs"])} <========================')
+        logger.info(f'======> {args.expname} test all psnr: {np.mean(test_res["psnrs"])} <========================')
 
     if args.render_path:
         c2ws = test_dataset.render_path
         # c2ws = test_dataset.poses
-        print('========>',c2ws.shape)
+        logger.info('========>',c2ws.shape)
         os.makedirs(f'{logfolder}/imgs_path_all', exist_ok=True)
         evaluation_path(test_dataset,tensorf, c2ws, renderer, f'{logfolder}/imgs_path_all/',
                         N_vis=-1, N_samples=-1, white_bg = white_bg, ndc_ray=ndc_ray,device=device,
@@ -458,8 +461,8 @@ def train(cfg: DictConfig):
     torch.set_default_dtype(torch.float32)
     torch.manual_seed(20211202)
     np.random.seed(20211202)
-    print(cfg.dataset)
-    print(cfg.model)
+    logger.info(cfg.dataset)
+    logger.info(cfg.model)
 
     if cfg.render_only:
         render_test(cfg)

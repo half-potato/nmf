@@ -12,7 +12,7 @@ arch:
   max_recurs: 0
   infinity_border: False
   enable_alpha_mask: false
-  appdim_noise_std: 0.1
+  appdim_noise_std: 0.5
   max_normal_similarity: 1.0
 
   tonemap:
@@ -123,10 +123,8 @@ params:
   # bg_upsamp_res: [128, 512, 1024, 1024, 2048]
   # bg_upsamp_lr: [0.03, 0.03, 0.015, 0.015, 0.015]
 
-  upsamp_list: [3000,4000,5500,7000]
-  #upsamp_list: [2000,3000,4000,5500,7000]
-  #uplambda_list: [7000, 12000, 17000, 21000]
-  #uplambda_list: [7000, 12000, 17000]
+  # upsamp_list: [3000,4000,5500,7000]
+  upsamp_list: [100000]
   uplambda_list: [7000, 10000, 12000]
   update_AlphaMask_list: [4000, 7000]
   # update_AlphaMask_list: [30000]

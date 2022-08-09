@@ -606,6 +606,7 @@ class TensorNeRF(torch.nn.Module):
             # ray_invalid = ~ray_valid
             # ray_invalid |= (~alpha_mask)
             ray_valid ^= alpha_mask
+        # ray_valid ^= xyz_normed[..., 2] > 0.2
 
         # sigma.shape: (N, N_samples)
         sigma = torch.zeros(xyz_sampled_shape[:-1], device=device)

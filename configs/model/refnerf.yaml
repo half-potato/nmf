@@ -14,6 +14,7 @@ arch:
   enable_alpha_mask: false
   appdim_noise_std: 0.0
   max_normal_similarity: 1.0
+  max_floater_loss: 1
 
   tonemap:
     # _target_: models.tonemap.HDRTonemap
