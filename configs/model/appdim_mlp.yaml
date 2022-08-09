@@ -21,26 +21,15 @@ arch:
 
   rf:
     _partial_: True
-    _target_: models.grid.Grid
+    _target_: models.tensoRF.TensorVMSplit
+    density_n_comp: 16
+    appearance_n_comp: 24
     app_dim: 24
     step_ratio: 0.5
     density_res_multi: 1
     contract_space: False
-    density_n_comp: 16
-    appearance_n_comp: 24
     # num_levels: 1
-
-  # rf:
-  #   _partial_: True
-  #   _target_: models.tensoRF.TensorVMSplit
-  #   density_n_comp: 16
-  #   appearance_n_comp: 24
-  #   app_dim: 24
-  #   step_ratio: 0.5
-  #   density_res_multi: 1
-  #   contract_space: False
-  #   # num_levels: 1
-  #   hier_sizes: [1]
+    hier_sizes: [1]
 
   sampler:
     _target_: models.brdf.GGXSampler
@@ -206,5 +195,5 @@ params:
   num_env_train_iters: 0
   n_iters: 30000
   charbonier_loss: false
-  start_density: 1e-3
+  start_density: 1e-2
   lr_init: 0.02
