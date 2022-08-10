@@ -41,6 +41,7 @@ Thumbs.db
 # Misc #
 ########
 
+*.pkl
 log/*
 outputs/*
 multirun/*

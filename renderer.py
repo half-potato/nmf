@@ -61,8 +61,8 @@ class BundleRender:
         data = self.base_renderer(rays, tensorf, keys=['depth_map', 'rgb_map', 'normal_map', 'acc_map', 'termination_xyz', 'debug_map', 'surf_width', 'weight_slice'],
                                   focal=self.focal, chunk=self.chunk, **kwargs)
 
-        # LOGGER.save('rays.pkl')
-        # LOGGER.reset()
+        LOGGER.save('rays.pkl')
+        LOGGER.reset()
         rgb_map = data['rgb_map']
         depth_map = data['depth_map']
         normal_map = data['normal_map']

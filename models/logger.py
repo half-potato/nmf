@@ -16,6 +16,33 @@ class Logger:
 
     def reset(self):
         self.data = defaultdict(list)
+    
+    def log_norms_n_rays(self, xyz, normals, weights):
+        if not self.enable:
+            return
+        self.data['xyz'].append(xyz.reshape(-1, xyz.shape[-1])[..., :3])
+        self.data['normals'].append(normals.reshape(-1, 3))
+        self.data['weights'].append(weights.reshape(-1, 1))
+
+    def plot_norms(self):
+        xyz = torch.cat(self.data['xyz'], dim=0)
+        normals = torch.cat(self.data['normals'], dim=0)
+        weights = torch.cat(self.data['weights'], dim=0)
+        # construct normal data
+        N = normals.shape[0]
+        lines_l = []
+        colors = []
+        for i in range(N):
+            lines_l.append(tuple(xyz[i][:3]))
+            lines_l.append(tuple(xyz[i][:3]+normals[i][3:6]))
+            lines_l.append((None, None, None))
+            c = int(weights[i]*255)
+            colors.extend([f'rgb({c},{c},{c})'] * 3)
+        lx, ly, lz = zip(*lines_l)
+
+        go1 = go.Scatter3d(lx, ly, lz, mode='lines')
+        fig = go.Figure([go1])
+        fig.show()
 
     def log_rays(self, rays, recur, return_data):
         if not self.enable:

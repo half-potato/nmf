@@ -116,6 +116,7 @@ class TensorNeRF(torch.nn.Module):
         return grad_vars
 
     def save(self, path, config):
+        print(f"Saving nerf to {path}")
         if self.bg_module is not None:
             config['bg_module']['bg_resolution'] = self.bg_module.bg_resolution
         ckpt = {'config': config, 'state_dict': self.state_dict()}
@@ -756,6 +757,8 @@ class TensorNeRF(torch.nn.Module):
             # surface width in voxels
             surface_width = (torch.arange(weight.shape[1], device=device)[None, :] * weight).std(dim=1)
             weight_slice = weight[torch.where(acc_map > 0.5)[0]].reshape(1, -1)
+            # TODO REMOVE
+            LOGGER.log_norms_n_rays(xyz_sampled, v_world_normal, weight)
         rgb_map = torch.sum(weight[..., None] * rgb, -2)
 
         if tonemap:
