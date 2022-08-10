@@ -15,90 +15,10 @@ from torch.autograd import grad
 import matplotlib.pyplot as plt
 import math
 from .logger import Logger
+import utils
 
 LOGGER = Logger(enable=False)
 
-
-def snells_law(r, n, l):
-    # n: (B, 3) surface outward normal
-    # l: (B, 3) light direction towards surface
-    # r: ratio between indices of refraction. n1/n2
-    # where n1 = index where light starts and n2 = index after surface penetration
-    dtype = n.dtype
-    n = n.double()
-    l = l.double()
-
-    cosi = torch.matmul(n.reshape(-1, 1, 3), l.reshape(-1, 3, 1)).reshape(*n.shape[:-1], 1)
-    Nsign = torch.sign(cosi)
-    N = torch.where(cosi < 0, n, -n)
-    cosi = cosi * Nsign
-    R = torch.where(cosi < 0, 1/r, r)
-
-    k = 1 - R * R * (1 - cosi * cosi);
-    refractdir = R * l + (R * cosi - torch.sqrt(k.clip(min=0))) * N
-
-    # c = -torch.matmul(n.reshape(-1, 1, 3), l.reshape(-1, 3, 1)).reshape(*n.shape[:-1], 1)
-    # sign = torch.sign(c).abs()
-    # refractdir = (r*l + (r * c.abs() - torch.sqrt( (1 - r**2 * (1-c**2)).clip(min=1e-8) )) * sign*n)
-    return refractdir.type(dtype)
-
-def fresnel_law(ior1, ior2, n, l, o):
-    # input: 
-    #  n: (B, 3) surface outward normal
-    #  l: (B, 3) light direction towards surface
-    #  o: (B, 3) refracted light direction given by snells_law
-    #  ior1: index of refraction for material from which light was emitted
-    #  ior2: index of refraction for material after surface
-    # output:
-    #  ratio reflected, between 0 and 1
-    cos_i = torch.matmul(n.reshape(-1, 1, 3), l.reshape(-1, 3, 1)).reshape(*n.shape[:-1], 1)
-    cos_t = torch.matmul(n.reshape(-1, 1, 3), o.reshape(-1, 3, 1)).reshape(*n.shape[:-1], 1)
-    sin_t = torch.sqrt(1 - cos_t**2)
-    s_polar = (ior2 * cos_i - ior1 * cos_t) / (ior2 * cos_i + ior1 * cos_t)
-    p_polar = (ior2 * cos_t - ior1 * cos_i) / (ior2 * cos_t + ior1 * cos_i)
-    ratio_reflected = (s_polar + p_polar)/2
-    return torch.where(sin_t >= 1, torch.ones_like(ratio_reflected), ratio_reflected)
-
-def refract_reflect(ior1, ior2, n, l, p):
-    # n: (B, 3) surface outward normal
-    # l: (B, 3) light direction towards surface
-    # p: (B) reflectivity of material, between 0 and 1
-    # ior1: index of refraction for material from which light was emitted
-    # ior2: index of refraction for material after surface
-    ratio = ior2/ior1
-    o = snells_law(ratio, n, l)
-    ratio_reflected = fresnel_law(ior1, ior2, n, l, o)
-    ratio_refracted = 1 - ratio_reflected
-    out_ratio_reflected = 1 - p * ratio_refracted
-    return out_ratio_reflected
-
-
-
-def select_top_n_app_mask(app_mask, weight, prob, N, t=0, wt=0):
-    # weight: (B, N)
-    # prob: (M)
-    # app_mask: (B, N) with M true elements
-    # N: int max number of selected
-    # t: threshold
-
-    pweight = weight[app_mask]
-    # topmask = weight > (weight.max(dim=1, keepdim=True).values - wt)
-    # ptopmask = topmask[app_mask]
-    prob = prob.reshape(-1)# * ptopmask
-    M = prob.shape[0]
-    bounce_mask = torch.zeros((M), dtype=bool, device=app_mask.device)
-    full_bounce_mask = torch.zeros_like(app_mask)
-    inv_full_bounce_mask = torch.zeros_like(app_mask)
-
-    n_bounces = min(min(N, M), ((prob > t) & (pweight > wt)).sum())
-    inds = torch.argsort(-pweight*prob)[:n_bounces]
-    bounce_mask[inds] = 1
-
-    # combine the two masks because double masking causes issues
-    ainds, ajinds = torch.where(app_mask)
-    full_bounce_mask[ainds[bounce_mask], ajinds[bounce_mask]] = 1
-    inv_full_bounce_mask[ainds[~bounce_mask], ajinds[~bounce_mask]] = 1
-    return bounce_mask, full_bounce_mask, inv_full_bounce_mask
 
 def raw2alpha(sigma, flip, dist):
     # sigma, dist  [N_rays, N_samples]
@@ -117,74 +37,29 @@ def raw2alpha(sigma, flip, dist):
     return alpha, weights, T[:, -1:]
 
 
-class AlphaGridMask(torch.nn.Module):
-    def __init__(self, aabb, alpha_volume):
-        super(AlphaGridMask, self).__init__()
-        self.register_buffer('aabb', aabb)
-
-        aabbSize = self.aabb[1] - self.aabb[0]
-        invgrid_size = 1.0/aabbSize * 2
-        grid_size = torch.LongTensor(
-            [alpha_volume.shape[-1], alpha_volume.shape[-2], alpha_volume.shape[-3]])
-        self.register_buffer('grid_size', grid_size)
-        self.register_buffer('invgrid_size', invgrid_size)
-        self.register_buffer('alpha_volume', alpha_volume)
-
-    def sample_alpha(self, xyz_sampled, contract_space=False):
-        xyz_sampled = self.normalize_coord(xyz_sampled, contract_space)
-        H, W, D = self.alpha_volume.shape
-        i = ((xyz_sampled[..., 0]/2+0.5)*(H-1)).long()
-        j = ((xyz_sampled[..., 1]/2+0.5)*(W-1)).long()
-        k = ((xyz_sampled[..., 2]/2+0.5)*(D-1)).long()
-        alpha_vals = self.alpha_volume[i, j, k]
-        # alpha_vals = F.grid_sample(self.alpha_volume, xyz_sampled[..., :3].view(
-        #     1, -1, 1, 1, 3), align_corners=False).view(-1)
-
-        return alpha_vals
-
-    def normalize_coord(self, xyz_sampled, contract_space):
-        coords = (xyz_sampled[..., :3]-self.aabb[0]) * self.invgrid_size - 1
-        size = xyz_sampled[..., 3:4]
-        normed = torch.cat((coords, size), dim=-1)
-        if contract_space:
-            dist = torch.linalg.norm(normed[..., :3], dim=-1, keepdim=True, ord=torch.inf) + 1e-8
-            direction = normed[..., :3] / dist
-            contracted = torch.where(dist > 1, (2-1/dist), dist)/2 * direction
-            return torch.cat([ contracted, xyz_sampled[..., 3:] ], dim=-1)
-        else:
-            return normed
-
-    def contract_coord(self, xyz_sampled): 
-        dist = torch.linalg.norm(xyz_sampled[..., :3], dim=1, keepdim=True) + 1e-8
-        direction = xyz_sampled[..., :3] / dist
-        contracted = torch.where(dist > 1, (2-1/dist), dist) * direction
-        return torch.cat([ contracted, xyz_sampled[..., 3:] ], dim=-1)
-
-
 class TensorNeRF(torch.nn.Module):
     def __init__(self, rf, grid_size, aabb, diffuse_module, sampler=None, brdf=None, tonemap=None, normal_module=None, ref_module=None, bg_module=None,
                  alphaMask=None, near_far=[2.0, 6.0], nEnvSamples=100, specularity_threshold=0.005, max_recurs=0,
                  max_normal_similarity=1, infinity_border=False, min_refraction=1.1, enable_refraction=True,
                  density_shift=-10, alphaMask_thres=0.001, distance_scale=25, rayMarch_weight_thres=0.0001,
                  max_bounce_rays=4000, roughness_rays=3, bounce_min_weight=0.001, appdim_noise_std=0.0,
-                 world_bounces=0, fea2denseAct='softplus', enable_alpha_mask=True, 
+                 world_bounces=0, fea2denseAct='softplus', enable_alpha_mask=True, selector=None,
                  max_floater_loss=6, **kwargs):
         super(TensorNeRF, self).__init__()
         self.rf = rf(aabb=aabb, grid_size=grid_size)
         self.ref_module = ref_module(in_channels=self.rf.app_dim) if ref_module is not None else None
         self.normal_module = normal_module(in_channels=self.rf.app_dim) if normal_module is not None else None
         self.diffuse_module = diffuse_module(in_channels=self.rf.app_dim)
+        self.brdf = brdf(in_channels=self.rf.app_dim) if brdf is not None else None
+        self.sampler = sampler if sampler is None else sampler(num_samples=roughness_rays)
+        self.selector = selector
         self.bg_module = bg_module
         if tonemap is None:
             self.tonemap = SRGBTonemap()
         else:
             self.tonemap = tonemap
 
-        self.sampler = sampler if sampler is None else sampler(num_samples=roughness_rays)
         self.world_bounces = world_bounces
-
-        self.brdf = brdf(in_channels=self.rf.app_dim) if brdf is not None else None
-
         self.alphaMask = alphaMask
         self.infinity_border = infinity_border
         self.enable_alpha_mask = enable_alpha_mask
@@ -266,7 +141,7 @@ class TensorNeRF(torch.nn.Module):
             #  alpha_volume = torch.from_numpy(np.unpackbits(ckpt['alphaMask.mask'])[
             #                                  :length].reshape(ckpt['alphaMask.shape'])).float()
             alpha_volume = ckpt['alphaMask']
-            rf.alphaMask = AlphaGridMask(
+            rf.alphaMask = utils.AlphaGridMask(
                 ckpt['alphaMask.aabb'], alpha_volume)
         rf.load_state_dict(ckpt['state_dict'], **kwargs)
         return rf
@@ -373,7 +248,7 @@ class TensorNeRF(torch.nn.Module):
         # alpha[alpha >= self.alphaMask_thres] = 1
         # alpha[alpha < self.alphaMask_thres] = 0
 
-        self.alphaMask = AlphaGridMask(self.rf.aabb, alpha > self.alphaMask_thres).to(self.device)
+        self.alphaMask = utils.AlphaGridMask(self.rf.aabb, alpha > self.alphaMask_thres).to(self.device)
 
         valid_xyz = dense_xyz[alpha > 0.0]
         if valid_xyz.shape[0] < 1:
@@ -736,10 +611,8 @@ class TensorNeRF(torch.nn.Module):
                 #         self.specularity_threshold, self.bounce_min_weight)
                 ratio_diffuse = matprop['ratio_diffuse']
                 ratio_reflected = 1 - ratio_diffuse
-                bounce_mask, full_bounce_mask, inv_full_bounce_mask = select_top_n_app_mask(
-                        app_mask, weight.detach(), 1-roughness.detach(), self.max_bounce_rays,
-                        # 0.5, self.bounce_min_weight)
-                        0.0, 0.0)
+                bounce_mask, full_bounce_mask, inv_full_bounce_mask = self.selector(
+                        app_mask, weight.detach(), 1-roughness.detach())
                 # if the bounce is not calculated, set the ratio to 0 to make sure we don't get black spots
                 # if not bounce_mask.all() and not is_train:
                 #     ratio_diffuse[~bounce_mask] += ratio_reflected[~bounce_mask]
@@ -876,10 +749,13 @@ class TensorNeRF(torch.nn.Module):
             # v_normal_map = v_normal_map / (torch.linalg.norm(d_normal_map, dim=-1, keepdim=True)+1e-8)
             v_world_normal_map = acc_map[..., None] * v_world_normal_map + (1 - acc_map[..., None])
 
-            # # extract
             inds = ((weight * (alpha < self.alphaMask_thres)).max(dim=1).indices).clip(min=0)
             termination_xyz = xyz_sampled[range(xyz_sampled_shape[0]), inds]
 
+            # collect statistics about the surface
+            # surface width in voxels
+            surface_width = (torch.arange(weight.shape[1], device=device)[None, :] * weight).std(dim=1)
+            weight_slice = weight[torch.where(acc_map > 0.5)[0]].reshape(1, -1)
         rgb_map = torch.sum(weight[..., None] * rgb, -2)
 
         if tonemap:
@@ -888,25 +764,20 @@ class TensorNeRF(torch.nn.Module):
         if self.bg_module is not None and not white_bg:
             bg_roughness = torch.zeros(B, 1, device=device)
             bg = self.bg_module(viewdirs[:, 0, :], bg_roughness)
-            # rgb_map = acc_map[..., None] * rgb_map + (1. - acc_map[..., None]) * bg.reshape(-1, 1, 1, 3)
             rgb_map = rgb_map + \
                 (1 - acc_map[..., None]) * self.tonemap(bg.reshape(-1, 3), noclip=True)
         else:
             if white_bg or (is_train and torch.rand((1,)) < 0.5):
                 rgb_map = rgb_map + (1 - acc_map[..., None])
-        # rgb_map = bg.reshape(-1, 1, 1, 3)
 
-        # rgb_map = linear_to_srgb(rgb_map).clamp(0, 1)
-
-        # process debug to turn it into map
-        # 1 = refracted. -1 = reflected
-        # we want to represent these two values by represnting them in the 1s and 10s place
         debug_map = (weight[..., None]*debug).sum(dim=1)
+
         return dict(
             rgb_map=rgb_map,
             depth_map=depth_map.detach().cpu(),
             debug_map=debug_map.detach().cpu(),
             normal_map=v_world_normal_map.detach().cpu(),
+            weight_slice=weight_slice,
             recur=recur,
             acc_map=acc_map.detach().cpu(),
             roughness=roughness.mean(),
@@ -915,6 +786,7 @@ class TensorNeRF(torch.nn.Module):
             backwards_rays_loss=backwards_rays_loss,
             termination_xyz=termination_xyz.detach().cpu(),
             floater_loss=floater_loss,
+            surf_width=surface_width,
             color_count=app_mask.detach().sum(),
             bounce_count=bounce_count,
         )

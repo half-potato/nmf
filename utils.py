@@ -223,3 +223,101 @@ def convert_sdf_samples_to_ply(
     ply_data = plyfile.PlyData([el_verts, el_faces])
     print("saving mesh to %s" % (ply_filename_out))
     ply_data.write(ply_filename_out)
+
+
+def snells_law(r, n, l):
+    # n: (B, 3) surface outward normal
+    # l: (B, 3) light direction towards surface
+    # r: ratio between indices of refraction. n1/n2
+    # where n1 = index where light starts and n2 = index after surface penetration
+    dtype = n.dtype
+    n = n.double()
+    l = l.double()
+
+    cosi = torch.matmul(n.reshape(-1, 1, 3), l.reshape(-1, 3, 1)).reshape(*n.shape[:-1], 1)
+    Nsign = torch.sign(cosi)
+    N = torch.where(cosi < 0, n, -n)
+    cosi = cosi * Nsign
+    R = torch.where(cosi < 0, 1/r, r)
+
+    k = 1 - R * R * (1 - cosi * cosi);
+    refractdir = R * l + (R * cosi - torch.sqrt(k.clip(min=0))) * N
+
+    # c = -torch.matmul(n.reshape(-1, 1, 3), l.reshape(-1, 3, 1)).reshape(*n.shape[:-1], 1)
+    # sign = torch.sign(c).abs()
+    # refractdir = (r*l + (r * c.abs() - torch.sqrt( (1 - r**2 * (1-c**2)).clip(min=1e-8) )) * sign*n)
+    return refractdir.type(dtype)
+
+def fresnel_law(ior1, ior2, n, l, o):
+    # input: 
+    #  n: (B, 3) surface outward normal
+    #  l: (B, 3) light direction towards surface
+    #  o: (B, 3) refracted light direction given by snells_law
+    #  ior1: index of refraction for material from which light was emitted
+    #  ior2: index of refraction for material after surface
+    # output:
+    #  ratio reflected, between 0 and 1
+    cos_i = torch.matmul(n.reshape(-1, 1, 3), l.reshape(-1, 3, 1)).reshape(*n.shape[:-1], 1)
+    cos_t = torch.matmul(n.reshape(-1, 1, 3), o.reshape(-1, 3, 1)).reshape(*n.shape[:-1], 1)
+    sin_t = torch.sqrt(1 - cos_t**2)
+    s_polar = (ior2 * cos_i - ior1 * cos_t) / (ior2 * cos_i + ior1 * cos_t)
+    p_polar = (ior2 * cos_t - ior1 * cos_i) / (ior2 * cos_t + ior1 * cos_i)
+    ratio_reflected = (s_polar + p_polar)/2
+    return torch.where(sin_t >= 1, torch.ones_like(ratio_reflected), ratio_reflected)
+
+def refract_reflect(ior1, ior2, n, l, p):
+    # n: (B, 3) surface outward normal
+    # l: (B, 3) light direction towards surface
+    # p: (B) reflectivity of material, between 0 and 1
+    # ior1: index of refraction for material from which light was emitted
+    # ior2: index of refraction for material after surface
+    ratio = ior2/ior1
+    o = snells_law(ratio, n, l)
+    ratio_reflected = fresnel_law(ior1, ior2, n, l, o)
+    ratio_refracted = 1 - ratio_reflected
+    out_ratio_reflected = 1 - p * ratio_refracted
+    return out_ratio_reflected
+
+class AlphaGridMask(torch.nn.Module):
+    def __init__(self, aabb, alpha_volume):
+        super(AlphaGridMask, self).__init__()
+        self.register_buffer('aabb', aabb)
+
+        aabbSize = self.aabb[1] - self.aabb[0]
+        invgrid_size = 1.0/aabbSize * 2
+        grid_size = torch.LongTensor(
+            [alpha_volume.shape[-1], alpha_volume.shape[-2], alpha_volume.shape[-3]])
+        self.register_buffer('grid_size', grid_size)
+        self.register_buffer('invgrid_size', invgrid_size)
+        self.register_buffer('alpha_volume', alpha_volume)
+
+    def sample_alpha(self, xyz_sampled, contract_space=False):
+        xyz_sampled = self.normalize_coord(xyz_sampled, contract_space)
+        H, W, D = self.alpha_volume.shape
+        i = ((xyz_sampled[..., 0]/2+0.5)*(H-1)).long()
+        j = ((xyz_sampled[..., 1]/2+0.5)*(W-1)).long()
+        k = ((xyz_sampled[..., 2]/2+0.5)*(D-1)).long()
+        alpha_vals = self.alpha_volume[i, j, k]
+        # alpha_vals = F.grid_sample(self.alpha_volume, xyz_sampled[..., :3].view(
+        #     1, -1, 1, 1, 3), align_corners=False).view(-1)
+
+        return alpha_vals
+
+    def normalize_coord(self, xyz_sampled, contract_space):
+        coords = (xyz_sampled[..., :3]-self.aabb[0]) * self.invgrid_size - 1
+        size = xyz_sampled[..., 3:4]
+        normed = torch.cat((coords, size), dim=-1)
+        if contract_space:
+            dist = torch.linalg.norm(normed[..., :3], dim=-1, keepdim=True, ord=torch.inf) + 1e-8
+            direction = normed[..., :3] / dist
+            contracted = torch.where(dist > 1, (2-1/dist), dist)/2 * direction
+            return torch.cat([ contracted, xyz_sampled[..., 3:] ], dim=-1)
+        else:
+            return normed
+
+    def contract_coord(self, xyz_sampled): 
+        dist = torch.linalg.norm(xyz_sampled[..., :3], dim=1, keepdim=True) + 1e-8
+        direction = xyz_sampled[..., :3] / dist
+        contracted = torch.where(dist > 1, (2-1/dist), dist) * direction
+        return torch.cat([ contracted, xyz_sampled[..., 3:] ], dim=-1)
+

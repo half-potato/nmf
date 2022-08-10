@@ -40,8 +40,7 @@ def chunk_renderer(rays, tensorf, focal, keys=['rgb_map'], chunk=4096, **kwargs)
     return data
 
 class BundleRender:
-    def __init__(self, base_renderer, render_mode, H, W, focal, bundle_size=1, chunk=3*512, scale_normal=False):
-        self.render_mode = render_mode
+    def __init__(self, base_renderer, H, W, focal, bundle_size=1, chunk=3*512, scale_normal=False):
         self.base_renderer = base_renderer
         self.bundle_size = bundle_size
         self.H = H 
@@ -54,21 +53,12 @@ class BundleRender:
     def __call__(self, rays, tensorf, **kwargs):
         height, width = self.H, self.W
         ray_dim = rays.shape[-1]
-        if self.render_mode == 'decimate':
-            rays = rays.reshape(self.H, self.W, ray_dim)
-            rays = rays[::self.bundle_size, ::self.bundle_size]
-            height = rays.shape[0]
-            width = rays.shape[1]
-            rays = rays.reshape(-1, ray_dim)
-            fH = height * self.bundle_size
-            fW = width * self.bundle_size
-        else:
-            fH = height
-            fW = width
+        fH = height
+        fW = width
         num_rays = height * width
         device = rays.device
 
-        data = self.base_renderer(rays, tensorf, keys=['depth_map', 'rgb_map', 'normal_map', 'acc_map', 'termination_xyz', 'debug_map'],#, 'backwards_rays_loss'],
+        data = self.base_renderer(rays, tensorf, keys=['depth_map', 'rgb_map', 'normal_map', 'acc_map', 'termination_xyz', 'debug_map', 'surf_width', 'weight_slice'],
                                   focal=self.focal, chunk=self.chunk, **kwargs)
 
         # LOGGER.save('rays.pkl')
@@ -77,6 +67,8 @@ class BundleRender:
         depth_map = data['depth_map']
         normal_map = data['normal_map']
         debug_map = data['debug_map']
+        surf_width = data['surf_width']
+        weight_slice = data['weight_slice']
         acc_map = data['acc_map']
         points = data['termination_xyz']
         # ic(data['backwards_rays_loss'].mean(), acc_map.max())
@@ -88,30 +80,22 @@ class BundleRender:
         env_map = (env_map.detach().cpu().numpy() * 255).astype('uint8')
         col_map = (col_map.detach().cpu().numpy() * 255).astype('uint8')
 
-        if self.render_mode == 'decimate':
-            # plt.imshow(normal_map.reshape(height, width, 3).cpu())
-            # plt.figure()
-            normal_map = None
-
         def reshape(val_map):
             val_map = val_map.reshape((height, width, self.bundle_size, self.bundle_size, -1))
             val_map = val_map.permute((0, 2, 1, 3, 4))
-            if self.render_mode == 'center':
-                val_map = val_map[:, self.bundle_size//2, :, self.bundle_size//2]
-            elif self.render_mode == 'mean':
-                print("Mean is incorrect. It should not be done this way. It should take averages on pixels")
-                val_map = val_map.mean(axis=1, keepdim=True).mean(axis=3, keepdim=True)
+            val_map = val_map[:, self.bundle_size//2, :, self.bundle_size//2]
             val_map = val_map.reshape((fH, fW, -1))[:self.H, :self.W, :]
             return val_map
 
 
         rgb_map, depth_map, acc_map = reshape(rgb_map.detach()).cpu(), reshape(depth_map.detach()).cpu(), reshape(acc_map.detach()).cpu()
         debug_map = reshape(debug_map.detach()).cpu()
+        surf_width = reshape(surf_width).cpu()
         rgb_map = rgb_map.clamp(0.0, 1.0)
         if normal_map is not None:
             normal_map = normal_map.reshape(height, width, 3).cpu()
         else:
-            print(f"Falling back to normals from depth map. Render mode: {self.render_mode}")
+            print(f"Falling back to normals from depth map. ")
             normal_map = depth_to_normals(depth_map, self.focal)
 
         # normal_map = acc_map * normal_map + (1-acc_map) * 0
@@ -145,7 +129,7 @@ class BundleRender:
         # fig.show()
         # assert(False)
 
-        return rgb_map, depth_map, debug_map, normal_map, env_map, col_map
+        return rgb_map, depth_map, debug_map, normal_map, env_map, col_map, surf_width, weight_slice
 
 
 def depth_to_normals(depth, focal):
@@ -165,7 +149,7 @@ def depth_to_normals(depth, focal):
     return normals
 
 def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N_samples=-1,
-               white_bg=False, ndc_ray=False, compute_extra_metrics=True, device='cuda', bundle_size=1, render_mode='decimate'):
+               white_bg=False, ndc_ray=False, compute_extra_metrics=True, device='cuda', bundle_size=1):
     PSNRs, rgb_maps, depth_maps = [], [], []
     norm_errs = []
     ssims,l_alex,l_vgg=[],[],[]
@@ -174,6 +158,7 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
     os.makedirs(savePath+"/normal", exist_ok=True)
     os.makedirs(savePath+"/normal_err", exist_ok=True)
     os.makedirs(savePath+"/err", exist_ok=True)
+    os.makedirs(savePath+"/surf_width", exist_ok=True)
     os.makedirs(savePath+"/debug", exist_ok=True)
     os.makedirs(savePath+"/envmaps", exist_ok=True)
 
@@ -191,7 +176,7 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
     near_far = test_dataset.near_far
     W, H = test_dataset.img_wh
     focal = (test_dataset.focal[0] if ndc_ray else test_dataset.focal)
-    brender = BundleRender(renderer, render_mode, H, W, focal)
+    brender = BundleRender(renderer, H, W, focal)
 
     if tensorf.ref_module is not None:
         env_map, col_map = tensorf.recover_envmap(512, xyz=torch.tensor([-0.3042,  0.8466,  0.8462,  0.0027], device='cuda:0'))
@@ -211,20 +196,14 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
         [0.0, 0.0, 1.0],
     ])
 
-    print(f"Using {render_mode} render mode")
     tensorf.eval()
     for idx, im_idx, rays, gt_rgb in iterator():
 
-        # rgb_map, _, depth_map, _, _ = renderer(rays, tensorf, chunk=4096, N_samples=N_samples,
-        #                                 ndc_ray=ndc_ray, white_bg = white_bg, device=device)
-        # rgb_map = rgb_map.clamp(0.0, 1.0)
-        rgb_map, depth_map, debug_map, normal_map, env_map, col_map = brender(
+        rgb_map, depth_map, debug_map, normal_map, env_map, col_map, surf_width, weight_slice = brender(
                 rays, tensorf, N_samples=N_samples, ndc_ray=ndc_ray, white_bg = white_bg, is_train=True)
 
         H, W, _ = normal_map.shape
-        # normal_map = -normal_map.reshape(-1, 3) @ T @ pose[:3, :3]
-        # normal_map = normal_map.reshape(-1, 3) @ T2 @ pose[:3, :3] @ T
-        normal_map = normal_map.reshape(-1, 3)# @ pose[:3, :3]# @ T
+        normal_map = normal_map.reshape(-1, 3)# @ pose[:3, :3]
         normal_map = normal_map.reshape(H, W, 3)
         # bottom of the sphere is green
         # top is blue
@@ -244,10 +223,10 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
                 # ic(u @ vh)
                 # mask = (gt_normal_map[..., 0] == 1) & (gt_normal_map[..., 1] == 1) & (gt_normal_map[..., 2] == 1)
                 # gt_normal_map[mask] = 0
-                norm_err = torch.linalg.norm(normal_map - gt_normal_map, dim=-1)
+                norm_err = torch.arccos((normal_map * gt_normal_map).sum(dim=-1).clip(min=1e-8, max=1-1e-8)) * 180/np.pi
                 norm_errs.append(norm_err.mean())
                 if savePath is not None:
-                    imageio.imwrite(f'{savePath}/normal_err/{prtx}{idx:03d}.png', (norm_err*256/norm_err.max()).numpy().astype(np.uint8))
+                    imageio.imwrite(f'{savePath}/normal_err/{prtx}{idx:03d}.png', norm_err.clip(max=255).numpy().astype(np.uint8))
                     # imageio.imwrite(f'{savePath}/normal_err/{prtx}{idx:03d}.png', vis_gt_normal_map)
             except:
                 pass
@@ -281,6 +260,7 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
             imageio.imwrite(f'{savePath}/rgbd/{prtx}{idx:03d}.png', rgb_map)
             imageio.imwrite(f'{savePath}/normal/{prtx}{idx:03d}.png', vis_normal_map)
             imageio.imwrite(f'{savePath}/err/{prtx}{idx:03d}.png', err_map)
+            imageio.imwrite(f'{savePath}/surf_width/{prtx}{idx:03d}.png', (surf_width*2).numpy().astype(np.uint8))
             imageio.imwrite(f'{savePath}/debug/{prtx}{idx:03d}.png', (255*debug_map.clamp(0, 1).numpy()).astype(np.uint8))
             if tensorf.ref_module is not None:
                 imageio.imwrite(f'{savePath}/envmaps/{prtx}ref_map_{idx:03d}.png', env_map)

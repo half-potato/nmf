@@ -62,8 +62,7 @@ def render_test(args):
         os.makedirs(f'{logfolder}/imgs_train_all', exist_ok=True)
         train_dataset = dataset(os.path.join(args.datadir, args.dataset.scenedir), split='train', downsample=args.dataset.downsample_train, is_stack=True)
         test_res = evaluation(train_dataset,tensorf, args, renderer, f'{logfolder}/imgs_train_all/',
-                                N_vis=-1, N_samples=-1, white_bg = white_bg, ndc_ray=ndc_ray,device=device,
-                                render_mode=args.render_mode)
+                                N_vis=-1, N_samples=-1, white_bg = white_bg, ndc_ray=ndc_ray,device=device)
         logger.info(f'======> {args.expname} train all psnr: {np.mean(test_res["psnrs"])} <========================')
 
     if args.render_test:
@@ -71,15 +70,13 @@ def render_test(args):
         os.makedirs(folder, exist_ok=True)
         logger.info(f"Saving test to {folder}")
         evaluation(test_dataset,tensorf, args, renderer, folder,
-                   N_vis=-1, N_samples=-1, white_bg = white_bg, ndc_ray=ndc_ray,device=device,
-                   render_mode=args.render_mode)
+                   N_vis=-1, N_samples=-1, white_bg = white_bg, ndc_ray=ndc_ray,device=device)
 
     #  if args.render_path:
     #      c2ws = test_dataset.render_path
     #      os.makedirs(f'{logfolder}/imgs_path_all', exist_ok=True)
     #      evaluation_path(test_dataset,tensorf, c2ws, renderer, f'{logfolder}/{args.expname}/imgs_path_all/',
-    #                      N_vis=-1, N_samples=-1, white_bg = white_bg, ndc_ray=ndc_ray,device=device,
-    #                      bundle_size=args.bundle_size, render_mode=args.render_mode)
+    #                      N_vis=-1, N_samples=-1, white_bg = white_bg, ndc_ray=ndc_ray,device=device, bundle_size=args.bundle_size)
 
 def reconstruction(args):
     params = args.model.params
@@ -377,7 +374,7 @@ def reconstruction(args):
                 # tensorf.save(f'{logfolder}/{args.expname}_{iteration}.th', args.model.arch)
                 test_res = evaluation(test_dataset,tensorf, args, renderer, f'{logfolder}/imgs_vis/', N_vis=args.N_vis,
                                         prtx=f'{iteration:06d}_', N_samples=nSamples, white_bg = white_bg, ndc_ray=ndc_ray,
-                                        compute_extra_metrics=False, render_mode=args.render_mode)
+                                        compute_extra_metrics=False)
                 PSNRs_test = test_res['psnrs']
                 summary_writer.add_scalar('test/psnr', np.mean(test_res['psnrs']), global_step=iteration)
                 summary_writer.add_scalar('test/norm_err', np.mean(test_res['norm_errs']), global_step=iteration)
@@ -436,13 +433,13 @@ def reconstruction(args):
         os.makedirs(f'{logfolder}/imgs_train_all', exist_ok=True)
         train_dataset = dataset(args.datadir, split='train', downsample=args.downsample_train, is_stack=True)
         test_res = evaluation(train_dataset,tensorf, args, renderer, f'{logfolder}/imgs_train_all/',
-                                N_vis=-1, N_samples=-1, white_bg = white_bg, ndc_ray=ndc_ray,device=device, render_mode=args.render_mode)
+                                N_vis=-1, N_samples=-1, white_bg = white_bg, ndc_ray=ndc_ray,device=device)
         logger.info(f'======> {args.expname} test all psnr: {np.mean(test_res["psnrs"])} <========================')
 
     if args.render_test:
         os.makedirs(f'{logfolder}/imgs_test_all', exist_ok=True)
         test_res = evaluation(test_dataset,tensorf, args, renderer, f'{logfolder}/imgs_test_all/',
-                                N_vis=-1, N_samples=-1, white_bg = white_bg, ndc_ray=ndc_ray,device=device, render_mode=args.render_mode)
+                                N_vis=-1, N_samples=-1, white_bg = white_bg, ndc_ray=ndc_ray,device=device)
         summary_writer.add_scalar('test/psnr_all', np.mean(test_res["psnrs"]), global_step=iteration)
         logger.info(f'======> {args.expname} test all psnr: {np.mean(test_res["psnrs"])} <========================')
 
@@ -452,8 +449,7 @@ def reconstruction(args):
         logger.info('========>',c2ws.shape)
         os.makedirs(f'{logfolder}/imgs_path_all', exist_ok=True)
         evaluation_path(test_dataset,tensorf, c2ws, renderer, f'{logfolder}/imgs_path_all/',
-                        N_vis=-1, N_samples=-1, white_bg = white_bg, ndc_ray=ndc_ray,device=device,
-                        render_mode=args.render_mode)
+                        N_vis=-1, N_samples=-1, white_bg = white_bg, ndc_ray=ndc_ray,device=device)
 
 
 @hydra.main(version_base=None, config_path='configs', config_name='default')
