@@ -22,7 +22,7 @@ arch:
 
   rf:
     _partial_: True
-    _target_: models.grid.Grid
+    _target_: fields.grid.Grid
     app_dim: 24
     step_ratio: 0.5
     density_res_multi: 1

@@ -2,9 +2,8 @@ from .tensor_base import TensorBase
 import torch
 import torch.nn.functional as F
 from icecream import ic
-from .convolver import Convolver
-from .grid_sample_Cinf import grid_sample
-from .grid_sample3d import grid_sample_3d
+from models.grid_sample_Cinf import grid_sample
+from models.grid_sample3d import grid_sample_3d
 import random
 import math
 

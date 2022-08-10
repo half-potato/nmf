@@ -1,0 +1,605 @@
+diff --git a/models/tensoRF.py b/fields/tensoRF.py
+similarity index 84%
+rename from models/tensoRF.py
+rename to fields/tensoRF.py
+index b7fea4a..e0c0faf 100644
+--- a/models/tensoRF.py
++++ b/fields/tensoRF.py
+@@ -2,8 +2,7 @@ from .tensor_base import TensorBase
+ import torch
+ import torch.nn.functional as F
+ from icecream import ic
+-from .convolver import Convolver
+-from .grid_sample_Cinf import grid_sample
++from models.grid_sample_Cinf import grid_sample
+ import random
+ import math
+ 
+@@ -16,10 +15,8 @@ def d_softplus(x, beta=1.0, shift=-10):
+ 
+ 
+ class TensorVMSplit(TensorBase):
+-    def __init__(self, aabb, grid_size, *args, hier_sizes, **kargs):
+-        super(TensorVMSplit, self).__init__(aabb, grid_size, *args, **kargs)
+-        self.convolver = Convolver(hier_sizes, False)
+-        self.sizes = self.convolver.sizes
++    def __init__(self, aabb, *args, smoothing, **kargs):
++        super(TensorVMSplit, self).__init__(aabb, *args, **kargs)
+ 
+         # num_levels x num_outputs
+         # self.interp_mode = 'bilinear'
+@@ -32,9 +29,7 @@ class TensorVMSplit(TensorBase):
+         self.basis_mat = torch.nn.Linear(m, self.app_dim, bias=False)
+         self.dbasis_mat = torch.nn.Linear(sum(self.density_n_comp), 1, bias=False)
+ 
+-    def set_smoothing(self, sm):
+-        self.smoothing = sm
+-        self.convolver.set_smoothing(sm)
++        self.smoothing = smoothing
+ 
+     def init_one_svd(self, n_component, grid_size, scale, shift):
+         plane_coef, line_coef = [], []
+@@ -140,34 +135,9 @@ class TensorVMSplit(TensorBase):
+         # sigma_feature = sigma_feature.sum(dim=-1)
+         return sigma_feature
+ 
+-    def compute_density_norm(self, xyz_sampled, activation_fn):
+-        coordinate_plane, coordinate_line = self.coordinates(xyz_sampled)
+-        sigma_feature = torch.zeros((xyz_sampled.shape[0],), device=xyz_sampled.device)
+-        world_normals = torch.zeros((xyz_sampled.shape[0], 3), device=xyz_sampled.device)
+-        # size_weights = self.convolver.compute_size_weights(xyz_sampled, self.units/self.density_res_multi)
+-        size_weights = 1
+-
+-        plane_kerns, line_kerns = self.convolver.get_kernels(size_weights, with_normals=True)
+-
+-        for idx_plane in range(len(self.density_plane)):
+-            plane_coef_point, dx_point, dy_point = self.convolver.multi_size_plane(self.density_plane[idx_plane], coordinate_plane[[idx_plane]], size_weights, convs=plane_kerns)
+-            line_coef_point, dz_point = self.convolver.multi_size_line(self.density_line[idx_plane], coordinate_line[[idx_plane]], size_weights, convs=line_kerns)
+-            plane_sigma = torch.sum(plane_coef_point * line_coef_point, dim=0)
+-            sigma_feature = sigma_feature + plane_sigma
+-            # deriv_act = d_softplus(plane_sigma)
+-
+-            # world_normals[:, self.matMode[idx_plane][0]] += (activation_fn(line_coef_point)*dx_point).sum(dim=0)
+-            # world_normals[:, self.matMode[idx_plane][1]] += (activation_fn(line_coef_point)*dy_point).sum(dim=0)
+-            # world_normals[:, self.vecMode[idx_plane]] += (activation_fn(plane_coef_point)*dz_point).sum(dim=0)
+-            world_normals[:, self.matMode[idx_plane][0]] += (line_coef_point*dx_point).sum(dim=0)*self.units[0]
+-            world_normals[:, self.matMode[idx_plane][1]] += (line_coef_point*dy_point).sum(dim=0)*self.units[1]
+-            world_normals[:, self.vecMode[idx_plane]] += (plane_coef_point*dz_point).sum(dim=0)*self.units[2]
+-        world_normals = world_normals / (torch.norm(world_normals, dim=1, keepdim=True)+1e-6)
+-        return sigma_feature, world_normals
+ 
+     def compute_appfeature(self, xyz_sampled):
+         coordinate_plane, coordinate_line = self.coordinates(xyz_sampled)
+-        size_weights = self.convolver.compute_size_weights(xyz_sampled, self.units/self.density_res_multi)
+         plane_coef_point,line_coef_point = [],[]
+         # plane_kerns = [self.norm_plane_kernels[0][0:1]]
+         # line_kerns = [self.norm_line_kernels[0][0:1]]
+@@ -253,8 +223,8 @@ class TensorVMSplit(TensorBase):
+ 
+ 
+ class TensorCP(TensorBase):
+-    def __init__(self, aabb, grid_size, device, *args, **kargs):
+-        super(TensorCP, self).__init__(aabb, grid_size, device, *args, **kargs)
++    def __init__(self, aabb, device, *args, **kargs):
++        super(TensorCP, self).__init__(aabb, device, *args, **kargs)
+ 
+ 
+     def init_svd_volume(self, res, device):
+@@ -381,8 +351,8 @@ class TensorCP(TensorBase):
+         return total
+ 
+ class TensorVM(TensorBase):
+-    def __init__(self, aabb, grid_size, device, *args, **kargs):
+-        super(TensorVM, self).__init__(aabb, grid_size, device, *args, **kargs)
++    def __init__(self, aabb, device, *args, **kargs):
++        super(TensorVM, self).__init__(aabb, device, *args, **kargs)
+         
+ 
+     def init_svd_volume(self, res, device):
+@@ -398,28 +368,6 @@ class TensorVM(TensorBase):
+                          {'params': self.basis_mat.parameters(), 'lr':lr_init_network}]
+         return grad_vars
+ 
+-    def compute_features(self, xyz_sampled):
+-
+-        coordinate_plane = torch.stack((xyz_sampled[..., self.matMode[0]], xyz_sampled[..., self.matMode[1]], xyz_sampled[..., self.matMode[2]])).detach()
+-        coordinate_line = torch.stack((xyz_sampled[..., self.vecMode[0]], xyz_sampled[..., self.vecMode[1]], xyz_sampled[..., self.vecMode[2]]))
+-        coordinate_line = torch.stack((torch.zeros_like(coordinate_line), coordinate_line), dim=-1).detach()
+-
+-        plane_feats = F.grid_sample(self.plane_coef[:, -self.density_n_comp:], coordinate_plane, align_corners=self.align_corners).view(
+-                                        -1, *xyz_sampled.shape[:1])
+-        line_feats = F.grid_sample(self.line_coef[:, -self.density_n_comp:], coordinate_line, align_corners=self.align_corners).view(
+-                                        -1, *xyz_sampled.shape[:1])
+-        
+-        sigma_feature = torch.sum(plane_feats * line_feats, dim=0)
+-        
+-        
+-        plane_feats = F.grid_sample(self.plane_coef[:, :self.app_n_comp], coordinate_plane, align_corners=self.align_corners).view(3 * self.app_n_comp, -1)
+-        line_feats = F.grid_sample(self.line_coef[:, :self.app_n_comp], coordinate_line, align_corners=self.align_corners).view(3 * self.app_n_comp, -1)
+-        
+-        
+-        app_features = self.basis_mat((plane_feats * line_feats).T)
+-        
+-        return sigma_feature, app_features
+-
+     def compute_densityfeature(self, xyz_sampled):
+         coordinate_plane = torch.stack((xyz_sampled[..., self.matMode[0]], xyz_sampled[..., self.matMode[1]], xyz_sampled[..., self.matMode[2]])).detach().view(3, -1, 1, 2)
+         coordinate_line = torch.stack((xyz_sampled[..., self.vecMode[0]], xyz_sampled[..., self.vecMode[1]], xyz_sampled[..., self.vecMode[2]]))
+diff --git a/models/tensor_base.py b/fields/tensor_base.py
+similarity index 76%
+rename from models/tensor_base.py
+rename to fields/tensor_base.py
+index 1626151..6fedb43 100644
+--- a/models/tensor_base.py
++++ b/fields/tensor_base.py
+@@ -1,20 +1,14 @@
+ import torch
+ from icecream import ic
+-from typing import List
++import numpy as np
++import utils
+ 
+ class TensorBase(torch.nn.Module):
+-    aabb: List[int]
+-    grid_size: List[int]
+-    density_n_comp: int
+-    appearance_n_comp: int
+-    app_dim: int
+-    step_ratio: float
+-    density_res_multi: float
+-    contract_space: bool
+-    hier_sizes: List[int]
+-    def __init__(self, aabb, grid_size, density_n_comp, appearance_n_comp,
+-                 app_dim, step_ratio, density_res_multi, contract_space):
++    def __init__(self, aabb, density_n_comp, appearance_n_comp,
++                 app_dim, step_ratio, density_res_multi, contract_space,
++                 N_voxel_init, N_voxel_final, upsamp_list):
+         super().__init__()
++        self.separate_appgrid = True
+         self.dtype = torch.half
+         self.density_n_comp = [density_n_comp]*3
+         self.app_n_comp = [appearance_n_comp]*3
+@@ -23,24 +17,16 @@ class TensorBase(torch.nn.Module):
+         self.register_buffer('aabb', aabb)
+         self.step_ratio = step_ratio
+         self.contract_space = contract_space
++        self.N_voxel_list = (torch.round(torch.exp(torch.linspace(np.log(N_voxel_init), np.log(N_voxel_final), len(upsamp_list)+1))).long()).tolist()[1:]
++        self.upsamp_list = upsamp_list
+ 
+         self.matMode = [[0,1], [0,2], [1,2]]
+         self.vecMode =  [2, 1, 0]
+         self.comp_w = [1,1,1]
++        grid_size = torch.tensor(utils.N_to_reso(N_voxel_init, self.aabb))
+ 
+         self.update_stepSize(grid_size)
+ 
+-    def get_kwargs(self):
+-        return {
+-            'grid_size':self.grid_size.tolist(),
+-            'aabb': self.aabb,
+-            'density_n_comp': self.density_n_comp,
+-            'appearance_n_comp': self.app_n_comp,
+-            'app_dim': self.app_dim,
+-            'step_ratio': self.step_ratio,
+-            'density_res_multi': self.density_res_multi,
+-        }
+-        
+     def set_register(self, name, val):
+         if hasattr(self, name):
+             setattr(self, name, val.type_as(getattr(self, name)))
+@@ -78,6 +64,16 @@ class TensorBase(torch.nn.Module):
+         else:
+             return normed
+ 
++    def check_schedule(self, iter):
++        if iter in self.upsamp_list:
++            i = self.upsamp_list.find(iter)
++            n_voxels = self.N_voxel_list[i]
++            reso_cur = utils.N_to_reso(n_voxels, self.aabb)
++            # nSamples = min(args.nSamples, cal_n_samples(reso_cur,args.step_ratio/tensorf.rf.density_res_multi))
++            self.upsample_volume_grid(reso_cur)
++            return True
++        return False
++
+     def get_optparam_groups(self, lr_init_spatialxyz = 0.02, lr_init_network = 0.001):
+         raise Exception("Not implemented")
+ 
+@@ -87,9 +83,6 @@ class TensorBase(torch.nn.Module):
+     def vector_comp_diffs(self):
+         raise Exception("Not implemented")
+ 
+-    def compute_features(self, xyz_sampled):
+-        raise Exception("Not implemented")
+-
+     def compute_densityfeature(self, xyz_sampled):
+         raise Exception("Not implemented")
+ 
+diff --git a/models/triplanar.py b/fields/triplanar.py
+similarity index 100%
+rename from models/triplanar.py
+rename to fields/triplanar.py
+diff --git a/models/envRF.py b/models/envRF.py
+deleted file mode 100644
+index e1e42c1..0000000
+--- a/models/envRF.py
++++ /dev/null
+@@ -1,60 +0,0 @@
+-from cv2 import norm
+-import torch
+-import torch.nn
+-import torch.nn.functional as F
+-import numpy as np
+-import time
+-from icecream import ic
+-from . import render_modules
+-from models.ise import ISE, RandISE
+-from models.ish import ISH, RandISH
+-
+-class EnvRF(torch.nn.Module):
+-    def __init__(self, rand_n=64, std=5, num_dense_layers=5, num_app_layers=1, featureC=256) -> None:
+-        
+-        self.ise = RandISH(rand_n, std)
+-        
+-        dense_aug_C = 0
+-        app_aug_C = 0
+-
+-        self.dense_mlp = torch.nn.Sequential(
+-            torch.nn.Linear(self.ise.dim() + 1 + dense_aug_C, featureC),
+-            *sum([[
+-                    torch.nn.ReLU(inplace=True),
+-                    torch.nn.Linear(featureC, featureC),
+-                ] for _ in range(num_dense_layers)], []),
+-        )
+-        self.dense_final = torch.nn.Sequential(
+-            torch.nn.ReLU(inplace=True),
+-            torch.nn.Linear(featureC, 3)
+-        )
+-        self.app_mlp = torch.nn.Sequential(
+-            torch.nn.Linear(featureC+app_aug_C, featureC),
+-            *sum([[
+-                    torch.nn.ReLU(inplace=True),
+-                    torch.nn.Linear(featureC, featureC),
+-                ] for _ in range(num_app_layers)], []),
+-        )
+-        torch.nn.init.constant_(self.app_mlp[-1].bias, 0)
+-        self.mlp.apply(self.init_weights)
+-
+-    def init_weights(self, m):
+-        if isinstance(m, torch.nn.Linear):
+-            gain = 0.2688 if m.weight.shape[1] > 200 else 1
+-            torch.nn.init.xavier_uniform_(m.weight, gain=gain)
+-            
+-    def compute_densityfeature(self, inner_dir, inv_depth):
+-
+-        roughness = torch.tensor(20.0, device=inner_dir.device)
+-        indata = [self.ise(inner_dir, roughness), inv_depth]
+-        mlp_in = torch.cat(indata, dim=-1)
+-        upper_feature = self.dense_mlp(mlp_in)
+-        density = torch.dense_final(upper_feature)
+-        return density, upper_feature
+-
+-    def compute_appfeature(self, upper_feature, view_dir, inner_dir, inv_depth, roughness):
+-        indata = [upper_feature]
+-        mlp_in = torch.cat(indata, dim=-1)
+-        rgb = self.app_mlp(mlp_in)
+-        rgb = torch.sigmoid(rgb)
+-        return rgb
+\ No newline at end of file
+diff --git a/models/logger.py b/models/logger.py
+index fe7d16c..ff43017 100644
+--- a/models/logger.py
++++ b/models/logger.py
+@@ -20,29 +20,49 @@ class Logger:
+     def log_norms_n_rays(self, xyz, normals, weights):
+         if not self.enable:
+             return
+-        self.data['xyz'].append(xyz.reshape(-1, xyz.shape[-1])[..., :3])
+-        self.data['normals'].append(normals.reshape(-1, 3))
+-        self.data['weights'].append(weights.reshape(-1, 1))
++        self.data['xyz'].append(xyz.detach().cpu().reshape(-1, xyz.shape[-1])[..., :3])
++        self.data['normals'].append(normals.detach().cpu().reshape(-1, 3))
++        self.data['weights'].append(weights.detach().cpu().reshape(-1, 1))
+ 
+     def plot_norms(self):
+         xyz = torch.cat(self.data['xyz'], dim=0)
+         normals = torch.cat(self.data['normals'], dim=0)
+         weights = torch.cat(self.data['weights'], dim=0)
++        mask = xyz[..., 2] > 0.9
++        xyz = xyz[mask]
++        normals = normals[mask]
++        weights = weights[mask]
++        # N = 500000
++        # xyz = xyz[:N]
++        # normals = normals[:N]
++        # weights = weights[:N]
+         # construct normal data
+         N = normals.shape[0]
+-        lines_l = []
+-        colors = []
+-        for i in range(N):
+-            lines_l.append(tuple(xyz[i][:3]))
+-            lines_l.append(tuple(xyz[i][:3]+normals[i][3:6]))
+-            lines_l.append((None, None, None))
+-            c = int(weights[i]*255)
+-            colors.extend([f'rgb({c},{c},{c})'] * 3)
+-        lx, ly, lz = zip(*lines_l)
++        eps = 0.001
++        # lines_l = []
++        # colors = []
++        # for i in range(N):
++        #     lines_l.append(tuple(xyz[i][:3]))
++        #     lines_l.append(tuple(xyz[i][:3]+eps*normals[i][:3]))
++        #     lines_l.append((None, None, None))
++        #     c = int(weights[i]*255)
++        #     colors.extend([f'rgb({c},{c},{c})'] * 3)
++        # lx, ly, lz = zip(*lines_l)
+ 
+-        go1 = go.Scatter3d(lx, ly, lz, mode='lines')
+-        fig = go.Figure([go1])
+-        fig.show()
++        xyzn = xyz + eps*normals
++        wnormals = weights * normals
++        # go1 = go.Scatter3d(x=lx, y=ly, z=lz, mode='lines', marker=dict(color=colors))
++        go2 = go.Cone(x=xyzn[:, 0], y=xyzn[:, 1], z=xyzn[:, 2], 
++                      u=wnormals[:, 0], v=wnormals[:, 1], w=wnormals[:, 2],
++                      anchor='tail', sizemode='absolute', colorscale='Blues', sizeref=5)
++        # fig = go.Figure([go1, go2])
++        layout = go.Layout(scene=dict(
++            # xaxis=dict(range=[0.5, 1.0], title='x'),
++            # yaxis=dict(range=[0.5, 1.0], title='y'),
++            zaxis=dict(range=[0.4, 1.0], title='z'),
++        ))
++        fig = go.Figure([go2], layout=layout)
++        return fig
+ 
+     def log_rays(self, rays, recur, return_data):
+         if not self.enable:
+@@ -85,5 +105,21 @@ class Logger:
+         fig.show()
+ 
+     def save(self, path):
++        print(self.data)
+         with open(path, 'wb') as f:
+             pkl.dump(self.data, f)
++
++from dash import Dash, html, dcc
++import flask
++logger = Logger(path='rays2.pkl')
++fig = logger.plot_norms()
++# fig.show()
++server = flask.Flask(__name__)
++app = Dash(__name__, server=server)
++app.layout = html.Div([
++    dcc.Graph(id=f"scatter", figure=fig),
++], id='main', className="container")
++# app.run_server(debug=False, port=8080)
++
++
++
+diff --git a/models/modules/selectors.py b/modules/selectors.py
+similarity index 100%
+rename from models/modules/selectors.py
+rename to modules/selectors.py
+diff --git a/samplers/alphagrid.py b/samplers/alphagrid.py
+new file mode 100644
+index 0000000..0931ca8
+--- /dev/null
++++ b/samplers/alphagrid.py
+@@ -0,0 +1,217 @@
++import torch
++import torch.nn.functional as F
++
++class AlphaGridMask(torch.nn.Module):
++    def __init__(self, aabb, alpha_volume):
++        super(AlphaGridMask, self).__init__()
++        self.register_buffer('aabb', aabb)
++
++        aabbSize = self.aabb[1] - self.aabb[0]
++        invgrid_size = 1.0/aabbSize * 2
++        grid_size = torch.LongTensor(
++            [alpha_volume.shape[-1], alpha_volume.shape[-2], alpha_volume.shape[-3]])
++        self.register_buffer('grid_size', grid_size)
++        self.register_buffer('invgrid_size', invgrid_size)
++        self.register_buffer('alpha_volume', alpha_volume)
++
++    def sample_alpha(self, xyz_sampled, contract_space=False):
++        xyz_sampled = self.normalize_coord(xyz_sampled, contract_space)
++        H, W, D = self.alpha_volume.shape
++        i = ((xyz_sampled[..., 0]/2+0.5)*(H-1)).long()
++        j = ((xyz_sampled[..., 1]/2+0.5)*(W-1)).long()
++        k = ((xyz_sampled[..., 2]/2+0.5)*(D-1)).long()
++        alpha_vals = self.alpha_volume[i, j, k]
++        # alpha_vals = F.grid_sample(self.alpha_volume, xyz_sampled[..., :3].view(
++        #     1, -1, 1, 1, 3), align_corners=False).view(-1)
++
++        return alpha_vals
++
++    def normalize_coord(self, xyz_sampled, contract_space):
++        coords = (xyz_sampled[..., :3]-self.aabb[0]) * self.invgrid_size - 1
++        size = xyz_sampled[..., 3:4]
++        normed = torch.cat((coords, size), dim=-1)
++        if contract_space:
++            dist = torch.linalg.norm(normed[..., :3], dim=-1, keepdim=True, ord=torch.inf) + 1e-8
++            direction = normed[..., :3] / dist
++            contracted = torch.where(dist > 1, (2-1/dist), dist)/2 * direction
++            return torch.cat([ contracted, xyz_sampled[..., 3:] ], dim=-1)
++        else:
++            return normed
++
++    def contract_coord(self, xyz_sampled): 
++        dist = torch.linalg.norm(xyz_sampled[..., :3], dim=1, keepdim=True) + 1e-8
++        direction = xyz_sampled[..., :3] / dist
++        contracted = torch.where(dist > 1, (2-1/dist), dist) * direction
++        return torch.cat([ contracted, xyz_sampled[..., 3:] ], dim=-1)
++
++class AlphaGridSampler:
++    def __init__(self, enable_alpha_mask, near_far=[2, 6], nEnvSamples=100):
++        self.enable_alpha_mask = enable_alpha_mask
++        self.alphaMask = None
++        self.nEnvSamples = nEnvSamples
++        self.near_far = near_far
++
++    def update(self, rf):
++        self.nSamples = rf.nSamples
++        self.aabb = rf.aabb
++        self.stepSize = rf.stepSize
++        self.units = rf.units
++        self.contract_space = rf.contract_space
++        self.grid_size = rf.grid_size
++        # reso_mask = reso_cur
++        # new_aabb = tensorf.updateAlphaMask(tuple(reso_mask))
++        # if iteration == update_AlphaMask_list[0]:
++        #     apply_correction = not torch.all(tensorf.alphaMask.grid_size == tensorf.rf.grid_size)
++        #     rf.shrink(new_aabb, apply_correction)
++
++    def sample_ray_ndc(self, rays_o, rays_d, focal, is_train=True, N_samples=-1):
++        N_samples = N_samples if N_samples > 0 else self.nSamples
++        near, far = self.near_far
++        interpx = torch.linspace(near, far, N_samples).unsqueeze(0).to(rays_o)
++        if is_train:
++            l = torch.rand_like(interpx)
++            interpx += l.to(rays_o) * ((far - near) / N_samples)
++
++        rays_pts = rays_o[..., None, :] + \
++            rays_d[..., None, :] * interpx[..., None]
++        mask_outbbox = ((self.aabb[0] > rays_pts) | (
++            rays_pts > self.aabb[1])).any(dim=-1)
++
++        # add size
++        rays_pts = torch.cat([rays_pts, interpx.unsqueeze(-1)/focal], dim=-1)
++
++        return rays_pts, interpx, ~mask_outbbox
++
++    def sample_ray(self, rays_o, rays_d, focal, is_train=True, override_near=None, N_samples=-1, N_env_samples=-1):
++        # focal: ratio of meters to pixels at a distance of 1 meter
++        N_samples = N_samples if N_samples > 0 else self.nSamples
++        N_env_samples = N_env_samples if N_env_samples > 0 else self.nEnvSamples
++        stepsize = self.stepSize
++        near, far = self.near_far
++        if override_near is not None:
++            near = override_near
++        vec = torch.where(rays_d == 0, torch.full_like(rays_d, 1e-6), rays_d)
++        rate_a = (self.aabb[1].to(rays_o) - rays_o) / vec
++        rate_b = (self.aabb[0].to(rays_o) - rays_o) / vec
++        t_min = torch.minimum(rate_a, rate_b).amax(-1).clamp(min=near, max=far)
++
++        rng = torch.arange(N_samples, device=rays_o.device)[None].float()
++        # extend rng to sample towards infinity
++        if N_env_samples > 0:
++            ext_rng = N_samples + N_env_samples / \
++                torch.linspace(1, 1/N_env_samples, N_env_samples,
++                               device=rays_o.device)[None].float()
++            rng = torch.cat([rng, ext_rng], dim=1)
++
++        if is_train:
++            rng = rng.repeat(rays_d.shape[-2], 1)
++            # N, N_samples
++            # add noise along each ray
++            brng = rng.reshape(-1, N_samples+N_env_samples)
++            # brng = brng + torch.rand_like(brng[:, [0], [0]])
++            # r = torch.rand_like(brng[:, 0:1, 0:1])
++            r = torch.rand_like(brng[:, 0:1])
++            brng = brng + r
++            rng = brng.reshape(-1, N_samples+N_env_samples)
++        step = stepsize * rng
++        interpx = (t_min[..., None] + step)
++
++        rays_pts = rays_o[..., None, :] + rays_d[..., None, :] * interpx[..., None]
++        mask_outbbox = ((self.aabb[0] > rays_pts) | (rays_pts > self.aabb[1])).any(dim=-1)
++
++        # add size
++        rays_pts = torch.cat([rays_pts, interpx.unsqueeze(-1)/focal], dim=-1)
++        env_mask = torch.zeros_like(mask_outbbox)
++        env_mask[:, N_samples:] = 1
++
++        if self.contract_space:
++            mask_outbbox = torch.zeros_like(mask_outbbox)
++
++        return rays_pts, interpx, ~mask_outbbox, env_mask
++
++    @torch.no_grad()
++    def getDenseAlpha(self, grid_size=None):
++        grid_size = self.grid_size if grid_size is None else grid_size
++
++        dense_xyz = torch.stack([*torch.meshgrid(
++            torch.linspace(-1, 1, grid_size[0]),
++            torch.linspace(-1, 1, grid_size[1]),
++            torch.linspace(-1, 1, grid_size[2])),
++            torch.ones((grid_size[0], grid_size[1],
++                       grid_size[2]))*self.units.min().cpu()*0.5
++        ], -1).to(self.device)
++
++        alpha = torch.zeros_like(dense_xyz[..., 0])
++        for i in range(grid_size[0]):
++            xyz_norm = dense_xyz[i].view(-1, 4)
++            sigma_feature = self.compute_densityfeature(xyz_norm)
++            sigma = self.feature2density(sigma_feature)
++            alpha[i] = 1 - torch.exp(-sigma*self.stepSize).reshape(*alpha[i].shape)
++
++        return alpha, dense_xyz
++
++    @torch.no_grad()
++    def updateAlphaMask(self, grid_size=(200, 200, 200)):
++
++        alpha, dense_xyz = self.getDenseAlpha(grid_size)
++
++        dense_xyz = dense_xyz.transpose(0, 2).contiguous()
++        alpha = alpha.clamp(0, 1).transpose(0, 2).contiguous()[None, None]
++        total_voxels = grid_size[0] * grid_size[1] * grid_size[2]
++
++        ks = 3
++        alpha = F.max_pool3d(alpha, kernel_size=ks,
++                             padding=ks // 2, stride=1).view(grid_size[::-1])
++        # alpha[alpha >= self.alphaMask_thres] = 1
++        # alpha[alpha < self.alphaMask_thres] = 0
++
++        self.alphaMask = AlphaGridMask(self.aabb, alpha > self.alphaMask_thres).to(self.device)
++
++        valid_xyz = dense_xyz[alpha > 0.0]
++        if valid_xyz.shape[0] < 1:
++            print("No volume")
++            return self.aabb
++
++        xyz_min = valid_xyz.amin(0)[:3]
++        xyz_max = valid_xyz.amax(0)[:3]
++
++        new_aabb = torch.stack((xyz_min, xyz_max))
++
++        total = torch.sum(alpha)
++        print(f"bbox: {xyz_min, xyz_max} alpha rest %%%f" %
++              (total/total_voxels*100))
++        return new_aabb
++
++
++    def sample(self, rays_chunk, focal, ndc_ray=False, override_near=None, is_train=False, N_samples=-1):
++        viewdirs = rays_chunk[:, 3:6]
++        if ndc_ray:
++            xyz_sampled, z_vals, ray_valid = self.sample_ray_ndc(
++                rays_chunk[:, :3], viewdirs, focal, is_train=is_train, N_samples=N_samples)
++            dists = torch.cat(
++                (z_vals[:, 1:] - z_vals[:, :-1], torch.zeros_like(z_vals[:, :1])), dim=-1)
++            rays_norm = torch.norm(viewdirs, dim=-1, keepdim=True)
++            dists = dists * rays_norm
++            viewdirs = viewdirs / rays_norm
++        else:
++            xyz_sampled, z_vals, ray_valid, env_mask = self.sample_ray(
++                rays_chunk[:, :3], viewdirs, focal, is_train=is_train, N_samples=N_samples, override_near=override_near)
++            dists = torch.cat(
++                (z_vals[:, 1:] - z_vals[:, :-1], torch.zeros_like(z_vals[:, :1])), dim=-1)
++
++        device = rays_chunk.device
++        N, M = xyz_sampled.shape[:2]
++        # sample alphas and cull samples from the ray
++        alpha_mask = torch.zeros((M), device=device, dtype=bool)
++        if self.alphaMask is not None and self.enable_alpha_mask:
++            alpha_mask[ray_valid] = self.alphaMask.sample_alpha(
++                xyz_sampled[ray_valid], contract_space=self.contract_space)
++
++            # T = torch.cumprod(torch.cat([
++            #     torch.ones(alphas.shape[0], 1, device=alphas.device),
++            #     1. - alphas + 1e-10
++            # ], dim=-1), dim=-1)[:, :-1]
++            # ray_invalid = ~ray_valid
++            # ray_invalid |= (~alpha_mask)
++            ray_valid ^= alpha_mask
++        return xyz_sampled[ray_valid], ray_valid, M, z_vals

@@ -38,7 +38,7 @@ def raw2alpha(sigma, flip, dist):
 
 
 class TensorNeRF(torch.nn.Module):
-    def __init__(self, rf, grid_size, aabb, diffuse_module, sampler=None, brdf=None, tonemap=None, normal_module=None, ref_module=None, bg_module=None,
+    def __init__(self, rf, grid_size, aabb, diffuse_module, sampler, brdf_sampler=None, brdf=None, tonemap=None, normal_module=None, ref_module=None, bg_module=None,
                  alphaMask=None, near_far=[2.0, 6.0], nEnvSamples=100, specularity_threshold=0.005, max_recurs=0,
                  max_normal_similarity=1, infinity_border=False, min_refraction=1.1, enable_refraction=True,
                  density_shift=-10, alphaMask_thres=0.001, distance_scale=25, rayMarch_weight_thres=0.0001,
@@ -51,7 +51,8 @@ class TensorNeRF(torch.nn.Module):
         self.normal_module = normal_module(in_channels=self.rf.app_dim) if normal_module is not None else None
         self.diffuse_module = diffuse_module(in_channels=self.rf.app_dim)
         self.brdf = brdf(in_channels=self.rf.app_dim) if brdf is not None else None
-        self.sampler = sampler if sampler is None else sampler(num_samples=roughness_rays)
+        self.brdf_sampler = brdf_sampler if brdf_sampler is None else brdf_sampler(num_samples=roughness_rays)
+        self.sampler = sampler
         self.selector = selector
         self.bg_module = bg_module
         if tonemap is None:
@@ -88,6 +89,7 @@ class TensorNeRF(torch.nn.Module):
         self.register_buffer('f_edge', f_edge)
 
         self.max_normal_similarity = max_normal_similarity
+        self.sampler.update(self.rf)
         self.l = 0
         
     @property
@@ -437,51 +439,38 @@ class TensorNeRF(torch.nn.Module):
 
         # sample points
         viewdirs = rays_chunk[:, 3:6]
-        if ndc_ray:
-            xyz_sampled, z_vals, ray_valid = self.sample_ray_ndc(
-                rays_chunk[:, :3], viewdirs, focal, is_train=is_train, N_samples=N_samples)
-            dists = torch.cat(
-                (z_vals[:, 1:] - z_vals[:, :-1], torch.zeros_like(z_vals[:, :1])), dim=-1)
-            rays_norm = torch.norm(viewdirs, dim=-1, keepdim=True)
-            dists = dists * rays_norm
-            viewdirs = viewdirs / rays_norm
-        else:
-            xyz_sampled, z_vals, ray_valid, env_mask = self.sample_ray(
-                rays_chunk[:, :3], viewdirs, focal, is_train=is_train, N_samples=N_samples, override_near=override_near)
-            dists = torch.cat(
-                (z_vals[:, 1:] - z_vals[:, :-1], torch.zeros_like(z_vals[:, :1])), dim=-1)
 
-        # xyz_sampled_shape: (N, N_samples, 3+1)
-        # z_vals.shape: (N, N_samples)
-        # ray_valid.shape: (N, N_samples)
+        device = rays_chunk.device
+        B = rays_chunk.shape[0]
+
+
+        # rays_up = rays_chunk[:, 6:9]
+        # rays_up = rays_up.view(-1, 1, 3).expand(xyz_sampled_shape)
+
+
+        pxyz_sampled, ray_valid, max_samps, z_vals = self.sampler.sample(rays_chunk, focal, ndc_ray, override_near=override_near, is_train=is_train, N_samples=N_samples)
+        xyz_sampled = torch.zeros((B, max_samps, 4), device=device)
+        xyz_sampled[ray_valid] = pxyz_sampled
+        xyz_normed = self.rf.normalize_coord(xyz_sampled)
         xyz_sampled_shape = xyz_sampled[:, :, :3].shape
 
-        xyz_normed = self.rf.normalize_coord(xyz_sampled)
+        ior_i_full = init_refraction_index.to(device).reshape(-1, 1).expand(xyz_sampled_shape[:-1])
+        flip = ior_i_full > self.min_refraction
+        n_samples = xyz_sampled_shape[1]
+        dists = torch.cat(
+            (z_vals[:, 1:] - z_vals[:, :-1], torch.zeros_like(z_vals[:, :1])), dim=-1)
 
+        full_shape = (B, max_samps, 3)
+        M = xyz_sampled.shape[0]
+ 
         device = xyz_sampled.device
+        dists = torch.cat((z_vals[:, 1:] - z_vals[:, :-1], torch.zeros_like(z_vals[:, :1])), dim=-1)
 
-        viewdirs = viewdirs.view(-1, 1, 3).expand(xyz_sampled_shape)
+        viewdirs = viewdirs.view(-1, 1, 3).expand(full_shape)
         # rays_up = rays_chunk[:, 6:9]
         # rays_up = rays_up.view(-1, 1, 3).expand(xyz_sampled_shape)
         B = xyz_sampled.shape[0]
         n_samples = xyz_sampled_shape[1]
-
-        ior_i_full = init_refraction_index.to(device).reshape(-1, 1).expand(xyz_sampled_shape[:-1])
-        flip = ior_i_full > self.min_refraction
-
-        # sample alphas and cull samples from the ray
-        alpha_mask = torch.zeros(xyz_sampled_shape[:-1], device=device, dtype=bool)
-        if self.alphaMask is not None and self.enable_alpha_mask and not flip.any():
-            alpha_mask[ray_valid] = self.alphaMask.sample_alpha(
-                xyz_sampled[ray_valid], contract_space=self.rf.contract_space)
-
-            # T = torch.cumprod(torch.cat([
-            #     torch.ones(alphas.shape[0], 1, device=alphas.device),
-            #     1. - alphas + 1e-10
-            # ], dim=-1), dim=-1)[:, :-1]
-            # ray_invalid = ~ray_valid
-            # ray_invalid |= (~alpha_mask)
-            ray_valid ^= alpha_mask
 
         # sigma.shape: (N, N_samples)
         sigma = torch.zeros(xyz_sampled_shape[:-1], device=device)
@@ -627,9 +616,9 @@ class TensorNeRF(torch.nn.Module):
                     outward = L[bounce_mask]
                     # ray_noise = self.roughness2noisestd(roughness[bounce_mask].reshape(-1, 1, 1)) * torch.normal(0, 1, (N, num_roughness_rays, 3), device=device)
                     # diffuse_noise = ray_noise / (torch.linalg.norm(ray_noise, dim=-1, keepdim=True)+1e-8)
-                    # noise_rays = self.sampler.sample(num_roughness_rays, V[bounce_mask].detach(), outward.detach(), roughness[bounce_mask].detach())
-                    # noise_rays, mipval = self.sampler.sample(num_roughness_rays, brefdirs.detach(), V[bounce_mask], outward.detach(), roughness[bounce_mask])
-                    noise_rays, mipval = self.sampler.sample(num_roughness_rays, brefdirs, V[bounce_mask], outward, roughness[bounce_mask])
+                    # noise_rays = self.brdf_sampler.sample(num_roughness_rays, V[bounce_mask].detach(), outward.detach(), roughness[bounce_mask].detach())
+                    # noise_rays, mipval = self.brdf_sampler.sample(num_roughness_rays, brefdirs.detach(), V[bounce_mask], outward.detach(), roughness[bounce_mask])
+                    noise_rays, mipval = self.brdf_sampler.sample(num_roughness_rays, brefdirs, V[bounce_mask], outward, roughness[bounce_mask])
                     bounce_rays = torch.cat([
                         xyz_sampled[full_bounce_mask][..., :3].reshape(-1, 1, 3).expand(noise_rays.shape),
                         noise_rays,

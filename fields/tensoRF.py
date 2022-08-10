@@ -2,8 +2,7 @@ from .tensor_base import TensorBase
 import torch
 import torch.nn.functional as F
 from icecream import ic
-from .convolver import Convolver
-from .grid_sample_Cinf import grid_sample
+from models.grid_sample_Cinf import grid_sample
 import random
 import math
 
@@ -16,10 +15,8 @@ def d_softplus(x, beta=1.0, shift=-10):
 
 
 class TensorVMSplit(TensorBase):
-    def __init__(self, aabb, grid_size, *args, hier_sizes, **kargs):
-        super(TensorVMSplit, self).__init__(aabb, grid_size, *args, **kargs)
-        self.convolver = Convolver(hier_sizes, False)
-        self.sizes = self.convolver.sizes
+    def __init__(self, aabb, *args, smoothing, **kargs):
+        super(TensorVMSplit, self).__init__(aabb, *args, **kargs)
 
         # num_levels x num_outputs
         # self.interp_mode = 'bilinear'
@@ -32,9 +29,10 @@ class TensorVMSplit(TensorBase):
         self.basis_mat = torch.nn.Linear(m, self.app_dim, bias=False)
         self.dbasis_mat = torch.nn.Linear(sum(self.density_n_comp), 1, bias=False)
 
+        self.smoothing = smoothing
+
     def set_smoothing(self, sm):
-        self.smoothing = sm
-        self.convolver.set_smoothing(sm)
+        pass
 
     def init_one_svd(self, n_component, grid_size, scale, shift):
         plane_coef, line_coef = [], []
@@ -140,34 +138,9 @@ class TensorVMSplit(TensorBase):
         # sigma_feature = sigma_feature.sum(dim=-1)
         return sigma_feature
 
-    def compute_density_norm(self, xyz_sampled, activation_fn):
-        coordinate_plane, coordinate_line = self.coordinates(xyz_sampled)
-        sigma_feature = torch.zeros((xyz_sampled.shape[0],), device=xyz_sampled.device)
-        world_normals = torch.zeros((xyz_sampled.shape[0], 3), device=xyz_sampled.device)
-        # size_weights = self.convolver.compute_size_weights(xyz_sampled, self.units/self.density_res_multi)
-        size_weights = 1
-
-        plane_kerns, line_kerns = self.convolver.get_kernels(size_weights, with_normals=True)
-
-        for idx_plane in range(len(self.density_plane)):
-            plane_coef_point, dx_point, dy_point = self.convolver.multi_size_plane(self.density_plane[idx_plane], coordinate_plane[[idx_plane]], size_weights, convs=plane_kerns)
-            line_coef_point, dz_point = self.convolver.multi_size_line(self.density_line[idx_plane], coordinate_line[[idx_plane]], size_weights, convs=line_kerns)
-            plane_sigma = torch.sum(plane_coef_point * line_coef_point, dim=0)
-            sigma_feature = sigma_feature + plane_sigma
-            # deriv_act = d_softplus(plane_sigma)
-
-            # world_normals[:, self.matMode[idx_plane][0]] += (activation_fn(line_coef_point)*dx_point).sum(dim=0)
-            # world_normals[:, self.matMode[idx_plane][1]] += (activation_fn(line_coef_point)*dy_point).sum(dim=0)
-            # world_normals[:, self.vecMode[idx_plane]] += (activation_fn(plane_coef_point)*dz_point).sum(dim=0)
-            world_normals[:, self.matMode[idx_plane][0]] += (line_coef_point*dx_point).sum(dim=0)*self.units[0]
-            world_normals[:, self.matMode[idx_plane][1]] += (line_coef_point*dy_point).sum(dim=0)*self.units[1]
-            world_normals[:, self.vecMode[idx_plane]] += (plane_coef_point*dz_point).sum(dim=0)*self.units[2]
-        world_normals = world_normals / (torch.norm(world_normals, dim=1, keepdim=True)+1e-6)
-        return sigma_feature, world_normals
 
     def compute_appfeature(self, xyz_sampled):
         coordinate_plane, coordinate_line = self.coordinates(xyz_sampled)
-        size_weights = self.convolver.compute_size_weights(xyz_sampled, self.units/self.density_res_multi)
         plane_coef_point,line_coef_point = [],[]
         # plane_kerns = [self.norm_plane_kernels[0][0:1]]
         # line_kerns = [self.norm_line_kernels[0][0:1]]
@@ -253,8 +226,8 @@ class TensorVMSplit(TensorBase):
 
 
 class TensorCP(TensorBase):
-    def __init__(self, aabb, grid_size, device, *args, **kargs):
-        super(TensorCP, self).__init__(aabb, grid_size, device, *args, **kargs)
+    def __init__(self, aabb, device, *args, **kargs):
+        super(TensorCP, self).__init__(aabb, device, *args, **kargs)
 
 
     def init_svd_volume(self, res, device):
@@ -381,8 +354,8 @@ class TensorCP(TensorBase):
         return total
 
 class TensorVM(TensorBase):
-    def __init__(self, aabb, grid_size, device, *args, **kargs):
-        super(TensorVM, self).__init__(aabb, grid_size, device, *args, **kargs)
+    def __init__(self, aabb, device, *args, **kargs):
+        super(TensorVM, self).__init__(aabb, device, *args, **kargs)
         
 
     def init_svd_volume(self, res, device):
@@ -397,28 +370,6 @@ class TensorVM(TensorBase):
         grad_vars = [{'params': self.line_coef, 'lr': lr_init_spatialxyz}, {'params': self.plane_coef, 'lr': lr_init_spatialxyz},
                          {'params': self.basis_mat.parameters(), 'lr':lr_init_network}]
         return grad_vars
-
-    def compute_features(self, xyz_sampled):
-
-        coordinate_plane = torch.stack((xyz_sampled[..., self.matMode[0]], xyz_sampled[..., self.matMode[1]], xyz_sampled[..., self.matMode[2]])).detach()
-        coordinate_line = torch.stack((xyz_sampled[..., self.vecMode[0]], xyz_sampled[..., self.vecMode[1]], xyz_sampled[..., self.vecMode[2]]))
-        coordinate_line = torch.stack((torch.zeros_like(coordinate_line), coordinate_line), dim=-1).detach()
-
-        plane_feats = F.grid_sample(self.plane_coef[:, -self.density_n_comp:], coordinate_plane, align_corners=self.align_corners).view(
-                                        -1, *xyz_sampled.shape[:1])
-        line_feats = F.grid_sample(self.line_coef[:, -self.density_n_comp:], coordinate_line, align_corners=self.align_corners).view(
-                                        -1, *xyz_sampled.shape[:1])
-        
-        sigma_feature = torch.sum(plane_feats * line_feats, dim=0)
-        
-        
-        plane_feats = F.grid_sample(self.plane_coef[:, :self.app_n_comp], coordinate_plane, align_corners=self.align_corners).view(3 * self.app_n_comp, -1)
-        line_feats = F.grid_sample(self.line_coef[:, :self.app_n_comp], coordinate_line, align_corners=self.align_corners).view(3 * self.app_n_comp, -1)
-        
-        
-        app_features = self.basis_mat((plane_feats * line_feats).T)
-        
-        return sigma_feature, app_features
 
     def compute_densityfeature(self, xyz_sampled):
         coordinate_plane = torch.stack((xyz_sampled[..., self.matMode[0]], xyz_sampled[..., self.matMode[1]], xyz_sampled[..., self.matMode[2]])).detach().view(3, -1, 1, 2)

@@ -16,7 +16,7 @@ enable_alpha_mask: false
 
 rf:
   _partial_: True
-  _target_: models.tensoRF.TensorVMSplit
+  _target_: fields.tensoRF.TensorVMSplit
   density_n_comp: 16
   # appearance_n_comp: 48
   # app_dim: 48

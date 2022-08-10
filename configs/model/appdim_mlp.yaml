@@ -20,14 +20,14 @@ arch:
   max_floater_loss: 1
   selector:
     # _target_: models.modules.selectors.Surface
-    _target_: models.modules.selectors.TopNWeight
+    _target_: modules.selectors.TopNWeight
     max_selected: 100000
     weight_thres: 1e-3
     eps: 1e-1
 
   rf:
     _partial_: True
-    _target_: models.tensoRF.TensorVMSplit
+    _target_: fields.tensoRF.TensorVMSplit
     density_n_comp: 16
     appearance_n_comp: 24
     app_dim: 24
@@ -35,9 +35,20 @@ arch:
     density_res_multi: 1
     contract_space: False
     # num_levels: 1
-    hier_sizes: [1]
+    smoothing: 1.5
+
+    N_voxel_init: 2097156 # 128**3
+    N_voxel_final: 27000000 # 300**3
+    # N_voxel_init: 27000000 # 128**3
+    # N_voxel_final: 134217728 # 300**3
+    upsamp_list: [3000,4000,5500,7000]
 
   sampler:
+    _target_: samplers.alphagrid.AlphaGridSampler
+    enable_alpha_mask: False
+    nEnvSamples: 0
+
+  brdf_sampler:
     _target_: models.brdf.GGXSampler
     _partial_: True
     # _target_: models.brdf.NormalSampler
@@ -163,10 +174,12 @@ params:
   lambda_start: 0.0
   lambda_end: 0.0
   smoothing_list: [10000, 15000, 20000]
+
   N_voxel_init: 2097156 # 128**3
   N_voxel_final: 27000000 # 300**3
   # N_voxel_init: 27000000 # 128**3
   # N_voxel_final: 134217728 # 300**3
+  upsamp_list: [3000,4000,5500,7000]
 
   # bounce_n_list: [100, 1000, 10000, 20000]
   # bounce_iter_list: [9000, 12000, 14000]
@@ -177,7 +190,6 @@ params:
 
   num_bw_iters: 0
 
-  upsamp_list: [3000,4000,5500,7000]
   #upsamp_list: [2000,3000,4000,5500,7000]
   #uplambda_list: [7000, 12000, 17000, 21000]
   #uplambda_list: [7000, 12000, 17000]

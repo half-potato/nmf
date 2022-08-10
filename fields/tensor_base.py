@@ -1,20 +1,14 @@
 import torch
 from icecream import ic
-from typing import List
+import numpy as np
+import utils
 
 class TensorBase(torch.nn.Module):
-    aabb: List[int]
-    grid_size: List[int]
-    density_n_comp: int
-    appearance_n_comp: int
-    app_dim: int
-    step_ratio: float
-    density_res_multi: float
-    contract_space: bool
-    hier_sizes: List[int]
     def __init__(self, aabb, grid_size, density_n_comp, appearance_n_comp,
-                 app_dim, step_ratio, density_res_multi, contract_space):
+                 app_dim, step_ratio, density_res_multi, contract_space,
+                 N_voxel_init, N_voxel_final, upsamp_list):
         super().__init__()
+        self.separate_appgrid = True
         self.dtype = torch.half
         self.density_n_comp = [density_n_comp]*3
         self.app_n_comp = [appearance_n_comp]*3
@@ -23,24 +17,18 @@ class TensorBase(torch.nn.Module):
         self.register_buffer('aabb', aabb)
         self.step_ratio = step_ratio
         self.contract_space = contract_space
+        self.N_voxel_list = (torch.round(torch.exp(torch.linspace(np.log(N_voxel_init), np.log(N_voxel_final), len(upsamp_list)+1))).long()).tolist()[1:]
+        self.upsamp_list = upsamp_list
 
         self.matMode = [[0,1], [0,2], [1,2]]
         self.vecMode =  [2, 1, 0]
         self.comp_w = [1,1,1]
+        print(1, grid_size)
+        grid_size = torch.tensor(utils.N_to_reso(N_voxel_init, self.aabb))
+        print(2, grid_size)
 
         self.update_stepSize(grid_size)
 
-    def get_kwargs(self):
-        return {
-            'grid_size':self.grid_size.tolist(),
-            'aabb': self.aabb,
-            'density_n_comp': self.density_n_comp,
-            'appearance_n_comp': self.app_n_comp,
-            'app_dim': self.app_dim,
-            'step_ratio': self.step_ratio,
-            'density_res_multi': self.density_res_multi,
-        }
-        
     def set_register(self, name, val):
         if hasattr(self, name):
             setattr(self, name, val.type_as(getattr(self, name)))
@@ -78,6 +66,16 @@ class TensorBase(torch.nn.Module):
         else:
             return normed
 
+    def check_schedule(self, iter):
+        if iter in self.upsamp_list:
+            i = self.upsamp_list.find(iter)
+            n_voxels = self.N_voxel_list[i]
+            reso_cur = utils.N_to_reso(n_voxels, self.aabb)
+            # nSamples = min(args.nSamples, cal_n_samples(reso_cur,args.step_ratio/tensorf.rf.density_res_multi))
+            self.upsample_volume_grid(reso_cur)
+            return True
+        return False
+
     def get_optparam_groups(self, lr_init_spatialxyz = 0.02, lr_init_network = 0.001):
         raise Exception("Not implemented")
 
@@ -85,9 +83,6 @@ class TensorBase(torch.nn.Module):
         pass
 
     def vector_comp_diffs(self):
-        raise Exception("Not implemented")
-
-    def compute_features(self, xyz_sampled):
         raise Exception("Not implemented")
 
     def compute_densityfeature(self, xyz_sampled):
