@@ -49,7 +49,6 @@ def render_test(args):
 
     ckpt = torch.load(args.ckpt)
     tensorf = TensorNeRF.load(ckpt).to(device)
-    tensorf.rf.set_smoothing(1)
 
     # init dataset
     dataset = dataset_dict[args.dataset.dataset_name]
@@ -107,11 +106,9 @@ def reconstruction(args):
     summary_writer = SummaryWriter(logfolder)
 
     aabb = train_dataset.scene_bbox.to(device)
-    reso_cur = N_to_reso(params.N_voxel_init, aabb)
-    nSamples = min(args.nSamples, cal_n_samples(reso_cur,args.step_ratio))
     lr_scale = 1
 
-    tensorf = hydra.utils.instantiate(args.model.arch)(aabb=aabb, grid_size=reso_cur)
+    tensorf = hydra.utils.instantiate(args.model.arch)(aabb=aabb)
     if args.ckpt is not None:
         ckpt = torch.load(args.ckpt)
         # tensorf = TensorNeRF.load(ckpt)
@@ -126,7 +123,6 @@ def reconstruction(args):
         # TODO REMOVE PRIORITY
         grid_size = N_to_reso(params.N_voxel_final, tensorf.rf.aabb)
         tensorf.rf.update_stepSize(grid_size)
-        nSamples = min(args.nSamples, cal_n_samples(grid_size,args.step_ratio))
     # TODO REMOVE
     # bg_sd = torch.load('log/mats360_bg.th')
     # from models import bg_modules
@@ -147,22 +143,18 @@ def reconstruction(args):
     logger.info("lr decay", args.lr_decay_target_ratio, args.lr_decay_iters)
     
     # Set up schedule
-    upsamp_list = params.upsamp_list
-    uplambda_list = params.uplambda_list
-    update_AlphaMask_list = params.update_AlphaMask_list
-    bounce_n_list = params.bounce_n_list
+    # uplambda_list = params.uplambda_list
+    # update_AlphaMask_list = params.update_AlphaMask_list
+    # bounce_n_list = params.bounce_n_list
     #linear in logrithmic space
-    N_voxel_list = (torch.round(torch.exp(torch.linspace(np.log(params.N_voxel_init), np.log(params.N_voxel_final), len(upsamp_list)+1))).long()).tolist()[1:]
     # l_list = torch.linspace(0.7, 0.0, len(uplambda_list)+1).tolist()
     # TODO FIX
     # l_list = torch.linspace(0.8, 0.5, len(uplambda_list)+1).tolist()
-    l_list = torch.linspace(params.lambda_start, params.lambda_end, len(uplambda_list)+1).tolist()
-    tensorf.l = l_list.pop(0)
-    tensorf.max_bounce_rays = bounce_n_list.pop(0)
+    # l_list = torch.linspace(params.lambda_start, params.lambda_end, len(uplambda_list)+1).tolist()
+    # tensorf.l = l_list.pop(0)
+    # tensorf.max_bounce_rays = bounce_n_list.pop(0)
 
     # smoothing_vals = [0.6, 0.7, 0.8, 0.7, 0.5]
-    smoothing_vals = torch.linspace(params.smoothing_start, params.smoothing_end, len(upsamp_list)+1).tolist()
-    tensorf.rf.set_smoothing(smoothing_vals.pop(0))
     upsamp_bg = hasattr(params, 'bg_upsamp_res') and tensorf.bg_module is not None
     if upsamp_bg:
         res = params.bg_upsamp_res.pop(0)
@@ -231,7 +223,7 @@ def reconstruction(args):
 
     if args.ckpt is None:
         space_optim = torch.optim.Adam(tensorf.parameters(), lr=0.1, betas=(0.9,0.99))
-        pbar = tqdm(range(5000))
+        pbar = tqdm(range(1000))
         for _ in pbar:
             xyz = torch.rand(5000, 3, device=device)*2-1
             feat = tensorf.rf.compute_densityfeature(xyz)
@@ -251,7 +243,7 @@ def reconstruction(args):
 
     pbar = tqdm(range(params.n_iters), miniters=args.progress_refresh_rate, file=sys.stdout)
     old_decay = False
-    T_max = 30000
+    # T_max = 30000
     # scheduler1 = lr_scheduler.CosineAnnealingLR(optimizer, T_max=T_max)
     # scheduler2 = lr_scheduler.ChainedScheduler([
     #         lr_scheduler.ConstantLR(optimizer, factor=0.25, total_iters=600000),
@@ -289,8 +281,7 @@ def reconstruction(args):
             with torch.cuda.amp.autocast(enabled=args.fp16):
                 data = renderer(rays_train, tensorf,
                         keys = ['rgb_map', 'floater_loss', 'normal_loss', 'backwards_rays_loss', 'diffuse_reg', 'bounce_count', 'color_count', 'roughness'],
-                        focal=focal, output_alpha=alpha_train, chunk=args.batch_size,
-                        N_samples=nSamples, white_bg = white_bg, ndc_ray=ndc_ray, is_train=True)
+                        focal=focal, output_alpha=alpha_train, chunk=args.batch_size, white_bg = white_bg, ndc_ray=ndc_ray, is_train=True)
 
                 # loss = torch.mean((rgb_map[:, 1, 1] - rgb_train[:, 1, 1]) ** 2)
                 normal_loss = data['normal_loss'].mean()
@@ -373,7 +364,7 @@ def reconstruction(args):
             if iteration % args.vis_every == args.vis_every - 1 and args.N_vis!=0:
                 # tensorf.save(f'{logfolder}/{args.expname}_{iteration}.th', args.model.arch)
                 test_res = evaluation(test_dataset,tensorf, args, renderer, f'{logfolder}/imgs_vis/', N_vis=args.N_vis,
-                                        prtx=f'{iteration:06d}_', N_samples=nSamples, white_bg = white_bg, ndc_ray=ndc_ray,
+                                        prtx=f'{iteration:06d}_', white_bg = white_bg, ndc_ray=ndc_ray,
                                         compute_extra_metrics=False)
                 PSNRs_test = test_res['psnrs']
                 summary_writer.add_scalar('test/psnr', np.mean(test_res['psnrs']), global_step=iteration)
@@ -382,47 +373,25 @@ def reconstruction(args):
                 if args.save_often:
                     tensorf.save(f'{logfolder}/{args.expname}_{iteration:06d}.th', args.model.arch)
 
-
-            if iteration in params.bounce_iter_list:
-                logger.info(f"Max bounces {tensorf.max_bounce_rays} -> {bounce_n_list[0]}")
-                tensorf.max_bounce_rays = bounce_n_list.pop(0)
-            if iteration in update_AlphaMask_list:
-
-                #  if reso_cur[0] * reso_cur[1] * reso_cur[2]<256**3:# update volume resolution
-                reso_mask = reso_cur
-                new_aabb = tensorf.updateAlphaMask(tuple(reso_mask))
-                if iteration == update_AlphaMask_list[0]:
-                    apply_correction = not torch.all(tensorf.alphaMask.grid_size == tensorf.rf.grid_size)
-                    tensorf.shrink(new_aabb, apply_correction)
-                    # tensorVM.alphaMask = None
-                    L1_reg_weight = params.L1_weight_rest
-                    logger.info("continuing L1_reg_weight", L1_reg_weight)
-
-
-                if not ndc_ray and iteration == update_AlphaMask_list[-1] and args.filter_rays:
-                    # filter rays outside the bbox
-                    allrays, allrgbs, mask = tensorf.filtering_rays(allrays, allrgbs, focal)
-                    trainingSampler = SimpleSampler(allrays.shape[0], args.batch_size)
-
-            # if iteration in params.smoothing_list:
-            #     sval = smoothing_vals.pop(0)
-            #     tensorf.rf.set_smoothing(sval)
-
-            if iteration in uplambda_list:
-                tensorf.l = l_list.pop(0)
-                logger.info(f"Setting normal lambda to {tensorf.l}")
-
-            if iteration in upsamp_list:
-                n_voxels = N_voxel_list.pop(0)
-                reso_cur = N_to_reso(n_voxels, tensorf.rf.aabb)
-                nSamples = min(args.nSamples, cal_n_samples(reso_cur,args.step_ratio/tensorf.rf.density_res_multi))
-                tensorf.rf.upsample_volume_grid(reso_cur)
-
-                # upscaling deregisters the parameter, so we need to reregister it
-                lr_scale = 1
+            if tensorf.check_schedule(iteration):
                 new_grad_vars = tensorf.get_optparam_groups(params.lr_init*lr_scale, args.lr_basis*lr_scale, lr_bg=lr_bg, lr_scale=lr_scale)
                 for param_group, new_param_group in zip(optimizer.param_groups, new_grad_vars):
                     param_group['params'] = new_param_group['params']
+
+            # if iteration in update_alphamask_list:
+
+                #  if reso_cur[0] * reso_cur[1] * reso_cur[2]<256**3:# update volume resolution
+                    # tensorVM.alphaMask = None
+                    # L1_reg_weight = params.L1_weight_rest
+                    # logger.info("continuing L1_reg_weight", L1_reg_weight)
+
+
+            # if not ndc_ray and iteration == update_AlphaMask_list[-1] and args.filter_rays:
+            #     # filter rays outside the bbox
+            #     allrays, allrgbs, mask = tensorf.filtering_rays(allrays, allrgbs, focal)
+            #     trainingSampler = SimpleSampler(allrays.shape[0], args.batch_size)
+
+
     # prof.export_chrome_trace('trace.json')
         
 

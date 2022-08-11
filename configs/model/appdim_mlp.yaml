@@ -2,8 +2,7 @@ arch:
   _target_: models.tensor_nerf.TensorNeRF
   _partial_: True
 
-  # density_shift: -10
-  density_shift: -3
+  density_shift: -10
   alphaMask_thres: 0.0001
   distance_scale: 25
   rayMarch_weight_thres: 0.0001
@@ -51,7 +50,6 @@ arch:
   brdf_sampler:
     _target_: models.brdf.GGXSampler
     _partial_: True
-    # _target_: models.brdf.NormalSampler
 
   tonemap:
     # _target_: models.tonemap.HDRTonemap
@@ -62,13 +60,6 @@ arch:
   #   _target_: models.brdf.PBR
   # #   # _target_: models.brdf.SimplePBR
   #   _partial_: True
-  # brdf:
-  #   _target_: models.brdf.MLPBRDFCos
-  #   _partial_: True
-  #   num_layers: 5
-  #   feape: 2
-  #   featureC: 128
-  #   activation: 'sigmoid'
 
   brdf:
     _target_: models.brdf.MLPBRDF
@@ -105,15 +96,6 @@ arch:
     detach_roughness: false
     lr: 1e-3
 
-  # bg_module:
-  #   _target_: models.bg_modules.HierarchicalCubeMap
-  #   bg_resolution: 1600
-  #   num_levels: 7
-  #   activation: 'softplus'
-  #   power: 2
-  #   stds: []
-  #   lr: 0.30
-
   bg_module:
     _target_: models.bg_modules.HierarchicalCubeMap
     bg_resolution: 1600
@@ -129,35 +111,8 @@ arch:
     _target_: models.render_modules.MLPDiffuse
     pospe: 0
     feape: 2
-    # view_encoder:
-    #   _target_: models.ish.FullISH
-    #   max_degree: 4
     featureC: 128
     num_layers: 3
-
-  # ref_module:
-  #   _partial_: True
-  #   _target_: models.render_modules.MLPRender_FP
-  #   feape: 0
-  #   lr: 1e-4
-  #   # view_encoder:
-  #   #   _target_: models.ish.FullISH
-  #   #   max_degree: 4
-  #   ref_encoder:
-  #     _target_: models.ish.FullISH
-  #     max_degree: 5
-  #   # ref_encoder:
-  #   #   _target_: models.render_modules.PE
-  #   #   max_degree: 4
-  #   # ref_encoder:
-  #   #   _target_: models.ish.ISH
-  #   #   max_degree: 6
-  #   # ref_encoder:
-  #   #   _target_: models.ish.RandISH
-  #   #   rand_n: 64
-  #   #   std: 5
-  #   featureC: 128
-  #   num_layers: 6
 
   normal_module:
     _partial_: True
@@ -169,17 +124,9 @@ arch:
     num_layers: 3
 
 params:
-  smoothing_start: 1.5
-  smoothing_end: 1.5
   lambda_start: 0.0
   lambda_end: 0.0
   smoothing_list: [10000, 15000, 20000]
-
-  N_voxel_init: 2097156 # 128**3
-  N_voxel_final: 27000000 # 300**3
-  # N_voxel_init: 27000000 # 128**3
-  # N_voxel_final: 134217728 # 300**3
-  upsamp_list: [3000,4000,5500,7000]
 
   # bounce_n_list: [100, 1000, 10000, 20000]
   # bounce_iter_list: [9000, 12000, 14000]

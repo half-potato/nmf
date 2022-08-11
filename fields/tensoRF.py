@@ -31,9 +31,6 @@ class TensorVMSplit(TensorBase):
 
         self.smoothing = smoothing
 
-    def set_smoothing(self, sm):
-        pass
-
     def init_one_svd(self, n_component, grid_size, scale, shift):
         plane_coef, line_coef = [], []
 

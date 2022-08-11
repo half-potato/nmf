@@ -4,7 +4,7 @@ import numpy as np
 import utils
 
 class TensorBase(torch.nn.Module):
-    def __init__(self, aabb, grid_size, density_n_comp, appearance_n_comp,
+    def __init__(self, aabb, density_n_comp, appearance_n_comp,
                  app_dim, step_ratio, density_res_multi, contract_space,
                  N_voxel_init, N_voxel_final, upsamp_list):
         super().__init__()
@@ -23,9 +23,7 @@ class TensorBase(torch.nn.Module):
         self.matMode = [[0,1], [0,2], [1,2]]
         self.vecMode =  [2, 1, 0]
         self.comp_w = [1,1,1]
-        print(1, grid_size)
         grid_size = torch.tensor(utils.N_to_reso(N_voxel_init, self.aabb))
-        print(2, grid_size)
 
         self.update_stepSize(grid_size)
 
@@ -68,7 +66,7 @@ class TensorBase(torch.nn.Module):
 
     def check_schedule(self, iter):
         if iter in self.upsamp_list:
-            i = self.upsamp_list.find(iter)
+            i = self.upsamp_list.index(iter)
             n_voxels = self.N_voxel_list[i]
             reso_cur = utils.N_to_reso(n_voxels, self.aabb)
             # nSamples = min(args.nSamples, cal_n_samples(reso_cur,args.step_ratio/tensorf.rf.density_res_multi))
