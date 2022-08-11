@@ -39,9 +39,10 @@ arch:
     upsamp_list: [4000,4000,5500,7000]
 
   sampler:
-    _target_: samplers.alphagrid.AlphaGridSampler
-    enable_alpha_mask: False
-    nEnvSamples: 0
+    # _target_: samplers.alphagrid.AlphaGridSampler
+    # enable_alpha_mask: False
+    # nEnvSamples: 0
+    _target_: samplers.raymarch.Raymarcher
 
   bg_module:
     _target_: models.bg_modules.HierarchicalCubeMap

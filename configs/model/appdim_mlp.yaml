@@ -33,7 +33,6 @@ arch:
     step_ratio: 0.5
     density_res_multi: 1
     contract_space: False
-    # num_levels: 1
     smoothing: 1.5
 
     N_voxel_init: 2097156 # 128**3

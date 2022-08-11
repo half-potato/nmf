@@ -217,7 +217,7 @@ class TensorNeRF(torch.nn.Module):
     def check_schedule(self, iter):
         require_reassignment = False
         require_reassignment |= self.rf.check_schedule(iter)
-        if iter in self.update_sampler_list:
+        if iter in self.update_sampler_list or require_reassignment:
             self.sampler.update(self.rf)
         return require_reassignment
 
@@ -308,14 +308,11 @@ class TensorNeRF(torch.nn.Module):
         return bg.reshape(-1, 3)
 
     def forward(self, rays_chunk, focal,
-                recur=0, init_refraction_index=torch.tensor(1.0),
-                override_near=None, output_alpha=None, white_bg=True,
+                recur=0, override_near=None, output_alpha=None, white_bg=True,
                 is_train=False, ndc_ray=False, N_samples=-1, tonemap=True):
         # rays_chunk: (N, (origin, viewdir, ray_up))
 
         # sample points
-        viewdirs = rays_chunk[:, 3:6]
-
         device = rays_chunk.device
         B = rays_chunk.shape[0]
 
@@ -324,25 +321,24 @@ class TensorNeRF(torch.nn.Module):
         full_shape = (B, max_samps, 3)
         n_samples = full_shape[1]
 
-        ior_i_full = init_refraction_index.to(device).reshape(-1, 1).expand(full_shape[:-1])
-        flip = ior_i_full > self.min_refraction
         dists = torch.cat(
             (z_vals[:, 1:] - z_vals[:, :-1], torch.zeros_like(z_vals[:, :1])), dim=-1)
 
-        M = xyz_sampled.shape[0]
+        M = xyz_sampled.shape[1]
  
         device = xyz_sampled.device
         dists = torch.cat((z_vals[:, 1:] - z_vals[:, :-1], torch.zeros_like(z_vals[:, :1])), dim=-1)
 
-        viewdirs = viewdirs.view(-1, 1, 3).expand(full_shape)
+        viewdirs = rays_chunk[:, 3:6].view(-1, 1, 3).expand(full_shape)
         # rays_up = rays_chunk[:, 6:9]
         # rays_up = rays_up.view(-1, 1, 3).expand(full_shape)
         n_samples = full_shape[1]
 
         # sigma.shape: (N, N_samples)
         sigma = torch.zeros(full_shape[:-1], device=device)
-        world_normal = torch.zeros(full_shape, device=device)
         rgb = torch.zeros((*full_shape[:2], 3), device=device)
+
+        world_normal = torch.zeros(full_shape, device=device)
         p_world_normal = torch.zeros(full_shape, device=device)
 
         if ray_valid.any():
