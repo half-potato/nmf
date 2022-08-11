@@ -133,7 +133,7 @@ class TensorVMSplit(TensorBase):
         # ic(sigma_feature[0], sigma_feature[0].sum())
         sigma_feature = self.dbasis_mat(sigma_feature).squeeze(-1)
         # sigma_feature = sigma_feature.sum(dim=-1)
-        return sigma_feature
+        return self.feature2density(sigma_feature)
 
 
     def compute_appfeature(self, xyz_sampled):

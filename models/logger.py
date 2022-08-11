@@ -109,16 +109,16 @@ class Logger:
         with open(path, 'wb') as f:
             pkl.dump(self.data, f)
 
-from dash import Dash, html, dcc
-import flask
-logger = Logger(path='rays2.pkl')
-fig = logger.plot_norms()
-# fig.show()
-server = flask.Flask(__name__)
-app = Dash(__name__, server=server)
-app.layout = html.Div([
-    dcc.Graph(id=f"scatter", figure=fig),
-], id='main', className="container")
+# from dash import Dash, html, dcc
+# import flask
+# logger = Logger(path='rays2.pkl')
+# fig = logger.plot_norms()
+# # fig.show()
+# server = flask.Flask(__name__)
+# app = Dash(__name__, server=server)
+# app.layout = html.Div([
+#     dcc.Graph(id=f"scatter", figure=fig),
+# ], id='main', className="container")
 # app.run_server(debug=False, port=8080)
 
 

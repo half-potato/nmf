@@ -1,13 +1,18 @@
 import torch
+import torch.nn.functional as F
 from icecream import ic
 import numpy as np
 import utils
 
 class TensorBase(torch.nn.Module):
     def __init__(self, aabb, density_n_comp, appearance_n_comp,
+                 density_shift, fea2denseAct,
                  app_dim, step_ratio, density_res_multi, contract_space,
-                 N_voxel_init, N_voxel_final, upsamp_list):
+                 N_voxel_init, N_voxel_final, upsamp_list, distance_scale=25):
         super().__init__()
+        self.distance_scale = distance_scale
+        self.density_shift = density_shift
+        self.fea2denseAct = fea2denseAct
         self.separate_appgrid = True
         self.dtype = torch.half
         self.density_n_comp = [density_n_comp]*3
@@ -26,6 +31,18 @@ class TensorBase(torch.nn.Module):
         grid_size = torch.tensor(utils.N_to_reso(N_voxel_init, self.aabb))
 
         self.update_stepSize(grid_size)
+
+    def feature2density(self, density_features):
+        if self.fea2denseAct == "softplus_shift":
+            return F.softplus(density_features+self.density_shift)
+        elif self.fea2denseAct == "softplus":
+            return F.softplus(density_features)
+        elif self.fea2denseAct == "relu":
+            return F.relu(density_features)
+        elif self.fea2denseAct == "relu_shift":
+            return F.relu(density_features+self.density_shift)
+        elif self.fea2denseAct == "identity":
+            return density_features
 
     def set_register(self, name, val):
         if hasattr(self, name):

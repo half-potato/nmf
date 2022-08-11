@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 import math
 from .logger import Logger
 import utils
+from samplers.alphagrid import AlphaGridSampler
 
 LOGGER = Logger(enable=False)
 
@@ -30,6 +31,7 @@ def raw2alpha(sigma, dist):
         torch.ones(alpha.shape[0], 1, device=alpha.device),
         1. - alpha + 1e-10
     ], dim=-1), dim=-1)
+    # ic(T.max(), alpha.max(), alpha.min(), dist.min())
 
     weights = alpha * T[:, :-1]  # [N_rays, N_samples]
     return alpha, weights, T[:, -1:]
@@ -39,9 +41,9 @@ class TensorNeRF(torch.nn.Module):
     def __init__(self, rf, aabb, diffuse_module, sampler, brdf_sampler=None, brdf=None, tonemap=None, normal_module=None, ref_module=None, bg_module=None,
                  alphaMask=None, specularity_threshold=0.005, max_recurs=0,
                  max_normal_similarity=1, infinity_border=False, min_refraction=1.1, enable_refraction=True,
-                 density_shift=-10, alphaMask_thres=0.001, distance_scale=25, rayMarch_weight_thres=0.0001,
+                 alphaMask_thres=0.001, rayMarch_weight_thres=0.0001,
                  max_bounce_rays=4000, roughness_rays=3, bounce_min_weight=0.001, appdim_noise_std=0.0,
-                 world_bounces=0, fea2denseAct='softplus', enable_alpha_mask=True, selector=None,
+                 world_bounces=0, enable_alpha_mask=True, selector=None,
                  update_sampler_list=[5000], max_floater_loss=6, **kwargs):
         super(TensorNeRF, self).__init__()
         self.rf = rf(aabb=aabb)
@@ -51,6 +53,7 @@ class TensorNeRF(torch.nn.Module):
         self.brdf = brdf(in_channels=self.rf.app_dim) if brdf is not None else None
         self.brdf_sampler = brdf_sampler if brdf_sampler is None else brdf_sampler(num_samples=roughness_rays)
         self.sampler = sampler
+        # self.sampler2 = AlphaGridSampler(near_far=[2, 6])
         self.selector = selector
         self.bg_module = bg_module
         if tonemap is None:
@@ -63,11 +66,8 @@ class TensorNeRF(torch.nn.Module):
         self.infinity_border = infinity_border
         self.enable_alpha_mask = enable_alpha_mask
         self.max_floater_loss = max_floater_loss
-        self.density_shift = density_shift
         self.alphaMask_thres = alphaMask_thres
-        self.distance_scale = distance_scale
         self.rayMarch_weight_thres = rayMarch_weight_thres
-        self.fea2denseAct = fea2denseAct
         self.appdim_noise_std = appdim_noise_std
         self.update_sampler_list = update_sampler_list
 
@@ -86,9 +86,8 @@ class TensorNeRF(torch.nn.Module):
         self.register_buffer('f_edge', f_edge)
 
         self.max_normal_similarity = max_normal_similarity
-        self.sampler.update(self.rf)
         self.l = 0
-        self.sampler.update(self.rf)
+        # self.sampler2.update(self.rf)
         
     @property
     def device(self):
@@ -96,7 +95,6 @@ class TensorNeRF(torch.nn.Module):
 
     def get_optparam_groups(self, lr_init_spatial=0.02, lr_init_network=0.001, lr_bg=0.025, lr_scale=1):
         grad_vars = []
-        # TODO REMOVE
         grad_vars += self.rf.get_optparam_groups(lr_init_spatial, lr_init_network)
         if isinstance(self.normal_module, torch.nn.Module):
             grad_vars += [{'params': self.normal_module.parameters(),
@@ -109,7 +107,6 @@ class TensorNeRF(torch.nn.Module):
         if isinstance(self.brdf, torch.nn.Module):
             grad_vars += [{'params': self.brdf.parameters(),
                            'lr': self.brdf.lr}]
-        # TODO REMOVE
         if isinstance(self.bg_module, torch.nn.Module):
             grad_vars += [{'params': self.bg_module.parameters(),
                 'lr': self.bg_module.lr, 'name': 'bg'}]
@@ -134,7 +131,6 @@ class TensorNeRF(torch.nn.Module):
     def load(ckpt, **kwargs):
         config = ckpt['config']
         aabb = ckpt['state_dict']['rf.aabb']
-        # ic(ckpt['state_dict'].keys())
         grid_size = ckpt['state_dict']['rf.grid_size'].cpu()
         rf = hydra.utils.instantiate(config)(aabb=aabb, grid_size=grid_size)
         # if 'alphaMask.aabb' in ckpt.keys():
@@ -185,22 +181,9 @@ class TensorNeRF(torch.nn.Module):
     #     print(f'Ray filtering done! takes {time.time()-tt} s. ray mask ratio: {torch.sum(mask_filtered) / N}')
     #     return all_rays[mask_filtered], all_rgbs[mask_filtered], mask_filtered
 
-    def feature2density(self, density_features):
-        if self.fea2denseAct == "softplus_shift":
-            return F.softplus(density_features+self.density_shift)
-        elif self.fea2denseAct == "softplus":
-            return F.softplus(density_features)
-        elif self.fea2denseAct == "relu":
-            return F.relu(density_features)
-        elif self.fea2denseAct == "relu_shift":
-            return F.relu(density_features+self.density_shift)
-        elif self.fea2denseAct == "identity":
-            return density_features
-
     def sample_occupied(self):
         samps = torch.rand((10000, 4), device=self.device)*2 - 1
-        sigma_feature = self.rf.compute_densityfeature(samps)
-        validsigma = self.feature2density(sigma_feature).squeeze()
+        validsigma = self.rf.compute_densityfeature(samps).squeeze()
         mask = validsigma > validsigma.mean()
         inds, = torch.where(mask)
         ind = random.randint(0, len(inds))
@@ -217,6 +200,7 @@ class TensorNeRF(torch.nn.Module):
     def check_schedule(self, iter):
         require_reassignment = False
         require_reassignment |= self.rf.check_schedule(iter)
+        require_reassignment |= self.sampler.check_schedule(iter, self.rf)
         if iter in self.update_sampler_list or require_reassignment:
             self.sampler.update(self.rf)
         return require_reassignment
@@ -288,14 +272,11 @@ class TensorNeRF(torch.nn.Module):
 
             # compute sigma
             xyz_g_normed = self.rf.normalize_coord(xyz_g)
-            sigma_feature = self.rf.compute_densityfeature(xyz_g_normed)
-            validsigma = self.feature2density(sigma_feature)
+            validsigma = self.rf.compute_densityfeature(xyz_g_normed)
 
             # compute normal
             grad_outputs = torch.ones_like(validsigma)
-            # TODO REMOVE
             g = grad(validsigma, xyz_g, grad_outputs=grad_outputs, create_graph=True, allow_unused=True)
-            # g = grad(validsigma, xyz_g, grad_outputs=grad_outputs, create_graph=False, allow_unused=True)
             norms = -g[0][:, :3]
             norms = norms / (torch.linalg.norm(norms, dim=-1, keepdim=True) + 1e-8)
             return norms
@@ -316,18 +297,17 @@ class TensorNeRF(torch.nn.Module):
         device = rays_chunk.device
         B = rays_chunk.shape[0]
 
-        xyz_sampled, ray_valid, max_samps, z_vals = self.sampler.sample(rays_chunk, focal, ndc_ray, override_near=override_near, is_train=is_train, N_samples=N_samples)
+        # xyz_sampled2, ray_valid2, max_samps2, z_vals2, dists2 = self.sampler2.sample(rays_chunk, focal, ndc_ray, override_near=override_near, is_train=is_train, N_samples=N_samples)
+        xyz_sampled, ray_valid, max_samps, z_vals, dists = self.sampler.sample(rays_chunk, focal, ndc_ray, override_near=override_near, is_train=is_train, N_samples=N_samples)
+
         xyz_normed = self.rf.normalize_coord(xyz_sampled)
         full_shape = (B, max_samps, 3)
         n_samples = full_shape[1]
 
-        dists = torch.cat(
-            (z_vals[:, 1:] - z_vals[:, :-1], torch.zeros_like(z_vals[:, :1])), dim=-1)
 
         M = xyz_sampled.shape[1]
  
         device = xyz_sampled.device
-        dists = torch.cat((z_vals[:, 1:] - z_vals[:, :-1], torch.zeros_like(z_vals[:, :1])), dim=-1)
 
         viewdirs = rays_chunk[:, 3:6].view(-1, 1, 3).expand(full_shape)
         # rays_up = rays_chunk[:, 6:9]
@@ -343,30 +323,10 @@ class TensorNeRF(torch.nn.Module):
 
         if ray_valid.any():
             if self.rf.separate_appgrid:
-                sigma_feature = self.rf.compute_densityfeature(xyz_normed)
+                psigma = self.rf.compute_densityfeature(xyz_normed)
             else:
-                sigma_feature, all_app_features = self.rf.compute_densityfeature(xyz_normed)
-            #  sigma_feature, world_normal[ray_valid] = self.rf.compute_density_norm(xyz_normed[ray_valid], self.feature2density)
-            #  _, world_normal[ray_valid] = self.rf.compute_density_norm(xyz_normed[ray_valid], self.feature2density)
-            validsigma = self.feature2density(sigma_feature)
-            sigma[ray_valid] = validsigma
-
-            #  with torch.enable_grad():
-            #      xyz_g = xyz_sampled[ray_valid].clone()
-            #      xyz_g.requires_grad = True
-            #
-            #      # compute sigma
-            #      xyz_g_normed = self.rf.normalize_coord(xyz_g)
-            #      sigma_feature = self.rf.compute_densityfeature(xyz_g_normed)
-            #      validsigma = self.feature2density(sigma_feature)
-            #      sigma[ray_valid] = validsigma
-            #
-            #      # compute normal
-            #      grad_outputs = torch.ones_like(validsigma)
-            #      surf_grad = grad(validsigma, xyz_g, grad_outputs=grad_outputs, create_graph=True, allow_unused=True)[0][:, :3]
-            #      surf_grad = surf_grad / (torch.norm(surf_grad, dim=1, keepdim=True)+1e-8)
-            #
-            #      world_normal[ray_valid] = surf_grad
+                psigma, all_app_features = self.rf.compute_densityfeature(xyz_normed)
+            sigma[ray_valid] = psigma
 
 
         if self.rf.contract_space and self.infinity_border:
@@ -374,13 +334,14 @@ class TensorNeRF(torch.nn.Module):
             sigma[at_infinity] = 100
 
         # weight: [N_rays, N_samples]
-        alpha, weight, bg_weight = raw2alpha(sigma, dists * self.distance_scale)
+        alpha, weight, bg_weight = raw2alpha(sigma, dists * self.rf.distance_scale)
 
         # weight[xyz_normed[..., 2] > 0.2] = 0
         full_weight = torch.cat([weight, bg_weight], dim=1)
 
         S = torch.linspace(0, 1, n_samples+1, device=device).reshape(-1, 1)
         fweight = (S - S.T).abs()
+        # ut = (z_vals[:, 1:] + z_vals[:, :-1])/2
 
         floater_loss_1 = torch.einsum('bj,bk,jk', full_weight.reshape(B, -1), full_weight.reshape(B, -1), fweight).clip(min=self.max_floater_loss)
         floater_loss_2 = (full_weight**2).sum(dim=1).sum()/3/n_samples
@@ -393,6 +354,7 @@ class TensorNeRF(torch.nn.Module):
         # app stands for appearance
         app_mask = (weight > self.rayMarch_weight_thres)
         papp_mask = app_mask[ray_valid]
+        # ic(weight.mean(), ray_valid.sum())
 
         # debug = torch.zeros((B, n_samples, 3), dtype=torch.short, device=device)
         debug = torch.zeros((B, n_samples, 3), dtype=torch.float, device=device, requires_grad=False)
@@ -455,10 +417,6 @@ class TensorNeRF(torch.nn.Module):
                 num_roughness_rays = self.roughness_rays // 2 if recur > 0 else self.roughness_rays
                 # num_roughness_rays = self.roughness_rays# if is_train else 100
                 # compute which rays to reflect
-                # TODO REMOVE
-                # bounce_mask, full_bounce_mask, inv_full_bounce_mask = select_top_n_app_mask(
-                #         app_mask, weight, ratio_reflected, self.max_bounce_rays,
-                #         self.specularity_threshold, self.bounce_min_weight)
                 ratio_diffuse = matprop['ratio_diffuse']
                 ratio_reflected = 1 - ratio_diffuse
                 bounce_mask, full_bounce_mask, inv_full_bounce_mask = self.selector(
@@ -601,6 +559,7 @@ class TensorNeRF(torch.nn.Module):
 
             inds = ((weight * (alpha < self.alphaMask_thres)).max(dim=1).indices).clip(min=0)
             full_xyz_sampled = torch.zeros((B, max_samps, 4), device=device)
+            full_xyz_sampled[ray_valid] = xyz_sampled
             termination_xyz = full_xyz_sampled[range(full_shape[0]), inds]
 
             # collect statistics about the surface
@@ -623,7 +582,8 @@ class TensorNeRF(torch.nn.Module):
             if white_bg or (is_train and torch.rand((1,)) < 0.5):
                 rgb_map = rgb_map + (1 - acc_map[..., None])
 
-        debug_map = (weight[..., None]*debug).sum(dim=1)
+        # debug_map = (weight[..., None]*debug).sum(dim=1)
+        debug_map = ray_valid.sum(dim=1, keepdim=True).expand(-1, 3) / 256
 
         return dict(
             rgb_map=rgb_map,

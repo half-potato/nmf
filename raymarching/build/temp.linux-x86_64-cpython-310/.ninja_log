@@ -1,4 +1,0 @@
-# ninja log v5
-0	6360	1660191111626516519	/home/amai/normalrf/raymarching/build/temp.linux-x86_64-cpython-310/home/amai/normalrf/raymarching/src/bindings.o	5f89c60ddd09066a
-0	23204	1660191128467192682	/home/amai/normalrf/raymarching/build/temp.linux-x86_64-cpython-310/home/amai/normalrf/raymarching/src/raymarching.o	2a6bc36e45e36b3b
-5	23149	1660191292750458851	/home/amai/normalrf/raymarching/build/temp.linux-x86_64-cpython-310/home/amai/normalrf/raymarching/src/raymarching.o	eafea1a64b4b16eb

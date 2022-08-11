@@ -1,7 +1,6 @@
-LICENSE
 setup.py
-/home/amai/normalrf/raymarching/src/bindings.cpp
-/home/amai/normalrf/raymarching/src/raymarching.cu
+/home/dronelab/patchnerf/raymarching/src/bindings.cpp
+/home/dronelab/patchnerf/raymarching/src/raymarching.cu
 raymarching.egg-info/PKG-INFO
 raymarching.egg-info/SOURCES.txt
 raymarching.egg-info/dependency_links.txt

@@ -226,11 +226,10 @@ def reconstruction(args):
         pbar = tqdm(range(1000))
         for _ in pbar:
             xyz = torch.rand(5000, 3, device=device)*2-1
-            feat = tensorf.rf.compute_densityfeature(xyz)
-            sigma_feat = tensorf.feature2density(feat)
+            sigma_feat = tensorf.rf.compute_densityfeature(xyz)
 
-            # sigma = 1-torch.exp(-sigma_feat * 0.025 * 25)
-            sigma = 1-torch.exp(-sigma_feat)
+            sigma = 1-torch.exp(-sigma_feat * 0.025 * tensorf.rf.distance_scale)
+            # sigma = 1-torch.exp(-sigma_feat)
             # sigma = sigma_feat
             # loss = (sigma-torch.rand_like(sigma)*args.start_density).abs().mean()
             loss = (sigma-params.start_density).abs().mean()
@@ -239,6 +238,8 @@ def reconstruction(args):
             space_optim.zero_grad()
             loss.backward()
             space_optim.step()
+    # tensorf.sampler.mark_untrained_grid(train_dataset.poses, train_dataset.intrinsics)
+    tensorf.sampler.update(tensorf.rf)
 
 
     pbar = tqdm(range(params.n_iters), miniters=args.progress_refresh_rate, file=sys.stdout)
@@ -256,8 +257,8 @@ def reconstruction(args):
     # with torch.autograd.detect_anomaly():
         for iteration in pbar:
 
-            if iteration < 1000:
-                ray_idx, rgb_idx = trainingSampler.nextids(args.batch_size // 2)
+            if iteration < 150:
+                ray_idx, rgb_idx = trainingSampler.nextids(args.batch_size // 3)
             else:
                 ray_idx, rgb_idx = trainingSampler.nextids()
 
