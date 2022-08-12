@@ -527,7 +527,7 @@ class TensorNeRF(torch.nn.Module):
 
             align_world_loss = (1-(p_world_normal * world_normal).sum(dim=-1).clamp(max=self.max_normal_similarity))
             # align_world_loss = torch.linalg.norm(p_world_normal - world_normal, dim=-1)
-            normal_loss = (pweight * align_world_loss).sum(dim=-1).mean()
+            normal_loss = (pweight * align_world_loss).sum() / B
             tint_brightness = tint.mean(dim=-1)
         else:
             ratio_diffuse = torch.tensor(0.0)

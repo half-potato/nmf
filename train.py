@@ -222,14 +222,14 @@ def reconstruction(args):
 
     if args.ckpt is None:
         space_optim = torch.optim.Adam(tensorf.parameters(), lr=0.1, betas=(0.9,0.99))
-        pbar = tqdm(range(1000))
-        xyz = torch.rand(5000, 3, device=device)*2-1
+        pbar = tqdm(range(tensorf.rf.num_pretrain))
         for _ in pbar:
+            xyz = torch.rand(5000, 3, device=device)*2-1
             sigma_feat = tensorf.rf.compute_densityfeature(xyz)
 
-            sigma = 1-torch.exp(-sigma_feat * 0.025 * tensorf.rf.distance_scale)
+            # sigma = 1-torch.exp(-sigma_feat * 0.025 * tensorf.rf.distance_scale)
+            sigma = sigma_feat * 0.0035 * tensorf.rf.distance_scale
             # sigma = 1-torch.exp(-sigma_feat)
-            # sigma = sigma_feat
             # loss = (sigma-torch.rand_like(sigma)*args.start_density).abs().mean()
             loss = (sigma-params.start_density).abs().mean()
             # loss = (-sigma[mask].clip(max=1).sum() + sigma[~mask].clip(min=1e-8).sum())
@@ -289,8 +289,8 @@ def reconstruction(args):
                 if params.charbonier_loss:
                     loss = torch.sqrt((rgb_map - rgb_train[whole_valid]) ** 2 + params.charbonier_eps**2).mean()
                 else:
-                    loss = ((rgb_map - rgb_train[whole_valid]) ** 2).mean()
-                # ic(F.huber_loss(rgb_map, rgb_train, delta=1, reduction='none'))
+                    # loss = ((rgb_map - rgb_train[whole_valid]) ** 2).mean()
+                    loss = F.huber_loss(rgb_map, rgb_train[whole_valid], delta=1, reduction='mean')
                 # loss = torch.sqrt(F.huber_loss(rgb_map, rgb_train, delta=1, reduction='none') + params.charbonier_eps**2).mean()
                 photo_loss = ((rgb_map.clip(0, 1) - rgb_train[whole_valid].clip(0, 1)) ** 2).mean().detach()
                 backwards_rays_loss = data['backwards_rays_loss']

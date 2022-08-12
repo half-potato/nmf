@@ -12,7 +12,7 @@ class Raymarcher(torch.nn.Module):
                  min_near=0.2,
                  density_thresh=0.002,
                  max_steps=1024,
-                 max_samples=int(2e5),
+                 max_samples=int(1.1e6),
                  dt_gamma=0,
                  grid_size=128,
                  perturb=False):
