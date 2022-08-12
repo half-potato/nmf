@@ -11,6 +11,8 @@ arch:
   appdim_noise_std: 0.0
   max_normal_similarity: 1.0
   max_floater_loss: 1
+  
+  rf: 'placeholder'
 
   sampler:
     # _target_: samplers.alphagrid.AlphaGridSampler
@@ -22,27 +24,6 @@ arch:
     # _target_: models.tonemap.HDRTonemap
     # _target_: models.tonemap.LinearTonemap
     _target_: models.tonemap.SRGBTonemap
-
-  rf:
-    distance_scale: 25
-    _partial_: True
-    _target_: fields.tensoRF.TensorVMSplit
-    density_n_comp: 16
-    appearance_n_comp: 24
-    app_dim: 24
-    step_ratio: 0.5
-    density_res_multi: 1
-    contract_space: False
-    smoothing: 1.5
-    fea2denseAct: 'softplus_shift'
-    # fea2denseAct: 'relu_shift'
-    density_shift: -10
-
-    N_voxel_init: 2097156 # 128**3
-    N_voxel_final: 27000000 # 300**3
-    # N_voxel_init: 27000000 # 128**3
-    # N_voxel_final: 134217728 # 300**3
-    upsamp_list: [4000,4000,5500,7000]
 
   bg_module:
     _target_: models.bg_modules.HierarchicalCubeMap
@@ -58,7 +39,7 @@ arch:
     _partial_: True
     _target_: models.render_modules.MLPDiffuse
     pospe: 0
-    feape: 2
+    feape: 0
     # view_encoder:
     #   _target_: models.ish.FullISH
     #   max_degree: 4
@@ -102,8 +83,8 @@ arch:
     _partial_: True
     _target_: models.render_modules.MLPNormal
     lr: 3e-3
-    pospe: 16
-    feape: 2
+    pospe: 0
+    feape: 0
     featureC: 128
     num_layers: 5
 
@@ -141,15 +122,17 @@ params:
   uplambda_list: [7000, 10000, 12000]
   update_AlphaMask_list: [4000, 7000]
   # update_AlphaMask_list: [30000]
-  L1_weight_inital: 8e-5
-  L1_weight_rest: 4e-5
+  # L1_weight_inital: 8e-5
+  # L1_weight_rest: 4e-5
+  L1_weight_inital: 0
+  L1_weight_rest: 0
 
   TV_weight_density: 0.0
   TV_weight_app: 0.0
   normal_lambda: 3e-4
   diffuse_lambda: 0
   backwards_rays_lambda: 1
-  floater_lambda: 0.0001
+  floater_lambda: 0.00001
   charbonier_eps: 0.001
   ortho_weight: 0
 
@@ -160,4 +143,3 @@ params:
   n_iters: 30000
   charbonier_loss: false
   start_density: 1e-2
-  lr_init: 0.02

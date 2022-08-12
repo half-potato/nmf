@@ -40,7 +40,7 @@ def chunk_renderer(rays, tensorf, focal, keys=['rgb_map'], chunk=4096, **kwargs)
     return data
 
 class BundleRender:
-    def __init__(self, base_renderer, H, W, focal, bundle_size=1, chunk=3*512, scale_normal=False):
+    def __init__(self, base_renderer, H, W, focal, bundle_size=1, chunk=2*512, scale_normal=False):
         self.base_renderer = base_renderer
         self.bundle_size = bundle_size
         self.H = H 
@@ -52,10 +52,8 @@ class BundleRender:
     @torch.no_grad()
     def __call__(self, rays, tensorf, **kwargs):
         height, width = self.H, self.W
-        ray_dim = rays.shape[-1]
         fH = height
         fW = width
-        num_rays = height * width
         device = rays.device
 
         data = self.base_renderer(rays, tensorf, keys=['depth_map', 'rgb_map', 'normal_map', 'acc_map', 'termination_xyz', 'debug_map', 'surf_width', 'weight_slice'],
@@ -200,7 +198,7 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
     for idx, im_idx, rays, gt_rgb in iterator():
 
         rgb_map, depth_map, debug_map, normal_map, env_map, col_map, surf_width, weight_slice = brender(
-                rays, tensorf, N_samples=N_samples, ndc_ray=ndc_ray, white_bg = white_bg, is_train=True)
+                rays, tensorf, N_samples=N_samples, ndc_ray=ndc_ray, white_bg = white_bg, is_train=False)
 
         H, W, _ = normal_map.shape
         normal_map = normal_map.reshape(-1, 3)# @ pose[:3, :3]

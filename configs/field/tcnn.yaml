@@ -1,0 +1,21 @@
+_partial_: True
+_target_: fields.tcnn.TCNNRF
+distance_scale: 1
+density_shift: 0
+activation: 'softplus_shift'
+network_config:
+    otype: "FullyFusedMLP"
+    activation: "ReLU"
+    output_activation: "None"
+    n_neurons: 64
+    n_hidden_layers: 2
+featureC: 64
+num_layers: 3
+encoder_conf:
+    otype: "HashGrid"
+    n_levels: 16
+    n_features_per_level: 2
+    log2_hashmap_size: 19
+    base_resolution: 16
+lr: 1e-2
+lr_net: 1e-3

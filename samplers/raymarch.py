@@ -10,8 +10,9 @@ class Raymarcher(torch.nn.Module):
     def __init__(self,
                  bound=2.0,
                  min_near=0.2,
-                 density_thresh=0.01,
-                 max_steps=540,
+                 density_thresh=0.002,
+                 max_steps=1024,
+                 max_samples=int(3e5),
                  dt_gamma=0,
                  perturb=False):
         super().__init__()
@@ -24,8 +25,9 @@ class Raymarcher(torch.nn.Module):
         self.dt_gamma = dt_gamma
         self.max_steps = max_steps
         self.perturb = perturb
-        # self.stepsize = 0.003383
-        self.stepsize = 0.005
+        self.max_samples = max_samples 
+        self.stepsize = 0.003383
+        # self.stepsize = 0.005
         # aabb_train = torch.FloatTensor(aabb)
         aabb_train = torch.FloatTensor([-bound, -bound, -bound, bound, bound, bound])
         aabb_infer = aabb_train.clone()
@@ -49,34 +51,40 @@ class Raymarcher(torch.nn.Module):
 
     def sample(self, rays_chunk, focal, ndc_ray=False, override_near=None, is_train=False, N_samples=-1):
         device = rays_chunk.device
-        rays_d = rays_chunk[:, 3:6].contiguous().view(-1, 3)
         rays_o = rays_chunk[:, :3].contiguous().view(-1, 3)
+        rays_d = rays_chunk[:, 3:6].contiguous().view(-1, 3)
 
-        counter = self.step_counter[self.local_step % 16]
-        counter.zero_() # set to 0
-        self.local_step += 1
         N = rays_o.shape[0] # N = B * N, in fact
 
-        aabb = self.aabb_train if is_train else self.aabb_infer
-        # aabb = self.aabb_train
+        # aabb = self.aabb_train if is_train else self.aabb_infer
+        aabb = self.aabb_train
         nears, fars = raymarching.near_far_from_aabb(rays_o, rays_d, aabb, self.min_near)
-        force_all_rays = not is_train
+        # force_all_rays = not is_train
         force_all_rays = True
         counter = self.step_counter[self.local_step % 16]
         counter.zero_() # set to 0
         self.local_step += 1
 
         fxyzs, deltas, ray_valid = raymarching.march_rays_train(rays_o, rays_d, self.bound, self.density_bitfield, self.cascade,
-                self.grid_size, nears, fars, counter, self.mean_count, self.perturb, -1, force_all_rays, self.dt_gamma, self.max_steps)
-        ic(ray_valid.sum() / ray_valid.numel(), ray_valid.max(), ray_valid.float().max())
-        z_vals = deltas[..., 1]
-        dists = deltas[..., 0]
+                self.grid_size, self.max_samples, nears, fars, counter, self.mean_count, self.perturb, -1, force_all_rays, self.dt_gamma, self.max_steps)
+        ray_valid = ray_valid > 0
+        retained = torch.zeros_like(ray_valid)
+        i, j = torch.stack(torch.where(ray_valid), dim=0)[:, :self.max_samples]
+        retained[i, j] = True
+        whole_valid = retained.sum(dim=1) == ray_valid.sum(dim=1) if is_train else torch.ones((N), dtype=bool, device=device)
+
+        M = ray_valid.sum(dim=1).max(dim=0).values
+        ray_valid = ray_valid[whole_valid, :M] 
+        fxyzs = fxyzs[whole_valid, :M] 
+        z_vals = deltas[whole_valid, :M, 1]
+        dists = deltas[whole_valid, :M, 0]
+
         fxyzs = torch.cat([
             fxyzs,
             (z_vals / focal)[..., None]
         ], dim=-1)
         xyzs = fxyzs[ray_valid]
-        M = fxyzs.shape[1]
+        # ic(whole_valid.sum(), ray_valid.sum(), xyzs.shape)
 
         # print(self.density_bitfield.sum())
         # xyzs: (M, 4) values
@@ -104,8 +112,7 @@ class Raymarcher(torch.nn.Module):
         # attach size
         # ic(deltas.max(dim=0), rays.max(dim=0))
 
-
-        return xyzs, ray_valid, M, z_vals, dists
+        return xyzs, ray_valid, M, z_vals, dists, whole_valid
 
     @torch.no_grad()
     def mark_untrained_grid(self, poses, intrinsic, S=64):
@@ -272,4 +279,4 @@ class Raymarcher(torch.nn.Module):
             self.mean_count = int(self.step_counter[:total_step, 0].sum().item() / total_step)
         self.local_step = 0
 
-        print(f'[density grid] min={self.density_grid.min().item():.4f}, max={self.density_grid.max().item():.4f}, mean={self.mean_density:.4f}, occ_rate={(self.density_grid > density_thresh).sum() / (128**3 * self.cascade):.3f} | [step counter] mean={self.mean_count}')
+        # print(f'[density grid] min={self.density_grid.min().item():.4f}, max={self.density_grid.max().item():.4f}, mean={self.mean_density:.4f}, thresh={density_thresh} occ_rate={(self.density_grid > density_thresh).sum() / (128**3 * self.cascade):.3f} | [step counter] mean={self.mean_count}')

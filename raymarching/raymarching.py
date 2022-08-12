@@ -162,7 +162,7 @@ packbits = _packbits.apply
 class _march_rays_train(Function):
     @staticmethod
     @custom_fwd(cast_inputs=torch.float32)
-    def forward(ctx, rays_o, rays_d, bound, density_bitfield, C, H, nears, fars, step_counter=None, mean_count=-1, perturb=False, align=-1, force_all_rays=False, dt_gamma=0, max_steps=1024):
+    def forward(ctx, rays_o, rays_d, bound, density_bitfield, C, H, max_samples, nears, fars, step_counter=None, mean_count=-1, perturb=False, align=-1, force_all_rays=False, dt_gamma=0, max_steps=1024):
         ''' march rays to generate points (forward only)
         Args:
             rays_o/d: float, [N, 3]
@@ -196,16 +196,9 @@ class _march_rays_train(Function):
         N = rays_o.shape[0] # num rays
         M = N * max_steps # init max points number in total
 
-        # running average based on previous epoch (mimic `measured_batch_size_before_compaction` in instant-ngp)
-        # It estimate the max points number to enable faster training, but will lead to random ignored rays if underestimated.
-        if not force_all_rays and mean_count > 0:
-            if align > 0:
-                mean_count += align - mean_count % align
-            M = mean_count
-        
         xyzs = torch.zeros(N, max_steps, 3, dtype=rays_o.dtype, device=rays_o.device)
         deltas = torch.zeros(N, max_steps, 2, dtype=rays_o.dtype, device=rays_o.device)
-        rays = torch.empty(N, max_steps, dtype=bool, device=rays_o.device) # id, offset, num_steps
+        rays = torch.zeros(N, max_steps, dtype=torch.uint8, device=rays_o.device) # id, offset, num_steps
 
         if step_counter is None:
             step_counter = torch.zeros(2, dtype=torch.int32, device=rays_o.device) # point counter, ray counter
@@ -216,7 +209,7 @@ class _march_rays_train(Function):
             noises = torch.zeros(N, dtype=rays_o.dtype, device=rays_o.device)
         
         # _backend.march_rays_train(rays_o, rays_d, density_bitfield, bound, dt_gamma, max_steps, N, C, H, M, nears, fars, xyzs, dirs, deltas, rays, step_counter, noises) # m is the actually used points number
-        _backend.march_rays_train(rays_o, rays_d, density_bitfield, bound, dt_gamma, max_steps, N, C, H, M, nears, fars, xyzs, deltas, rays, step_counter, noises) # m is the actually used points number
+        _backend.march_rays_train(rays_o, rays_d, density_bitfield, bound, dt_gamma, max_steps, N, C, H, max_samples, nears, fars, xyzs, deltas, rays, step_counter, noises) # m is the actually used points number
 
         #print(step_counter, M)
 

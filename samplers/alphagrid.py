@@ -223,4 +223,4 @@ class AlphaGridSampler:
             ray_valid ^= alpha_mask
 
         dists = torch.cat((z_vals[:, 1:] - z_vals[:, :-1], torch.zeros_like(z_vals[:, :1])), dim=-1)
-        return xyz_sampled[ray_valid], ray_valid, M, z_vals, dists
+        return xyz_sampled[ray_valid], ray_valid, M, z_vals, dists, torch.ones((N), dtype=bool, device=device)

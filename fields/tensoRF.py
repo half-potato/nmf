@@ -1,4 +1,4 @@
-from .tensor_base import TensorBase
+from .tensor_base import TensorVoxelBase
 import torch
 import torch.nn.functional as F
 from icecream import ic
@@ -14,7 +14,7 @@ def d_softplus(x, beta=1.0, shift=-10):
     return torch.exp(shift+beta*x) / (1.0 + torch.exp(shift+beta*x))
 
 
-class TensorVMSplit(TensorBase):
+class TensorVMSplit(TensorVoxelBase):
     def __init__(self, aabb, *args, smoothing, **kargs):
         super(TensorVMSplit, self).__init__(aabb, *args, **kargs)
 
@@ -69,12 +69,12 @@ class TensorVMSplit(TensorBase):
         return torch.nn.ParameterList(plane_coef), torch.nn.ParameterList(line_coef)
     
     
-    def get_optparam_groups(self, lr_init_spatialxyz = 0.02, lr_init_network = 0.001):
+    def get_optparam_groups(self):
         grad_vars = [
-            {'params': self.density_line, 'lr': lr_init_spatialxyz}, {'params': self.density_plane, 'lr': lr_init_spatialxyz},
-            {'params': self.app_line, 'lr': lr_init_spatialxyz}, {'params': self.app_plane, 'lr': lr_init_spatialxyz},
-            {'params': self.basis_mat.parameters(), 'lr':lr_init_network},
-            {'params': self.dbasis_mat.parameters(), 'lr':lr_init_network},
+            {'params': self.density_line, 'lr': self.lr}, {'params': self.density_plane, 'lr': self.lr},
+            {'params': self.app_line, 'lr': self.lr}, {'params': self.app_plane, 'lr': self.lr},
+            {'params': self.basis_mat.parameters(), 'lr': self.lr_net},
+            {'params': self.dbasis_mat.parameters(), 'lr': self.lr_net},
         ]
         return grad_vars
 
@@ -222,7 +222,7 @@ class TensorVMSplit(TensorBase):
         self.update_stepSize((newSize[0], newSize[1], newSize[2]))
 
 
-class TensorCP(TensorBase):
+class TensorCP(TensorVoxelBase):
     def __init__(self, aabb, device, *args, **kargs):
         super(TensorCP, self).__init__(aabb, device, *args, **kargs)
 
@@ -350,7 +350,7 @@ class TensorCP(TensorBase):
             total = total + reg(self.app_line[idx]) * 1e-3
         return total
 
-class TensorVM(TensorBase):
+class TensorVM(TensorVoxelBase):
     def __init__(self, aabb, device, *args, **kargs):
         super(TensorVM, self).__init__(aabb, device, *args, **kargs)
         

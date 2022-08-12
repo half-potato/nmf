@@ -319,7 +319,7 @@ __global__ void kernel_march_rays_train(
     const scalar_t* __restrict__ nears, 
     const scalar_t* __restrict__ fars,
     scalar_t * xyzs, scalar_t * deltas,
-    bool * rays,
+    uint8_t * rays,
     int * counter,
     const scalar_t* __restrict__ noises
 ) {
@@ -389,14 +389,14 @@ __global__ void kernel_march_rays_train(
         // if occpuied, advance a small step, and write to output
         // if (n == 0) printf("t=%f occ=%d step=%d. (%f, %f, %f)\n", t, occ, step, x, y, z);
 
-        if (true) {
+        if (occ) {
             num_steps++;
             // t += dt;
 
             xyzs[0] = x;
             xyzs[1] = y;
             xyzs[2] = z;
-            *rays = true;
+            *rays = 1;
 
             // deltas[0] = t - last_t;
             deltas[0] = dt;
@@ -441,7 +441,7 @@ void march_rays_train(const at::Tensor rays_o, const at::Tensor rays_d, const at
     
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(
     rays_o.scalar_type(), "march_rays_train", ([&] {
-        kernel_march_rays_train<<<div_round_up(N, N_THREAD), N_THREAD>>>(rays_o.data_ptr<scalar_t>(), rays_d.data_ptr<scalar_t>(), grid.data_ptr<uint8_t>(), bound, dt_gamma, max_steps, N, C, H, M, nears.data_ptr<scalar_t>(), fars.data_ptr<scalar_t>(), xyzs.data_ptr<scalar_t>(), deltas.data_ptr<scalar_t>(), rays.data_ptr<bool>(), counter.data_ptr<int>(), noises.data_ptr<scalar_t>());
+        kernel_march_rays_train<<<div_round_up(N, N_THREAD), N_THREAD>>>(rays_o.data_ptr<scalar_t>(), rays_d.data_ptr<scalar_t>(), grid.data_ptr<uint8_t>(), bound, dt_gamma, max_steps, N, C, H, M, nears.data_ptr<scalar_t>(), fars.data_ptr<scalar_t>(), xyzs.data_ptr<scalar_t>(), deltas.data_ptr<scalar_t>(), rays.data_ptr<uint8_t>(), counter.data_ptr<int>(), noises.data_ptr<scalar_t>());
     }));
 }
 

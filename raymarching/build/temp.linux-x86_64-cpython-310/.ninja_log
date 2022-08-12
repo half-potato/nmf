@@ -1,0 +1,12 @@
+# ninja log v5
+0	7156	1660261909068359106	/home/amai/normalrf/raymarching/build/temp.linux-x86_64-cpython-310/home/amai/normalrf/raymarching/src/bindings.o	1213716968a4e2c7
+0	22735	1660261924652333993	/home/amai/normalrf/raymarching/build/temp.linux-x86_64-cpython-310/home/amai/normalrf/raymarching/src/raymarching.o	17c938e3e40dd073
+5	6664	1660261940066301791	/home/amai/normalrf/raymarching/build/temp.linux-x86_64-cpython-310/home/amai/normalrf/raymarching/src/bindings.o	5f89c60ddd09066a
+5	23126	1660261956526979242	/home/amai/normalrf/raymarching/build/temp.linux-x86_64-cpython-310/home/amai/normalrf/raymarching/src/raymarching.o	3d2578507ec3b406
+5	22200	1660262135591009745	/home/amai/normalrf/raymarching/build/temp.linux-x86_64-cpython-310/home/amai/normalrf/raymarching/src/raymarching.o	3d2578507ec3b406
+4	23021	1660262438163435423	/home/amai/normalrf/raymarching/build/temp.linux-x86_64-cpython-310/home/amai/normalrf/raymarching/src/raymarching.o	3d2578507ec3b406
+5	22817	1660262584772784343	/home/amai/normalrf/raymarching/build/temp.linux-x86_64-cpython-310/home/amai/normalrf/raymarching/src/raymarching.o	3d2578507ec3b406
+5	22976	1660263001026223557	/home/amai/normalrf/raymarching/build/temp.linux-x86_64-cpython-310/home/amai/normalrf/raymarching/src/raymarching.o	3d2578507ec3b406
+4	20887	1660279958371957583	/home/amai/normalrf/raymarching/build/temp.linux-x86_64-cpython-310/home/amai/normalrf/raymarching/src/raymarching.o	3d2578507ec3b406
+4	20973	1660280073656550620	/home/amai/normalrf/raymarching/build/temp.linux-x86_64-cpython-310/home/amai/normalrf/raymarching/src/raymarching.o	3d2578507ec3b406
+5	21451	1660280346740812212	/home/amai/normalrf/raymarching/build/temp.linux-x86_64-cpython-310/home/amai/normalrf/raymarching/src/raymarching.o	3d2578507ec3b406
