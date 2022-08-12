@@ -369,7 +369,7 @@ class TensorNeRF(torch.nn.Module):
         # app stands for appearance
         app_mask = (weight > self.rayMarch_weight_thres)
         papp_mask = app_mask[ray_valid]
-        # ic(weight.mean(), ray_valid.sum())
+        ic(weight.mean(), ray_valid.sum())
 
         # debug = torch.zeros((B, n_samples, 3), dtype=torch.short, device=device)
         debug = torch.zeros((B, n_samples, 3), dtype=torch.float, device=device, requires_grad=False)
@@ -406,7 +406,7 @@ class TensorNeRF(torch.nn.Module):
                 p_world_normal[app_mask] = self.normal_module(app_xyz, app_features)
                 l = self.l# if is_train else 1
                 v_world_normal = ((1-l)*p_world_normal + l*world_normal)
-                v_world_normal = v_world_normal / (v_world_normal.norm(dim=-1, keepdim=True) + 1e-20)
+                v_world_normal = v_world_normal / (v_world_normal.norm(dim=-1, keepdim=True) + 1e-8)
             else:
                 v_world_normal = world_normal
 
@@ -422,6 +422,7 @@ class TensorNeRF(torch.nn.Module):
                 ratio_reflected = 0
             elif self.ref_module is not None and recur >= self.max_recurs:
                 viewdotnorm = (viewdirs[app_mask]*L).sum(dim=-1, keepdim=True)
+                ic(app_xyz.mean(), noise_app_features.mean(), refdirs.mean(), roughness.mean(), viewdotnorm.mean(), tint.mean(), v_world_normal.mean(), p_world_normal.mean(), world_normal.mean())
                 ref_col = self.ref_module(
                     app_xyz, viewdirs[app_mask],
                     noise_app_features, refdirs=refdirs,
@@ -587,6 +588,7 @@ class TensorNeRF(torch.nn.Module):
 
         if tonemap:
             rgb_map = self.tonemap(rgb_map.clip(min=0), noclip=True)
+        ic(rgb_map.mean(), rgb.mean())
 
         if self.bg_module is not None and not white_bg:
             bg_roughness = torch.zeros(B, 1, device=device)

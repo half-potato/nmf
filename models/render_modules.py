@@ -124,7 +124,7 @@ class MLPRender_FP(torch.nn.Module):
             torch.nn.Linear(featureC, 3)
         )
         self.activation = str2fn(activation)
-        torch.nn.init.constant_(self.mlp[-1].bias, 0)
+        torch.nn.init.constant_(self.mlp[-1].bias, -2)
         self.mlp.apply(self.init_weights)
 
     def init_weights(self, m):
@@ -194,7 +194,7 @@ class MLPDiffuse(torch.nn.Module):
                 torch.nn.ReLU(inplace=True),
                 torch.nn.Linear(featureC, 20),
             )
-            torch.nn.init.constant_(self.mlp[-1].bias, -2)
+            torch.nn.init.constant_(self.mlp[-1].bias, 0)
             self.mlp.apply(self.init_weights)
         else:
             self.mlp = torch.nn.Identity()
