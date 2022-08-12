@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 from icecream import ic
 from tqdm import tqdm
 from models.sh import eval_sh_bases
-#  import tinycudann as tcnn
+import tinycudann as tcnn
 from pathlib import Path
 import math
 
@@ -108,7 +108,7 @@ mlp = torch.nn.Sequential(
 #      torch.nn.Sigmoid()
 #  ).to(device)
 
-"""
+# """
 encoding = tcnn.Encoding(3, dict(
     otype="HashGrid",
     n_levels=16,
@@ -127,7 +127,7 @@ network = tcnn.Network(encoding.n_output_dims, 3, dict(
 mlp = torch.nn.Sequential(
     encoding, network
 ).to(device)
-"""
+# """
 
 mlp.apply(init_weights)
 
@@ -166,7 +166,8 @@ for i in pbar:
     feats = get_features(inds)
     # enc = torch.cat([enc, feats], dim=-1)
     #  enc = torch.cat([enc, eval_sh_bases(4, samp_vecs)], dim=-1)
-    output = mlp(enc)
+    # output = mlp(enc)
+    output = mlp(samp_vecs)
 
     #  output = mlp(samp_vecs)
     #  loss = ((output - samp.half())**2).mean()
@@ -194,7 +195,8 @@ with torch.no_grad():
             #  enc = torch.cat([enc, eval_sh_bases(4, samp_vecs)], dim=-1)
             feats = get_features(inds)
             # enc = torch.cat([enc, feats], dim=-1)
-            output = mlp(enc)
+            # output = mlp(enc)
+            output = mlp(samp_vecs)
 
             #  output = mlp(samp_vecs)
 

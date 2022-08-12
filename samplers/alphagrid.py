@@ -1,5 +1,6 @@
 import torch
 import torch.nn.functional as F
+from icecream import ic
 
 class AlphaGridMask(torch.nn.Module):
     def __init__(self, aabb, alpha_volume):
@@ -45,11 +46,17 @@ class AlphaGridMask(torch.nn.Module):
         return torch.cat([ contracted, xyz_sampled[..., 3:] ], dim=-1)
 
 class AlphaGridSampler:
-    def __init__(self, enable_alpha_mask, near_far=[2, 6], nEnvSamples=100):
+    def __init__(self, enable_alpha_mask=False, near_far=[2, 6], nEnvSamples=0, update_list=[]):
         self.enable_alpha_mask = enable_alpha_mask
         self.alphaMask = None
         self.nEnvSamples = nEnvSamples
         self.near_far = near_far
+        self.update_list = update_list
+
+    def check_schedule(self, iteration, rf):
+        if iteration in self.update_list:
+            self.update(rf)
+        return False
 
     def update(self, rf):
         self.nSamples = rf.nSamples
@@ -214,4 +221,6 @@ class AlphaGridSampler:
             # ray_invalid = ~ray_valid
             # ray_invalid |= (~alpha_mask)
             ray_valid ^= alpha_mask
-        return xyz_sampled[ray_valid], ray_valid, M, z_vals
+
+        dists = torch.cat((z_vals[:, 1:] - z_vals[:, :-1], torch.zeros_like(z_vals[:, :1])), dim=-1)
+        return xyz_sampled[ray_valid], ray_valid, M, z_vals, dists, torch.ones((N), dtype=bool, device=device)

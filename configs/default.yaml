@@ -4,6 +4,7 @@ defaults:
   - _self_
   - dataset: counter
   - model: refnerf
+  - field: tensorf
 basedir: ./log
 filter_rays: false
 batch_size: 4096
@@ -25,9 +26,6 @@ rm_weight_mask_thre: 1e-4
 step_ratio: 0.5
 ckpt: NULL
 
-lr_init: .01
-# lr_init: 0.02
-lr_basis: 1e-3
 lr_decay_iters: -1
 lr_decay_target_ratio: 0.1
 lr_upsample_reset: 1

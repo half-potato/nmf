@@ -4,42 +4,30 @@ import raymarching
 import torch.nn.functional as F
 from numba import jit
 import numpy as np
-
-# @jit(nopython=True)
-def rays2ray_valid(N, M, rays):
-    mask = np.zeros((N, M), dtype=bool)
-
-    ind = 0
-    for i in range(N):
-        index, offset, num_steps = rays[ind]
-        if index != i:
-            continue
-        # rays: index, offset, num_steps
-        mask[i, :num_steps] = True
-    return mask
-    
+from icecream import ic
 
 class Raymarcher(torch.nn.Module):
     def __init__(self,
-                 bound=1,
-                 density_scale=1, # scale up deltas (or sigmas), to make the density grid more sharp. larger value than 1 usually improves performance.
+                 bound=2.0,
                  min_near=0.2,
-                 density_thresh=0.01,
+                 density_thresh=0.002,
                  max_steps=1024,
+                 max_samples=int(3e5),
                  dt_gamma=0,
                  perturb=False):
         super().__init__()
 
         self.bound = bound
-        self.cascade = 1 + math.ceil(math.log2(bound))
+        self.cascade = 1 + math.floor(math.log2(bound))
         self.grid_size = 128
-        self.density_scale = density_scale
         self.min_near = min_near
         self.density_thresh = density_thresh
         self.dt_gamma = dt_gamma
         self.max_steps = max_steps
         self.perturb = perturb
-
+        self.max_samples = max_samples 
+        self.stepsize = 0.003383
+        # self.stepsize = 0.005
         # aabb_train = torch.FloatTensor(aabb)
         aabb_train = torch.FloatTensor([-bound, -bound, -bound, bound, bound, bound])
         aabb_infer = aabb_train.clone()
@@ -63,21 +51,42 @@ class Raymarcher(torch.nn.Module):
 
     def sample(self, rays_chunk, focal, ndc_ray=False, override_near=None, is_train=False, N_samples=-1):
         device = rays_chunk.device
-        rays_o = rays_chunk[:, 3:6].contiguous().view(-1, 3)
-        rays_d = rays_chunk[:, :3].contiguous().view(-1, 3)
+        rays_o = rays_chunk[:, :3].contiguous().view(-1, 3)
+        rays_d = rays_chunk[:, 3:6].contiguous().view(-1, 3)
 
-        counter = self.step_counter[self.local_step % 16]
-        counter.zero_() # set to 0
-        self.local_step += 1
         N = rays_o.shape[0] # N = B * N, in fact
 
-        nears, fars = raymarching.near_far_from_aabb(rays_o, rays_d, self.aabb_train if self.training else self.aabb_infer, self.min_near)
-        force_all_rays = not is_train
+        # aabb = self.aabb_train if is_train else self.aabb_infer
+        aabb = self.aabb_train
+        nears, fars = raymarching.near_far_from_aabb(rays_o, rays_d, aabb, self.min_near)
+        # force_all_rays = not is_train
+        force_all_rays = True
         counter = self.step_counter[self.local_step % 16]
         counter.zero_() # set to 0
         self.local_step += 1
 
-        xyzs, dirs, deltas, rays = raymarching.march_rays_train(rays_o, rays_d, self.bound, self.density_bitfield, self.cascade, self.grid_size, nears, fars, counter, self.mean_count, self.perturb, 128, force_all_rays, self.dt_gamma, self.max_steps)
+        fxyzs, deltas, ray_valid = raymarching.march_rays_train(rays_o, rays_d, self.bound, self.density_bitfield, self.cascade,
+                self.grid_size, self.max_samples, nears, fars, counter, self.mean_count, self.perturb, -1, force_all_rays, self.dt_gamma, self.max_steps)
+        ray_valid = ray_valid > 0
+        retained = torch.zeros_like(ray_valid)
+        i, j = torch.stack(torch.where(ray_valid), dim=0)[:, :self.max_samples]
+        retained[i, j] = True
+        whole_valid = retained.sum(dim=1) == ray_valid.sum(dim=1) if is_train else torch.ones((N), dtype=bool, device=device)
+
+        M = ray_valid.sum(dim=1).max(dim=0).values
+        ray_valid = ray_valid[whole_valid, :M] 
+        fxyzs = fxyzs[whole_valid, :M] 
+        z_vals = deltas[whole_valid, :M, 1]
+        dists = deltas[whole_valid, :M, 0]
+
+        fxyzs = torch.cat([
+            fxyzs,
+            (z_vals / focal)[..., None]
+        ], dim=-1)
+        xyzs = fxyzs[ray_valid]
+        # ic(whole_valid.sum(), ray_valid.sum(), xyzs.shape)
+
+        # print(self.density_bitfield.sum())
         # xyzs: (M, 4) values
         # dirs: the view direction. don't need this because we are packing it back up
         # delta: (M, 2). 0 = dt, 1 = z
@@ -87,27 +96,42 @@ class Raymarcher(torch.nn.Module):
         # num_steps: number of samples for this ray
 
         # next, we want to convert rays to the ray_valid mask
-        M = rays.max(dim=0)[2]
-        ray_valid = rays2ray_valid(N, M, rays.detach().cpu().numpy())
-        z_vals = torch.zeros((N, M), device=device)
-        z_vals[ray_valid] = deltas[:, 1]
+        # M = rays.max(dim=0).values[2]
+        # ray_valid = torch.as_tensor(rays2ray_valid(N, M, xyzs.shape[0], rays.detach().cpu().numpy()))
+        # if not is_train:
+        #     ic(ray_valid.sum(), xyzs.shape, rays.sum(dim=0), dirs.shape, deltas.shape, rays.shape, rays)
+        # z_vals = torch.zeros((N, M), device=device)
+        # dists = torch.zeros((N, M), device=device)
+        # dists[ray_valid] = deltas[:, 0]
+        # z_vals[ray_valid] = deltas[:, 1]
 
-        return xyzs, ray_valid, M, z_vals
+        # full_xyzs = torch.zeros((N, M, 3), device=device)
+        # full_xyzs[ray_valid] = xyzs
+        # ic(ray_valid.sum(dim=1)[0], torch.cat([full_xyzs[0], torch.arange(M, device=device)[:, None]], dim=-1), rays[0])
+
+        # attach size
+        # ic(deltas.max(dim=0), rays.max(dim=0))
+
+        return xyzs, ray_valid, M, z_vals, dists, whole_valid
 
     @torch.no_grad()
     def mark_untrained_grid(self, poses, intrinsic, S=64):
         # poses: [B, 4, 4]
         # intrinsic: [3, 3]
 
-        if not self.cuda_ray:
-            return
         
         if isinstance(poses, np.ndarray):
             poses = torch.from_numpy(poses)
 
         B = poses.shape[0]
         
-        fx, fy, cx, cy = intrinsic
+        if len(intrinsic) == 3:
+            fx = intrinsic[0, 0]
+            fy = intrinsic[1, 1]
+            cx = intrinsic[0, 2]
+            cy = intrinsic[1, 2]
+        else:
+            fx, fy, cx, cy = intrinsic
         
         X = torch.arange(self.grid_size, dtype=torch.int32, device=self.density_grid.device).split(S)
         Y = torch.arange(self.grid_size, dtype=torch.int32, device=self.density_grid.device).split(S)
@@ -156,11 +180,15 @@ class Raymarcher(torch.nn.Module):
     
         # mark untrained grid as -1
         self.density_grid[count == 0] = -1
+        print(f'[mark untrained grid] {(count == 0).sum()} from {self.grid_size ** 3 * self.cascade}')
 
-        #print(f'[mark untrained grid] {(count == 0).sum()} from {resolution ** 3 * self.cascade}')
+    def check_schedule(self, iteration, rf):
+        if iteration % 16 == 0:
+            self.update(rf)
+        return False
 
     @torch.no_grad()
-    def update(self, rf, decay=0.95, S=64):
+    def update(self, rf, decay=0.95, S=128):
         # call before each epoch to update extra states.
 
         ### update density grid
@@ -193,12 +221,14 @@ class Raymarcher(torch.nn.Module):
                             # add noise in [-hgs, hgs]
                             cas_xyzs += (torch.rand_like(cas_xyzs) * 2 - 1) * half_grid_size
                             # query density
-                            sigmas = rf.compute_densityfeature(cas_xyzs).reshape(-1).detach()
+                            cas_norm = rf.normalize_coord(cas_xyzs)
+                            sigmas = rf.compute_densityfeature(cas_norm).reshape(-1)
                             # from `scalbnf(MIN_CONE_STEPSIZE(), 0)`, check `splat_grid_samples_nerf_max_nearest_neighbor`
                             # scale == 2 * sqrt(3) / 1024
-                            sigmas *= self.density_scale * 0.003383
+                            sigmas *= rf.distance_scale * self.stepsize
                             # assign 
                             tmp_grid[cas, indices] = sigmas
+                            # tmp_grid[cas, indices] = torch.exp(-sigmas)
 
         # partial update (half the computation)
         # TODO: why no need of maxpool ?
@@ -225,10 +255,11 @@ class Raymarcher(torch.nn.Module):
                 # add noise in [-hgs, hgs]
                 cas_xyzs += (torch.rand_like(cas_xyzs) * 2 - 1) * half_grid_size
                 # query density
-                sigmas = rf.compute_densityfeature(cas_xyzs).reshape(-1).detach()
+                cas_norm = rf.normalize_coord(cas_xyzs)
+                sigmas = rf.compute_densityfeature(cas_norm).reshape(-1)
                 # from `scalbnf(MIN_CONE_STEPSIZE(), 0)`, check `splat_grid_samples_nerf_max_nearest_neighbor`
                 # scale == 2 * sqrt(3) / 1024
-                sigmas *= self.density_scale * 0.003383
+                sigmas *= rf.distance_scale * self.stepsize
                 # assign 
                 tmp_grid[cas, indices] = sigmas
 
@@ -248,4 +279,4 @@ class Raymarcher(torch.nn.Module):
             self.mean_count = int(self.step_counter[:total_step, 0].sum().item() / total_step)
         self.local_step = 0
 
-        #print(f'[density grid] min={self.density_grid.min().item():.4f}, max={self.density_grid.max().item():.4f}, mean={self.mean_density:.4f}, occ_rate={(self.density_grid > 0.01).sum() / (128**3 * self.cascade):.3f} | [step counter] mean={self.mean_count}')
+        # print(f'[density grid] min={self.density_grid.min().item():.4f}, max={self.density_grid.max().item():.4f}, mean={self.mean_density:.4f}, thresh={density_thresh} occ_rate={(self.density_grid > density_thresh).sum() / (128**3 * self.cascade):.3f} | [step counter] mean={self.mean_count}')

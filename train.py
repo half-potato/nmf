@@ -106,7 +106,6 @@ def reconstruction(args):
     summary_writer = SummaryWriter(logfolder)
 
     aabb = train_dataset.scene_bbox.to(device)
-    lr_scale = 1
 
     tensorf = hydra.utils.instantiate(args.model.arch)(aabb=aabb)
     if args.ckpt is not None:
@@ -133,7 +132,7 @@ def reconstruction(args):
     tensorf = tensorf.to(device)
 
     lr_bg = 1e-5
-    grad_vars = tensorf.get_optparam_groups(params.lr_init, args.lr_basis, lr_bg, lr_scale)
+    grad_vars = tensorf.get_optparam_groups()
     if args.lr_decay_iters > 0:
         lr_factor = args.lr_decay_target_ratio**(1/args.lr_decay_iters)
     else:
@@ -224,21 +223,22 @@ def reconstruction(args):
     if args.ckpt is None:
         space_optim = torch.optim.Adam(tensorf.parameters(), lr=0.1, betas=(0.9,0.99))
         pbar = tqdm(range(1000))
+        xyz = torch.rand(5000, 3, device=device)*2-1
         for _ in pbar:
-            xyz = torch.rand(5000, 3, device=device)*2-1
-            feat = tensorf.rf.compute_densityfeature(xyz)
-            sigma_feat = tensorf.feature2density(feat)
+            sigma_feat = tensorf.rf.compute_densityfeature(xyz)
 
-            # sigma = 1-torch.exp(-sigma_feat * 0.025 * 25)
-            sigma = 1-torch.exp(-sigma_feat)
+            sigma = 1-torch.exp(-sigma_feat * 0.025 * tensorf.rf.distance_scale)
+            # sigma = 1-torch.exp(-sigma_feat)
             # sigma = sigma_feat
             # loss = (sigma-torch.rand_like(sigma)*args.start_density).abs().mean()
             loss = (sigma-params.start_density).abs().mean()
             # loss = (-sigma[mask].clip(max=1).sum() + sigma[~mask].clip(min=1e-8).sum())
-            pbar.set_description(f"Mean sigma: {sigma.detach().mean().item():.06f}")
             space_optim.zero_grad()
             loss.backward()
+            pbar.set_description(f"Mean sigma: {sigma.detach().mean().item():.06f}.")
             space_optim.step()
+    # tensorf.sampler.mark_untrained_grid(train_dataset.poses, train_dataset.intrinsics)
+    tensorf.sampler.update(tensorf.rf)
 
 
     pbar = tqdm(range(params.n_iters), miniters=args.progress_refresh_rate, file=sys.stdout)
@@ -256,16 +256,12 @@ def reconstruction(args):
     # with torch.autograd.detect_anomaly():
         for iteration in pbar:
 
-            if iteration < 1000:
-                ray_idx, rgb_idx = trainingSampler.nextids(args.batch_size // 2)
-            else:
-                ray_idx, rgb_idx = trainingSampler.nextids()
+            ray_idx, rgb_idx = trainingSampler.nextids()
 
             # patches = allrgbs[ray_idx].reshape(-1, args.bundle_size, args.bundle_size, 3)
             # plt.imshow(patches[0])
             # plt.show()
 
-            # rays_train, rgb_train = allrays[ray_idx], allrgbs[rgb_idx].to(device).reshape(-1, args.bundle_size, args.bundle_size, 3)
             rays_train, rgba_train = allrays[ray_idx], allrgbs[rgb_idx].reshape(-1, allrgbs.shape[-1])
             rgb_train = rgba_train[..., :3]
             if rgba_train.shape[-1] == 4:
@@ -279,22 +275,24 @@ def reconstruction(args):
 
             #rgb_map, alphas_map, depth_map, weights, uncertainty
             with torch.cuda.amp.autocast(enabled=args.fp16):
+            # if True:
                 data = renderer(rays_train, tensorf,
-                        keys = ['rgb_map', 'floater_loss', 'normal_loss', 'backwards_rays_loss', 'diffuse_reg', 'bounce_count', 'color_count', 'roughness'],
-                        focal=focal, output_alpha=alpha_train, chunk=args.batch_size, white_bg = white_bg, ndc_ray=ndc_ray, is_train=True)
+                        keys = ['rgb_map', 'floater_loss', 'normal_loss', 'backwards_rays_loss', 'diffuse_reg', 'bounce_count', 'color_count', 'roughness', 'whole_valid'],
+                        focal=focal, output_alpha=alpha_train, chunk=args.batch_size, white_bg = white_bg, is_train=True, ndc_ray=ndc_ray)
 
                 # loss = torch.mean((rgb_map[:, 1, 1] - rgb_train[:, 1, 1]) ** 2)
                 normal_loss = data['normal_loss'].mean()
                 floater_loss = data['floater_loss'].mean()
                 diffuse_reg = data['diffuse_reg'].mean()
                 rgb_map = data['rgb_map']
+                whole_valid = data['whole_valid'] 
                 if params.charbonier_loss:
-                    loss = torch.sqrt((rgb_map - rgb_train) ** 2 + params.charbonier_eps**2).mean()
+                    loss = torch.sqrt((rgb_map - rgb_train[whole_valid]) ** 2 + params.charbonier_eps**2).mean()
                 else:
-                    loss = ((rgb_map - rgb_train) ** 2).mean()
+                    loss = ((rgb_map - rgb_train[whole_valid]) ** 2).mean()
                 # ic(F.huber_loss(rgb_map, rgb_train, delta=1, reduction='none'))
                 # loss = torch.sqrt(F.huber_loss(rgb_map, rgb_train, delta=1, reduction='none') + params.charbonier_eps**2).mean()
-                photo_loss = ((rgb_map.clip(0, 1) - rgb_train.clip(0, 1)) ** 2).mean().detach()
+                photo_loss = ((rgb_map.clip(0, 1) - rgb_train[whole_valid].clip(0, 1)) ** 2).mean().detach()
                 backwards_rays_loss = data['backwards_rays_loss']
 
                 # loss
@@ -374,7 +372,7 @@ def reconstruction(args):
                     tensorf.save(f'{logfolder}/{args.expname}_{iteration:06d}.th', args.model.arch)
 
             if tensorf.check_schedule(iteration):
-                new_grad_vars = tensorf.get_optparam_groups(params.lr_init*lr_scale, args.lr_basis*lr_scale, lr_bg=lr_bg, lr_scale=lr_scale)
+                new_grad_vars = tensorf.get_optparam_groups()
                 for param_group, new_param_group in zip(optimizer.param_groups, new_grad_vars):
                     param_group['params'] = new_param_group['params']
 
@@ -428,6 +426,7 @@ def train(cfg: DictConfig):
     np.random.seed(20211202)
     logger.info(cfg.dataset)
     logger.info(cfg.model)
+    cfg.model.arch.rf = cfg.field
 
     if cfg.render_only:
         render_test(cfg)

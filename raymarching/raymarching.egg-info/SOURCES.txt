@@ -1,4 +1,3 @@
-LICENSE
 setup.py
 /home/amai/normalrf/raymarching/src/bindings.cpp
 /home/amai/normalrf/raymarching/src/raymarching.cu
