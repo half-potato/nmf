@@ -31,7 +31,6 @@ def raw2alpha(sigma, dist):
         torch.ones(alpha.shape[0], 1, device=alpha.device),
         1. - alpha + 1e-10
     ], dim=-1), dim=-1)
-    # ic(T.max(), alpha.max(), alpha.min(), dist.min())
 
     weights = alpha * T[:, :-1]  # [N_rays, N_samples]
     return alpha, weights, T[:, -1:]
@@ -104,7 +103,7 @@ class TensorNeRF(torch.nn.Module):
         
     @property
     def device(self):
-        return self.rf.units.device
+        return self.rf.aabb.device
 
     def get_optparam_groups(self, lr_bg=0.025, lr_scale=1):
         grad_vars = []
@@ -362,14 +361,12 @@ class TensorNeRF(torch.nn.Module):
         #
         # # this one consumes too much memory
         # # floater_loss_1 = torch.einsum('bj,bk,jk->b', full_weight.reshape(B, -1), full_weight.reshape(B, -1), fweight).clip(min=self.max_floater_loss).sum()
-        # # ic(floater_loss_1, floater_loss_2)
         # floater_loss = (floater_loss_1 + floater_loss_2)#.clip(min=self.max_floater_loss)
         floater_loss = lossfun_distortion(z_vals, weight[:, :-1])
 
         # app stands for appearance
         app_mask = (weight > self.rayMarch_weight_thres)
         papp_mask = app_mask[ray_valid]
-        ic(weight.mean(), ray_valid.sum())
 
         # debug = torch.zeros((B, n_samples, 3), dtype=torch.short, device=device)
         debug = torch.zeros((B, n_samples, 3), dtype=torch.float, device=device, requires_grad=False)
@@ -422,7 +419,6 @@ class TensorNeRF(torch.nn.Module):
                 ratio_reflected = 0
             elif self.ref_module is not None and recur >= self.max_recurs:
                 viewdotnorm = (viewdirs[app_mask]*L).sum(dim=-1, keepdim=True)
-                ic(app_xyz.mean(), noise_app_features.mean(), refdirs.mean(), roughness.mean(), viewdotnorm.mean(), tint.mean(), v_world_normal.mean(), p_world_normal.mean(), world_normal.mean())
                 ref_col = self.ref_module(
                     app_xyz, viewdirs[app_mask],
                     noise_app_features, refdirs=refdirs,
@@ -588,7 +584,6 @@ class TensorNeRF(torch.nn.Module):
 
         if tonemap:
             rgb_map = self.tonemap(rgb_map.clip(min=0), noclip=True)
-        ic(rgb_map.mean(), rgb.mean())
 
         if self.bg_module is not None and not white_bg:
             bg_roughness = torch.zeros(B, 1, device=device)
@@ -607,7 +602,7 @@ class TensorNeRF(torch.nn.Module):
             depth_map=depth_map.detach().cpu(),
             debug_map=debug_map.detach().cpu(),
             normal_map=v_world_normal_map.detach().cpu(),
-            weight_slice=weight_slice,
+            # weight_slice=weight_slice,
             recur=recur,
             acc_map=acc_map.detach().cpu(),
             roughness=roughness.mean(),

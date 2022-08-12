@@ -252,8 +252,8 @@ def reconstruction(args):
     # scheduler = lr_scheduler.SequentialLR(optimizer, schedulers=[scheduler1, scheduler2], milestones=[3000])
     scheduler = lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=params.n_iters, T_mult=1, eta_min=1e-3)
     # scheduler = lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=1000, T_mult=1, eta_min=1e-3)
-    # if True:
-    with torch.autograd.detect_anomaly():
+    if True:
+    # with torch.autograd.detect_anomaly():
         for iteration in pbar:
 
             ray_idx, rgb_idx = trainingSampler.nextids()
