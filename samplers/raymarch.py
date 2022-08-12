@@ -1,6 +1,6 @@
 import torch
 import math
-import raymarching
+import raymarching_full as raymarching 
 import torch.nn.functional as F
 from numba import jit
 import numpy as np
@@ -11,15 +11,18 @@ class Raymarcher(torch.nn.Module):
                  bound=2.0,
                  min_near=0.2,
                  density_thresh=0.002,
-                 max_steps=512,
+                 max_steps=1024,
                  max_samples=int(2e5),
                  dt_gamma=0,
+                 grid_size=128,
                  perturb=False):
         super().__init__()
 
         self.bound = bound
         self.cascade = int(1 + math.ceil(math.log2(bound)))
         self.grid_size = 128
+        # self.cascade = 1 + math.ceil(math.log2(bound))
+        self.grid_size = grid_size
         self.min_near = min_near
         self.density_thresh = density_thresh
         self.dt_gamma = dt_gamma

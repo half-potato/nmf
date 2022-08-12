@@ -43,10 +43,10 @@ pip install -e . # ditto but better (e.g., dependency & metadata handling)
 
 '''
 setup(
-    name='raymarching', # package name, import this to use python API
+    name='raymarching_full', # package name, import this to use python API
     ext_modules=[
         CUDAExtension(
-            name='_raymarching', # extension name, import this to use CUDA API
+            name='_raymarching_full', # extension name, import this to use CUDA API
             sources=[os.path.join(_src_path, 'src', f) for f in [
                 'raymarching.cu',
                 'bindings.cpp',
