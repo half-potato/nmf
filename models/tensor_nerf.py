@@ -31,7 +31,6 @@ def raw2alpha(sigma, dist):
         torch.ones(alpha.shape[0], 1, device=alpha.device),
         1. - alpha + 1e-10
     ], dim=-1), dim=-1)
-    # ic(T.max(), alpha.max(), alpha.min(), dist.min())
 
     weights = alpha * T[:, :-1]  # [N_rays, N_samples]
     return alpha, weights, T[:, -1:]
@@ -285,7 +284,7 @@ class TensorNeRF(torch.nn.Module):
             xyz_g.requires_grad = True
 
             # compute sigma
-            xyz_g_normed = self.rf.normalize_coord(xyz_g)[..., :3]
+            xyz_g_normed = self.rf.normalize_coord(xyz_g)
             validsigma = self.rf.compute_densityfeature(xyz_g_normed)
 
             # compute normal
@@ -312,14 +311,13 @@ class TensorNeRF(torch.nn.Module):
 
         # xyz_sampled2, ray_valid2, max_samps2, z_vals2, dists2 = self.sampler2.sample(rays_chunk, focal, ndc_ray, override_near=override_near, is_train=is_train, N_samples=N_samples)
         xyz_sampled, ray_valid, max_samps, z_vals, dists, whole_valid = self.sampler.sample(rays_chunk, focal, ndc_ray, override_near=override_near, is_train=is_train, N_samples=N_samples)
-        xyz_sampled = xyz_sampled   
         B = ray_valid.shape[0]
 
         xyz_normed = self.rf.normalize_coord(xyz_sampled)
         full_shape = (B, max_samps, 3)
         n_samples = full_shape[1]
 
-        M = xyz_sampled.shape[1]
+        M = xyz_sampled.shape[0]
  
         device = xyz_sampled.device
 
@@ -330,10 +328,9 @@ class TensorNeRF(torch.nn.Module):
 
         # sigma.shape: (N, N_samples)
         sigma = torch.zeros(full_shape[:-1], device=device)
-        rgb = torch.zeros((*full_shape[:2], 3), device=device)
 
-        world_normal = torch.zeros(full_shape, device=device)
-        p_world_normal = torch.zeros(full_shape, device=device)
+        world_normal = torch.zeros((M, 3), device=device)
+        p_world_normal = torch.zeros((M, 3), device=device)
 
         if ray_valid.any():
             if self.rf.separate_appgrid:
@@ -362,14 +359,13 @@ class TensorNeRF(torch.nn.Module):
         #
         # # this one consumes too much memory
         # # floater_loss_1 = torch.einsum('bj,bk,jk->b', full_weight.reshape(B, -1), full_weight.reshape(B, -1), fweight).clip(min=self.max_floater_loss).sum()
-        # # ic(floater_loss_1, floater_loss_2)
         # floater_loss = (floater_loss_1 + floater_loss_2)#.clip(min=self.max_floater_loss)
         floater_loss = lossfun_distortion(z_vals, weight[:, :-1])
 
         # app stands for appearance
+        pweight = weight[ray_valid]
         app_mask = (weight > self.rayMarch_weight_thres)
         papp_mask = app_mask[ray_valid]
-        ic(weight.mean(), ray_valid.sum())
 
         # debug = torch.zeros((B, n_samples, 3), dtype=torch.short, device=device)
         debug = torch.zeros((B, n_samples, 3), dtype=torch.float, device=device, requires_grad=False)
@@ -379,13 +375,15 @@ class TensorNeRF(torch.nn.Module):
         depth_map = depth_map + (1. - acc_map) * rays_chunk[whole_valid, -1]
         bounce_count = 0
 
+        rgb = torch.zeros((*full_shape[:2], 3), device=device, dtype=weight.dtype)
+
         if app_mask.any():
             #  Compute normals for app mask
 
             norms = self.calculate_normals(xyz_sampled[papp_mask])
-            world_normal[app_mask] = norms
+            world_normal[papp_mask] = norms
             # pred norms is initialized to world norms to set loss to zero for align_world_loss when prediction is none
-            p_world_normal[app_mask] = norms.detach()
+            p_world_normal[papp_mask] = norms.detach()
 
             app_xyz = xyz_normed[papp_mask]
 
@@ -403,16 +401,18 @@ class TensorNeRF(torch.nn.Module):
 
             # interpolate between the predicted and world normals
             if self.normal_module is not None:
-                p_world_normal[app_mask] = self.normal_module(app_xyz, app_features)
+                p_world_normal[papp_mask] = self.normal_module(app_xyz, app_features)
                 l = self.l# if is_train else 1
                 v_world_normal = ((1-l)*p_world_normal + l*world_normal)
                 v_world_normal = v_world_normal / (v_world_normal.norm(dim=-1, keepdim=True) + 1e-8)
+                # TODO REMOVE
+                v_world_normal = xyz_sampled[:, :3] / (xyz_sampled[:, :3].norm(dim=-1, keepdim=True) + 1e-8)
             else:
                 v_world_normal = world_normal
 
             # calculate reflected ray direction
             V = -viewdirs[app_mask]
-            L = v_world_normal[app_mask]
+            L = v_world_normal[papp_mask]
             refdirs = 2 * (V * L).sum(-1, keepdim=True) * L - V
 
             reflect_rgb = torch.zeros_like(diffuse)
@@ -422,7 +422,6 @@ class TensorNeRF(torch.nn.Module):
                 ratio_reflected = 0
             elif self.ref_module is not None and recur >= self.max_recurs:
                 viewdotnorm = (viewdirs[app_mask]*L).sum(dim=-1, keepdim=True)
-                ic(app_xyz.mean(), noise_app_features.mean(), refdirs.mean(), roughness.mean(), viewdotnorm.mean(), tint.mean(), v_world_normal.mean(), p_world_normal.mean(), world_normal.mean())
                 ref_col = self.ref_module(
                     app_xyz, viewdirs[app_mask],
                     noise_app_features, refdirs=refdirs,
@@ -528,7 +527,7 @@ class TensorNeRF(torch.nn.Module):
 
             align_world_loss = (1-(p_world_normal * world_normal).sum(dim=-1).clamp(max=self.max_normal_similarity))
             # align_world_loss = torch.linalg.norm(p_world_normal - world_normal, dim=-1)
-            normal_loss = (weight * align_world_loss).sum(dim=-1).mean()
+            normal_loss = (pweight * align_world_loss).sum(dim=-1).mean()
             tint_brightness = tint.mean(dim=-1)
         else:
             ratio_diffuse = torch.tensor(0.0)
@@ -540,8 +539,8 @@ class TensorNeRF(torch.nn.Module):
             reflectivity = torch.tensor(0.0)
         
         # viewdirs point inward. -viewdirs aligns with p_world_normal. So we want it below 0
-        backwards_rays_loss = torch.matmul(viewdirs.reshape(-1, 1, 3), p_world_normal.reshape(-1, 3, 1)).reshape(app_mask.shape).clamp(min=0)**2
-        backwards_rays_loss = (weight * backwards_rays_loss).sum(dim=1).mean()
+        backwards_rays_loss = torch.matmul(viewdirs[ray_valid].reshape(-1, 1, 3), p_world_normal.reshape(-1, 3, 1)).reshape(pweight.shape).clamp(min=0)**2
+        backwards_rays_loss = (pweight * backwards_rays_loss).sum() / B
 
         # calculate depth
 
@@ -564,7 +563,9 @@ class TensorNeRF(torch.nn.Module):
             #     (torch.norm(p_world_normal_map, dim=-1, keepdim=True)+1e-8)
             # d_world_normal_map = torch.sum(weight[..., None] * world_normal, 1)
             # d_world_normal_map = d_world_normal_map / (torch.linalg.norm(d_world_normal_map, dim=-1, keepdim=True)+1e-8)
-            v_world_normal_map = torch.sum(weight[..., None] * v_world_normal, 1)
+            full_v_world_normal = torch.zeros(full_shape, device=device)
+            full_v_world_normal[ray_valid] = v_world_normal
+            v_world_normal_map = torch.sum(weight[..., None] * full_v_world_normal, 1)
             v_world_normal_map = v_world_normal_map / (torch.linalg.norm(v_world_normal_map, dim=-1, keepdim=True)+1e-8)
             # d_normal_map = torch.matmul(row_basis, d_world_normal_map.unsqueeze(-1)).squeeze(-1)
             # p_normal_map = torch.matmul(
@@ -588,7 +589,6 @@ class TensorNeRF(torch.nn.Module):
 
         if tonemap:
             rgb_map = self.tonemap(rgb_map.clip(min=0), noclip=True)
-        ic(rgb_map.mean(), rgb.mean())
 
         if self.bg_module is not None and not white_bg:
             bg_roughness = torch.zeros(B, 1, device=device)
