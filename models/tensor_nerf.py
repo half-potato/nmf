@@ -103,7 +103,7 @@ class TensorNeRF(torch.nn.Module):
         
     @property
     def device(self):
-        return self.rf.units.device
+        return self.rf.aabb.device
 
     def get_optparam_groups(self, lr_bg=0.025, lr_scale=1):
         grad_vars = []
@@ -607,7 +607,7 @@ class TensorNeRF(torch.nn.Module):
             depth_map=depth_map.detach().cpu(),
             debug_map=debug_map.detach().cpu(),
             normal_map=v_world_normal_map.detach().cpu(),
-            weight_slice=weight_slice,
+            # weight_slice=weight_slice,
             recur=recur,
             acc_map=acc_map.detach().cpu(),
             roughness=roughness.mean(),

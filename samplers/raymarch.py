@@ -19,8 +19,9 @@ class Raymarcher(torch.nn.Module):
         super().__init__()
 
         self.bound = bound
-        self.cascade = 1 + math.ceil(math.log2(bound))
-        # self.cascade = int(1 + math.ceil(math.log2(bound)))
+        self.cascade = int(1 + math.ceil(math.log2(bound)))
+        self.grid_size = 128
+        # self.cascade = 1 + math.ceil(math.log2(bound))
         self.grid_size = grid_size
         self.min_near = min_near
         self.density_thresh = density_thresh
@@ -86,7 +87,7 @@ class Raymarcher(torch.nn.Module):
             (z_vals / focal)[..., None]
         ], dim=-1)
         xyzs = fxyzs[ray_valid]
-        # ic(whole_valid.sum(), ray_valid.sum(), xyzs.shape)
+        # ic(whole_valid.sum(), ray_valid.sum(dim=1).float().mean(), xyzs.shape)
 
         # print(self.density_bitfield.sum())
         # xyzs: (M, 4) values
