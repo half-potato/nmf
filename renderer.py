@@ -72,8 +72,7 @@ class BundleRender:
         points = data['termination_xyz']
         # ic(data['backwards_rays_loss'].mean(), acc_map.max())
         #  ind = [598,532]
-        ind = [height // 2, width // 2]
-        point = points.reshape(height, width, -1)[ind[0], ind[1]].to(device)
+        point = points[len(points)//2].to(device)
 
         env_map, col_map = tensorf.recover_envmap(512, xyz=point, roughness=0.01)
         env_map = (env_map.detach().cpu().numpy() * 255).astype('uint8')
@@ -149,6 +148,7 @@ def depth_to_normals(depth, focal):
 
 def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N_samples=-1,
                white_bg=False, ndc_ray=False, compute_extra_metrics=True, device='cuda', bundle_size=1):
+    print("Eval")
     PSNRs, rgb_maps, depth_maps = [], [], []
     norm_errs = []
     ssims,l_alex,l_vgg=[],[],[]
@@ -242,8 +242,8 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
 
             if compute_extra_metrics:
                 ssim = rgb_ssim(rgb_map, gt_rgb, 1)
-                l_a = rgb_lpips(gt_rgb.numpy(), rgb_map.numpy(), 'alex', tensorf.device)
-                l_v = rgb_lpips(gt_rgb.numpy(), rgb_map.numpy(), 'vgg', tensorf.device)
+                l_a = rgb_lpips(gt_rgb.numpy(), rgb_map.numpy(), 'alex', device)
+                l_v = rgb_lpips(gt_rgb.numpy(), rgb_map.numpy(), 'vgg', device)
                 ssims.append(ssim)
                 l_alex.append(l_a)
                 l_vgg.append(l_v)

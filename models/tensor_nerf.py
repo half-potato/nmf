@@ -35,19 +35,57 @@ def raw2alpha(sigma, dist):
     weights = alpha * T[:, :-1]  # [N_rays, N_samples]
     return alpha, weights, T[:, -1:]
 
-def lossfun_distortion(t, w):
+def lossfun_distortion(t, w, dt):
     """Compute iint w[i] w[j] |t[i] - t[j]| di dj."""
     # The loss incurred between all pairs of intervals.
-    ut = (t[..., 1:] + t[..., :-1]) / 2
-    dut = torch.abs(ut[..., :, None] - ut[..., None, :])
+    # extend the mipoint artifically to the background
+    midpoint = torch.cat([
+        t,
+        (2*t[:, -1] - t[:, -2])[:, None],
+    ], dim=1)
+    # extend the dt artifically to the background
+    dt = torch.cat([
+        dt,
+        0*dt[:, -2:-1]
+    ], dim=1)
+    full_weight = torch.cat([w, 1-w.sum(dim=1, keepdim=True)], dim=1)
+    dut = torch.abs(midpoint[..., :, None] - midpoint[..., None, :])
     # loss_inter = torch.sum(w * torch.sum(w[..., None, :] * dut, dim=-1), dim=-1)
     B = t.shape[0]
-    loss_inter = torch.einsum('bj,bk,bjk', w.reshape(B, -1), w.reshape(B, -1), dut)
+    loss_inter = torch.einsum('bj,bk,bjk', full_weight.reshape(B, -1), full_weight.reshape(B, -1), dut)
+    # ic(dt.shape, full_weight.shape)
 
     # The loss incurred within each individual interval with itself.
-    loss_intra = torch.sum(w**2 * (t[..., 1:] - t[..., :-1]), dim=-1) / 3
+    loss_intra = torch.sum(full_weight**2 * dt) / 3
+    # ic(1, loss_inter, loss_intra)
 
     return loss_inter + loss_intra
+
+def lossfun_distortion2(t, w, dt):
+    device = w.device
+    B, n_samples = w.shape
+    full_weight = torch.cat([w, 1-w.sum(dim=1, keepdim=True)], dim=1)
+    #
+    # midpoint = t
+    # fweight = torch.abs(midpoint[..., :, None] - midpoint[..., None, :])
+    # # # ut = (z_vals[:, 1:] + z_vals[:, :-1])/2
+    # #
+    # loss_inter = torch.einsum('bj,bk,jk', full_weight.reshape(B, -1), full_weight.reshape(B, -1), fweight)
+    # loss_intra = (w**2 * dt).sum(dim=1).sum()/3
+    #
+    # # this one consumes too much memory
+
+    S = torch.linspace(0, 1, n_samples+1, device=device).reshape(-1, 1)
+    # S = t[0, :].reshape(-1, 1)
+    fweight = (S - S.T).abs()
+    # ut = (z_vals[:, 1:] + z_vals[:, :-1])/2
+
+    floater_loss_1 = torch.einsum('bj,bk,jk', full_weight.reshape(B, -1), full_weight.reshape(B, -1), fweight)
+    floater_loss_2 = (full_weight**2).sum()/3/n_samples
+    # ic(fweight)
+
+    # ic(floater_loss_1, floater_loss_2)
+    return floater_loss_1 + floater_loss_2
 
 class TensorNeRF(torch.nn.Module):
     def __init__(self, rf, aabb, diffuse_module, sampler, brdf_sampler=None, brdf=None, tonemap=None, normal_module=None, ref_module=None, bg_module=None,
@@ -100,10 +138,9 @@ class TensorNeRF(torch.nn.Module):
         self.max_normal_similarity = max_normal_similarity
         self.l = 0
         # self.sampler2.update(self.rf)
-        
-    @property
-    def device(self):
-        return self.rf.aabb.device
+
+    def get_device(self):
+        return self.rf.units.device
 
     def get_optparam_groups(self, lr_bg=0.025, lr_scale=1):
         grad_vars = []
@@ -165,7 +202,7 @@ class TensorNeRF(torch.nn.Module):
     #     mask_filtered = []
     #     idx_chunks = torch.split(torch.arange(N), chunk)
     #     for idx_chunk in idx_chunks:
-    #         rays_chunk = all_rays[idx_chunk].to(self.device)
+    #         rays_chunk = all_rays[idx_chunk].to(self.get_device())
     #
     #         rays_o, rays_d = rays_chunk[..., :3], rays_chunk[..., 3:6]
     #         if bbox_only:
@@ -194,7 +231,7 @@ class TensorNeRF(torch.nn.Module):
     #     return all_rays[mask_filtered], all_rgbs[mask_filtered], mask_filtered
 
     def sample_occupied(self):
-        samps = torch.rand((10000, 4), device=self.device)*2 - 1
+        samps = torch.rand((10000, 4), device=self.get_device())*2 - 1
         validsigma = self.rf.compute_densityfeature(samps).squeeze()
         mask = validsigma > validsigma.mean()
         inds, = torch.where(mask)
@@ -219,13 +256,13 @@ class TensorNeRF(torch.nn.Module):
 
     def render_env_sparse(self, ray_origins, env_dirs, roughness: float):
         B, M = env_dirs.shape[:2]
-        ray_origins = torch.cat([ray_origins, roughness*torch.ones((B, 1), device=self.device)], dim=-1)
+        ray_origins = torch.cat([ray_origins, roughness*torch.ones((B, 1), device=self.get_device())], dim=-1)
         norm_ray_origins = self.rf.normalize_coord(ray_origins)
         app_features = self.rf.compute_appfeature(norm_ray_origins)
         app_features = app_features.reshape(B, 1, -1).expand(B, M, -1)
         norm_ray_origins = norm_ray_origins.reshape(B, 1, -1).expand(B, M, -1)
         roughness = torch.tensor(roughness, device=ray_origins.device)
-        staticdir = torch.zeros((B*M, 3), device=self.device)
+        staticdir = torch.zeros((B*M, 3), device=self.get_device())
         staticdir[:, 0] = 1
         color = self.ref_module(
                 pts=norm_ray_origins.reshape(B*M, -1),
@@ -348,19 +385,9 @@ class TensorNeRF(torch.nn.Module):
         alpha, weight, bg_weight = raw2alpha(sigma, dists * self.rf.distance_scale)
 
         # weight[xyz_normed[..., 2] > 0.2] = 0
-        # full_weight = torch.cat([weight, bg_weight], dim=1)
 
-        # S = torch.linspace(0, 1, n_samples+1, device=device).reshape(-1, 1)
-        # fweight = (S - S.T).abs()
-        # # ut = (z_vals[:, 1:] + z_vals[:, :-1])/2
-        #
-        # floater_loss_1 = torch.einsum('bj,bk,jk', full_weight.reshape(B, -1), full_weight.reshape(B, -1), fweight).clip(min=self.max_floater_loss)
-        # floater_loss_2 = (full_weight**2).sum(dim=1).sum()/3/n_samples
-        #
-        # # this one consumes too much memory
-        # # floater_loss_1 = torch.einsum('bj,bk,jk->b', full_weight.reshape(B, -1), full_weight.reshape(B, -1), fweight).clip(min=self.max_floater_loss).sum()
-        # floater_loss = (floater_loss_1 + floater_loss_2)#.clip(min=self.max_floater_loss)
-        floater_loss = lossfun_distortion(z_vals, weight[:, :-1])
+        floater_loss = lossfun_distortion(z_vals, weight, dists).clip(min=self.max_floater_loss)
+        # floater_loss2 = lossfun_distortion2(z_vals, weight, dists).clip(min=self.max_floater_loss)
 
         # app stands for appearance
         pweight = weight[ray_valid]
@@ -406,7 +433,7 @@ class TensorNeRF(torch.nn.Module):
                 v_world_normal = ((1-l)*p_world_normal + l*world_normal)
                 v_world_normal = v_world_normal / (v_world_normal.norm(dim=-1, keepdim=True) + 1e-8)
                 # TODO REMOVE
-                v_world_normal = xyz_sampled[:, :3] / (xyz_sampled[:, :3].norm(dim=-1, keepdim=True) + 1e-8)
+                # v_world_normal[ray_valid] = xyz_sampled[..., :3] / (xyz_sampled[..., :3].norm(dim=-1, keepdim=True) + 1e-8)
             else:
                 v_world_normal = world_normal
 
@@ -574,10 +601,13 @@ class TensorNeRF(torch.nn.Module):
             # v_normal_map = v_normal_map / (torch.linalg.norm(d_normal_map, dim=-1, keepdim=True)+1e-8)
             v_world_normal_map = acc_map[..., None] * v_world_normal_map + (1 - acc_map[..., None])
 
-            inds = ((weight * (alpha < self.alphaMask_thres)).max(dim=1).indices).clip(min=0)
-            full_xyz_sampled = torch.zeros((B, max_samps, 4), device=device)
-            full_xyz_sampled[ray_valid] = xyz_sampled
-            termination_xyz = full_xyz_sampled[range(full_shape[0]), inds]
+            if weight.shape[1] > 0:
+                inds = ((weight * (alpha < self.alphaMask_thres)).max(dim=1).indices).clip(min=0)
+                full_xyz_sampled = torch.zeros((B, max_samps, 4), device=device)
+                full_xyz_sampled[ray_valid] = xyz_sampled
+                termination_xyz = full_xyz_sampled[range(full_shape[0]), inds].cpu()
+            else:
+                termination_xyz = torch.empty(0, 4)
 
             # collect statistics about the surface
             # surface width in voxels
@@ -614,7 +644,7 @@ class TensorNeRF(torch.nn.Module):
             diffuse_reg=roughness.mean() - reflectivity.mean() + diffuse.mean(),# + ((tint_brightness-0.5)**2).mean(),
             normal_loss=normal_loss,
             backwards_rays_loss=backwards_rays_loss,
-            termination_xyz=termination_xyz.detach().cpu(),
+            termination_xyz=termination_xyz,
             floater_loss=floater_loss,
             surf_width=surface_width,
             color_count=app_mask.detach().sum(),

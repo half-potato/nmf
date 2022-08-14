@@ -221,8 +221,9 @@ def reconstruction(args):
         # tensorf.bg_module.save('test.png')
 
     if args.ckpt is None:
-        space_optim = torch.optim.Adam(tensorf.parameters(), lr=0.1, betas=(0.9,0.99))
-        pbar = tqdm(range(tensorf.rf.num_pretrain))
+        space_optim = torch.optim.Adam(tensorf.parameters(), lr=0.01, betas=(0.9,0.99))
+        pbar = tqdm(range(1000))
+        xyz = torch.rand(5000, 3, device=device)*2-1
         for _ in pbar:
             xyz = torch.rand(5000, 3, device=device)*2-1
             sigma_feat = tensorf.rf.compute_densityfeature(xyz)
