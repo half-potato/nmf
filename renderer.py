@@ -56,7 +56,7 @@ class BundleRender:
         fW = width
         device = rays.device
 
-        data = self.base_renderer(rays, tensorf, keys=['depth_map', 'rgb_map', 'normal_map', 'acc_map', 'termination_xyz', 'debug_map', 'surf_width', 'weight_slice'],
+        data = self.base_renderer(rays, tensorf, keys=['depth_map', 'rgb_map', 'normal_map', 'acc_map', 'termination_xyz', 'debug_map', 'surf_width'],#, 'weight_slice'],
                                   focal=self.focal, chunk=self.chunk, **kwargs)
 
         LOGGER.save('rays.pkl')
@@ -66,7 +66,8 @@ class BundleRender:
         normal_map = data['normal_map']
         debug_map = data['debug_map']
         surf_width = data['surf_width']
-        weight_slice = data['weight_slice']
+        # weight_slice = data['weight_slice']
+        weight_slice = None
         acc_map = data['acc_map']
         points = data['termination_xyz']
         # ic(data['backwards_rays_loss'].mean(), acc_map.max())

@@ -19,3 +19,4 @@ encoder_conf:
     base_resolution: 16
 lr: 1e-2
 lr_net: 1e-3
+num_pretrain: 0

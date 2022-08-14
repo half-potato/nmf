@@ -8,7 +8,7 @@ from torch.cuda.amp import custom_bwd, custom_fwd
 from icecream import ic
 
 try:
-    import _raymarching as _backend
+    import _raymarching_full as _backend
 except ImportError:
     from .backend import _backend
 

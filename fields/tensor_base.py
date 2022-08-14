@@ -5,12 +5,13 @@ import numpy as np
 import utils
 
 class TensorBase(torch.nn.Module):
-    def __init__(self, aabb, density_shift, activation, lr, lr_net, contract_space=False, distance_scale=25):
+    def __init__(self, aabb, density_shift, activation, lr, lr_net, contract_space=False, distance_scale=25, num_pretrain=0):
         super().__init__()
         self.register_buffer('aabb', aabb)
         self.lr = lr
         self.lr_net = lr_net
         self.activation = activation
+        self.num_pretrain = num_pretrain
         self.density_shift = density_shift
         self.contract_space = contract_space
         self.distance_scale = distance_scale
