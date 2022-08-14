@@ -113,6 +113,7 @@ arch:
     feape: 2
     featureC: 128
     num_layers: 3
+    lr: 1e-4
 
   normal_module:
     _partial_: True

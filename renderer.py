@@ -19,6 +19,8 @@ def chunk_renderer(rays, tensorf, focal, keys=['rgb_map'], chunk=4096, **kwargs)
     N_rays_all = rays.shape[0]
     for chunk_idx in range(N_rays_all // chunk + int(N_rays_all % chunk > 0)):
         rays_chunk = rays[chunk_idx * chunk:(chunk_idx + 1) * chunk]#.to(device)
+        if rays_chunk.numel() == 0:
+            continue
     
         cdata = tensorf(rays_chunk, focal, **kwargs)
         for key in keys:

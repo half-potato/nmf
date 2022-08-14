@@ -169,11 +169,12 @@ class MLPDiffuse(torch.nn.Module):
     refpe: int
     featureC: int
     num_layers: int
-    def __init__(self, in_channels, pospe=12, view_encoder=None, feape=6, featureC=128, num_layers=0, unlit_tint=False):
+    def __init__(self, in_channels, pospe=12, view_encoder=None, feape=6, featureC=128, num_layers=0, unlit_tint=False, lr=1e-4):
         super().__init__()
 
         self.in_mlpC = 2*pospe*3 + 3 + 2*max(feape, 0)*in_channels + in_channels if feape >= 0 else 0
         self.unlit_tint = unlit_tint
+        self.lr = lr
 
         self.view_encoder = view_encoder
         if view_encoder is not None:
@@ -229,7 +230,7 @@ class MLPDiffuse(torch.nn.Module):
         refraction_index = F.softplus(mlp_out[..., 7:8]-1) + self.min_refraction_index
         reflectivity = 50*F.softplus(mlp_out[..., 8:9])
         # roughness = F.softplus(mlp_out[..., 10:11]-1)
-        roughness = torch.sigmoid(mlp_out[..., 10:11])
+        roughness = torch.sigmoid(mlp_out[..., 10:11]-1).clip(min=1e-2)
         f0 = torch.sigmoid(mlp_out[..., 11:14])
         albedo = torch.sigmoid(mlp_out[..., 14:17])
         # ambient = torch.sigmoid(mlp_out[..., 9:10])
