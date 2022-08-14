@@ -15,10 +15,11 @@ arch:
   rf: 'placeholder'
 
   sampler:
-    _target_: samplers.alphagrid.AlphaGridSampler
-    enable_alpha_mask: False
-    nEnvSamples: 0
-    # _target_: samplers.raymarch.Raymarcher
+    # _target_: samplers.alphagrid.AlphaGridSampler
+    # enable_alpha_mask: False
+    # nEnvSamples: 0
+    _target_: samplers.raymarch.Raymarcher
+    max_samples: 20000
 
   tonemap:
     # _target_: models.tonemap.HDRTonemap
@@ -143,3 +144,4 @@ params:
   n_iters: 30000
   charbonier_loss: false
   start_density: 1e-2
+

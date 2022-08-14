@@ -221,7 +221,7 @@ def reconstruction(args):
         # tensorf.bg_module.save('test.png')
 
     if args.ckpt is None:
-        space_optim = torch.optim.Adam(tensorf.parameters(), lr=0.1, betas=(0.9,0.99))
+        space_optim = torch.optim.Adam(tensorf.parameters(), lr=0.01, betas=(0.9,0.99))
         pbar = tqdm(range(1000))
         xyz = torch.rand(5000, 3, device=device)*2-1
         for _ in pbar:
@@ -252,8 +252,8 @@ def reconstruction(args):
     # scheduler = lr_scheduler.SequentialLR(optimizer, schedulers=[scheduler1, scheduler2], milestones=[3000])
     scheduler = lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=params.n_iters, T_mult=1, eta_min=1e-3)
     # scheduler = lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=1000, T_mult=1, eta_min=1e-3)
-    # if True:
-    with torch.autograd.detect_anomaly():
+    if True:
+    # with torch.autograd.detect_anomaly():
         for iteration in pbar:
 
             ray_idx, rgb_idx = trainingSampler.nextids()
