@@ -120,6 +120,3 @@ class Logger:
 #     dcc.Graph(id=f"scatter", figure=fig),
 # ], id='main', className="container")
 # app.run_server(debug=False, port=8080)
-
-
-
