@@ -59,9 +59,14 @@ class AlphaGridSampler:
         return False
 
     def update(self, rf):
+        # self.nSamples = rf.nSamples//8
+        # self.stepSize = rf.stepSize*8
+        # self.nSamples = rf.nSamples*16
+        # self.stepSize = rf.stepSize/16
         self.nSamples = rf.nSamples
-        self.aabb = rf.aabb
         self.stepSize = rf.stepSize
+
+        self.aabb = rf.aabb
         self.units = rf.units
         self.contract_space = rf.contract_space
         self.grid_size = rf.grid_size
@@ -93,6 +98,7 @@ class AlphaGridSampler:
         # focal: ratio of meters to pixels at a distance of 1 meter
         N_samples = N_samples if N_samples > 0 else self.nSamples
         N_env_samples = N_env_samples if N_env_samples > 0 else self.nEnvSamples
+        device = rays_o.device
         stepsize = self.stepSize
         near, far = self.near_far
         if override_near is not None:
@@ -101,6 +107,7 @@ class AlphaGridSampler:
         rate_a = (self.aabb[1].to(rays_o) - rays_o) / vec
         rate_b = (self.aabb[0].to(rays_o) - rays_o) / vec
         t_min = torch.minimum(rate_a, rate_b).amax(-1).clamp(min=near, max=far)
+        t_min = near * torch.ones_like(t_min)
 
         rng = torch.arange(N_samples, device=rays_o.device)[None].float()
         # extend rng to sample towards infinity
@@ -121,6 +128,8 @@ class AlphaGridSampler:
             brng = brng + r
             rng = brng.reshape(-1, N_samples+N_env_samples)
         step = stepsize * rng
+        steps = torch.rand((rays_d.shape[-2], N_samples), device=device) * stepsize * 2
+        step = torch.cumsum(steps, dim=1)
         interpx = (t_min[..., None] + step)
 
         rays_pts = rays_o[..., None, :] + rays_d[..., None, :] * interpx[..., None]

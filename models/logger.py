@@ -32,10 +32,11 @@ class Logger:
         xyz = xyz[mask]
         normals = normals[mask]
         weights = weights[mask]
-        # N = 500000
-        # xyz = xyz[:N]
-        # normals = normals[:N]
-        # weights = weights[:N]
+        ic(xyz.shape)
+        N = 500000
+        xyz = xyz[:N]
+        normals = normals[:N]
+        weights = weights[:N]
         # construct normal data
         N = normals.shape[0]
         eps = 0.001
@@ -105,18 +106,21 @@ class Logger:
         fig.show()
 
     def save(self, path):
-        print(self.data)
+        if not self.enable:
+            return
+        print("Saving")
         with open(path, 'wb') as f:
             pkl.dump(self.data, f)
 
-# from dash import Dash, html, dcc
-# import flask
-# logger = Logger(path='rays2.pkl')
-# fig = logger.plot_norms()
-# # fig.show()
-# server = flask.Flask(__name__)
-# app = Dash(__name__, server=server)
-# app.layout = html.Div([
-#     dcc.Graph(id=f"scatter", figure=fig),
-# ], id='main', className="container")
-# app.run_server(debug=False, port=8080)
+if __name__ == "__main__":
+    from dash import Dash, html, dcc
+    import flask
+    logger = Logger(path='rays.pkl')
+    fig = logger.plot_norms()
+    fig.show()
+    # server = flask.Flask(__name__)
+    # app = Dash(__name__, server=server)
+    # app.layout = html.Div([
+    #     dcc.Graph(id=f"scatter", figure=fig),
+    # ], id='main', className="container")
+    # app.run_server(debug=False, port=8080)

@@ -58,7 +58,8 @@ class BundleRender:
         fW = width
         device = rays.device
 
-        data = self.base_renderer(rays, tensorf, keys=['depth_map', 'rgb_map', 'normal_map', 'acc_map', 'termination_xyz', 'debug_map', 'surf_width', 'weight_slice'],
+        LOGGER.reset()
+        data = self.base_renderer(rays, tensorf, keys=['depth_map', 'rgb_map', 'normal_map', 'acc_map', 'termination_xyz', 'debug_map', 'surf_width'],
                                   focal=self.focal, chunk=self.chunk, **kwargs)
 
         LOGGER.save('rays.pkl')
@@ -68,7 +69,7 @@ class BundleRender:
         normal_map = data['normal_map']
         debug_map = data['debug_map']
         surf_width = data['surf_width']
-        weight_slice = data['weight_slice']
+        # weight_slice = data['weight_slice']
         acc_map = data['acc_map']
         points = data['termination_xyz']
         # ic(data['backwards_rays_loss'].mean(), acc_map.max())
@@ -128,7 +129,7 @@ class BundleRender:
         # fig.show()
         # assert(False)
 
-        return rgb_map, depth_map, debug_map, normal_map, env_map, col_map, surf_width, weight_slice
+        return rgb_map, depth_map, debug_map, normal_map, env_map, col_map, surf_width, None
 
 
 def depth_to_normals(depth, focal):
@@ -216,6 +217,7 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
         if gt_rgb is not None:
             try:
                 gt_normal_map = test_dataset.get_normal(im_idx)
+                vis_normal_map = (gt_normal_map * 127 + 128).clamp(0, 255).byte()
                 # vis_gt_normal_map = (gt_normal_map * 127 + 128).clamp(0, 255).byte()
                 # X = normal_map.reshape(-1, 3)
                 # Y = gt_normal_map.reshape(-1, 3)
@@ -257,7 +259,7 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
         if savePath is not None:
             imageio.imwrite(f'{savePath}/{prtx}{idx:03d}.png', rgb_map)
             rgb_map = np.concatenate((rgb_map, vis_depth_map), axis=1)
-            imageio.imwrite(f'{savePath}/rgbd/{prtx}{idx:03d}.png', rgb_map)
+            imageio.imwrite(f'{savePath}/rgbd/{prtx}{idx:03d}.exr', depth_map.numpy())
             imageio.imwrite(f'{savePath}/normal/{prtx}{idx:03d}.png', vis_normal_map)
             imageio.imwrite(f'{savePath}/err/{prtx}{idx:03d}.png', err_map)
             imageio.imwrite(f'{savePath}/surf_width/{prtx}{idx:03d}.png', (surf_width*2).numpy().astype(np.uint8))

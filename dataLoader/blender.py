@@ -5,6 +5,7 @@ from tqdm import tqdm
 import os
 from PIL import Image
 from torchvision import transforms as T
+import matplotlib.pyplot as plt
 
 # import matplotlib.pyplot as plt
 from icecream import ic
@@ -44,6 +45,11 @@ class BlenderDataset(Dataset):
             ext = self.meta['ext']
         else:
             ext = '.png'
+        if 'normal_ext' in self.meta:
+            normal_ext = self.meta['normal_ext']
+        else:
+            normal_ext = ext
+
         if 'near_far' in self.meta:
             self.near_far = self.meta['near_far']
         else:
@@ -101,7 +107,7 @@ class BlenderDataset(Dataset):
             self.poses += [c2w]
 
             image_path = os.path.join(self.root_dir, f"{frame['file_path']}{ext}")
-            normal_path = os.path.join(self.root_dir, f"{frame['file_path']}_normal{ext}")
+            normal_path = os.path.join(self.root_dir, f"{frame['file_path']}_normal{normal_ext}")
             self.image_paths += [image_path]
             self.normal_paths += [normal_path]
             # img = Image.open(image_path)
@@ -110,6 +116,8 @@ class BlenderDataset(Dataset):
             if self.downsample!=1.0:
                 img = img.resize(self.img_wh, Image.LANCZOS)
             img = self.transform(img)  # (4, h, w)
+            # plt.imshow(img.permute(1, 2, 0))
+            # plt.show()
             img = img.view(img.shape[0], -1).permute(1, 0)  # (h*w, 4) RGBA
 
 
@@ -156,7 +164,10 @@ class BlenderDataset(Dataset):
     def get_normal(self, idx):
         norms = imageio.imread(self.normal_paths[idx])
         norms = torch.as_tensor(norms)[..., :3].float()
-        norms = (norms - 128)/127
+        if norms.max() > 2:
+            norms = (norms - 128)/127
+        else:
+            norms = (norms - 0.5)*2
         # norms = norms / torch.linalg.norm(norms, dim=-1, keepdim=True)
         return norms
 

@@ -10,7 +10,7 @@ arch:
   fea2denseAct: 'softplus_shift'
   # fea2denseAct: 'relu_shift'
   max_recurs: 2
-  roughness_rays: 25
+  roughness_rays: 100
   infinity_border: False
   enable_alpha_mask: false
   appdim_noise_std: 0.0
@@ -58,7 +58,6 @@ arch:
 
   # brdf:
   #   _target_: models.brdf.PBR
-  # #   # _target_: models.brdf.SimplePBR
   #   _partial_: True
 
   brdf:
