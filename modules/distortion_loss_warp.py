@@ -12,35 +12,36 @@ def distortion_bidir_kernel(
     dm: wp.array2d(dtype=float),
     dw: wp.array2d(dtype=float),
     ddt: wp.array2d(dtype=float),
-    loss: wp.array(dtype=float)):
-    b, i, j = wp.tid()
+    loss: wp.array(dtype=float),
+    M: int):
+    b, i = wp.tid()
     mp1 = midpoint[b, i]
-    mp2 = midpoint[b, j]
     fw1 = full_weight[b, i]
-    fw2 = full_weight[b, j]
     pdt = dt[b, i]
 
-    aut = mp1 - mp2
-    wm = fw1 * fw2
-    dut = wp.abs(aut)
-    inter = dut * wm
-    if j == 0:
-        inner = fw1 * fw1 * pdt / 3.0
-        # backward
-        ddt[b, i] = fw1*fw1
-        wp.atomic_add(dw, b, i, 2.0*fw1*pdt)
-    else:
-        inner = 0.0
+    inner = fw1 * fw1 * pdt / 3.0
+    # backward
+    ddt[b, i] = fw1*fw1
+    wp.atomic_add(dw, b, i, 2.0*fw1*pdt / 3.0)
+
+    inter = float(0.0)
+    for j in range(M):
+        mp2 = midpoint[b, j]
+        fw2 = full_weight[b, j]
+
+        aut = mp1 - mp2
+        wm = fw1 * fw2
+        dut = wp.abs(aut)
+        inter += dut * wm
+        wp.atomic_add(dw, b, j, dut*fw1)
+        wp.atomic_add(dw, b, i, dut*fw2)
+        s = torch.sign(aut)
+
+        wp.atomic_add(dm, b, j, -wm * s)
+        wp.atomic_add(dm, b, i, wm * s)
+
     wp.atomic_add(loss, 0, inter+inner)
 
-    # backward
-
-    wp.atomic_add(dw, b, j, dut*fw1)
-    wp.atomic_add(dw, b, i, dut*fw2)
-
-    s = torch.sign(aut)
-    wp.atomic_add(dm, b, j, -wm * s)
-    wp.atomic_add(dm, b, i, wm * s)
 
 def distortion_bidir(midpoint, full_weight, dt):
     B, M = midpoint.shape
@@ -59,8 +60,8 @@ def distortion_bidir(midpoint, full_weight, dt):
     ddt = wp.zeros((B, M), dtype=dtype, device=device)
 
     wp.launch(kernel=distortion_bidir_kernel,
-              dim=(B, M, M),
-              inputs=[midpoint_wp, full_weight_wp, dt_wp, dm, dw, ddt, loss],
+              dim=(B, M),
+              inputs=[midpoint_wp, full_weight_wp, dt_wp, dm, dw, ddt, loss, M],
               device=device)
     loss = wp.to_torch(loss)
     dm = wp.to_torch(dm)
@@ -75,7 +76,7 @@ class _DistortionLoss(torch.autograd.Function):
     def forward(ctx, midpoint, full_weight, dt):
         accum, dm, dw, dt = distortion_bidir(midpoint, full_weight, dt)
 
-        # ic(dm, dm.shape, dw, dt)
+        # ic(dm, dw, dt)
         ctx.save_for_backward(dm, dw, dt)
         return accum
 
@@ -88,7 +89,7 @@ distortion_loss = _DistortionLoss.apply
 
 if __name__ == "__main__":
     B = 3
-    M = 16
+    M = 1000
     device = torch.device('cuda')
     dtype = torch.float
     midpoint = torch.rand(B, M, dtype=dtype, device=device)
@@ -99,5 +100,5 @@ if __name__ == "__main__":
     dt.requires_grad = True 
     print(distortion_loss_pseudo(midpoint, full_weight, dt))
     print(distortion_loss(midpoint, full_weight, dt))
-    torch.autograd.gradcheck(distortion_loss_pseudo, (midpoint, full_weight, dt))
+    # torch.autograd.gradcheck(distortion_loss_pseudo, (midpoint, full_weight, dt))
     # torch.autograd.gradcheck(distortion_loss, (midpoint, full_weight, dt))
