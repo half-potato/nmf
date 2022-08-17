@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from icecream import ic
 from . import safemath
+import math
 import numpy as np
 import cv2
 from .render_modules import str2fn
@@ -60,7 +61,7 @@ class CubeUnwrap(torch.nn.Module):
 
 class HierarchicalCubeMap(torch.nn.Module):
     def __init__(self, bg_resolution=512, num_levels=2, featureC=128, activation='identity', power=4,
-                 stds = [1, 2, 4, 8], mipbias=+0, interp_pyramid=True, lr=0.15):
+                 stds = [1, 2, 4, 8], mipbias=+0.0, interp_pyramid=True, lr=0.15):
         super().__init__()
         self.num_levels = num_levels
         self.interp_pyramid = interp_pyramid
@@ -151,23 +152,32 @@ class HierarchicalCubeMap(torch.nn.Module):
     def upsample(self, bg_resolution):
         return
 
-    def sa2mip(self, saSample):
-        res = self.bg_mats[-1].shape[-2]
-        saTexel = 4 * math.pi / (6*res*res)
+    def sa2mip(self, u, saSample):
+        h, w = self.bg_mats[-1].shape[-2], self.bg_mats[-1].shape[-3]
+        saTexel = 4 * math.pi / (6*h*w) * 4
+        # TODO calculate distortion of cube map for saTexel
+        distortion = 4 * math.pi / 6
+        # saTexel is the ratio to the solid angle subtended by one pixel of the 0th mipmap level
+        num_pixels = self.bg_mats[-1].numel() // 3
+        # saTexel = distortion / num_pixels
         # miplevel = (torch.log(saSample / saTexel) / math.log(self.power) / self.power).clip(0, self.num_levels-5)
         # mip level is 0 when it wants the full image and inf when it wants just the color
         # miplevel = (torch.log(saSample / saTexel) / math.log(self.power) / 2).clip(0, self.num_levels-1)
-        miplevel = (torch.log(saSample / saTexel) / math.log(self.power))/2 + self.mipbias
+        # miplevel = (torch.log(torch.sqrt(saSample / saTexel)) / math.log(self.power))/2 + self.mipbias
+        miplevel = ((saSample - math.log(saTexel)) / math.log(self.power))/2 + self.mipbias
+        # miplevel *= 0
         miplevel = miplevel.clip(0, self.max_mip-1)
         # miplevel = (torch.log(saSample / saTexel) / math.log(self.power) / 2).clip(self.num_levels, self.max_mip)
         # miplevel = (torch.log(saSample / saTexel) / math.log(self.power) / 2).clip(0, 0)
+        # ic(miplevel.mean(), (saSample/saTexel).mean(), saTexel, saSample.mean())
+        # ic(miplevel, saSample)
         return miplevel
         
     def forward(self, viewdirs, saSample, max_level=None):
         B = viewdirs.shape[0]
         max_level = self.num_levels if max_level is None else max_level
         V = viewdirs.reshape(1, -1, 1, 3).contiguous()
-        miplevel = self.sa2mip(saSample)
+        miplevel = self.sa2mip(viewdirs, saSample)
 
         sumemb = 0
         for bg_mat, mip in self.iter_levels():

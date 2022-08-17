@@ -262,7 +262,7 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
             imageio.imwrite(f'{savePath}/rgbd/{prtx}{idx:03d}.exr', depth_map.numpy())
             imageio.imwrite(f'{savePath}/normal/{prtx}{idx:03d}.png', vis_normal_map)
             imageio.imwrite(f'{savePath}/err/{prtx}{idx:03d}.png', err_map)
-            imageio.imwrite(f'{savePath}/surf_width/{prtx}{idx:03d}.png', (surf_width*2).numpy().astype(np.uint8))
+            imageio.imwrite(f'{savePath}/surf_width/{prtx}{idx:03d}.png', surf_width.numpy().astype(np.uint8))
             imageio.imwrite(f'{savePath}/debug/{prtx}{idx:03d}.png', (255*debug_map.clamp(0, 1).numpy()).astype(np.uint8))
             if tensorf.ref_module is not None:
                 imageio.imwrite(f'{savePath}/envmaps/{prtx}ref_map_{idx:03d}.png', env_map)

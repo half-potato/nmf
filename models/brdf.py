@@ -5,16 +5,23 @@ import torch.nn.functional as F
 import numpy as np
 from .render_modules import positional_encoding, str2fn
 from icecream import ic
+import matplotlib.pyplot as plt
+
+import plotly.express as px
+import plotly.graph_objects as go
 
 def schlick(f0, n, l):
     return f0 + (1-f0)*(1-(n*l).sum(dim=-1, keepdim=True).clip(min=1e-20))**5
 
 def normalize(x):
-    return x / (torch.linalg.norm(x, dim=-1, keepdim=True)+1e-8)
+    return x / (torch.linalg.norm(x, dim=-1, keepdim=True)+1e-20)
 
 def ggx_dist(NdotH, roughness):
+    # takes the cos of the zenith angle between the micro surface and the macro surface
+    # and returns the probability of that micro surface existing
     a2 = roughness**2
-    return a2 / np.pi / ((NdotH**2*(a2-1)+1)**2).clip(min=1e-8)
+    # return a2 / np.pi / ((NdotH**2*(a2-1)+1)**2).clip(min=1e-8)
+    return ((a2 / (NdotH.clip(min=0, max=1)**2*(a2-1)+1))**2).clip(min=0, max=1)
 
 class NormalSampler:
     def __init__(self) -> None:
@@ -52,28 +59,70 @@ class NormalSampler:
 
 class GGXSampler:
     def __init__(self, num_samples) -> None:
-        self.sampler = torch.quasirandom.SobolEngine(dimension=2)
+        self.sampler = torch.quasirandom.SobolEngine(dimension=2, scramble=True)
         self.num_samples = num_samples
         self.angs = self.sampler.draw(num_samples*2)
+        # plt.scatter(self.angs[:, 0], self.angs[:, 1])
+        # plt.show()
 
     def draw(self, B, num_samples):
+        self.angs = self.sampler.draw(num_samples*2)
         angs = self.angs.reshape(1, 2*self.num_samples, 2)[:, :num_samples, :].expand(B, num_samples, 2)
+        self.sampler = torch.quasirandom.SobolEngine(dimension=2, scramble=True)
         # add random offset
-        offset = torch.rand(B, 1, 2)
-        angs = (angs + offset) % 1
+        offset = torch.rand(B, 1, 2)*0.25
+        angs = (angs + offset) % 1.0
         return angs
 
     def sample(self, num_samples, refdirs, viewdir, normal, roughness):
-        # viewdir: (refdirs, 3)
         # viewdir: (B, 3)
         # normal: (B, 3)
         # roughness: B
         device = normal.device
         B = normal.shape[0]
+
+        # establish basis for BRDF
+        z_up = torch.tensor([0.0, 0.0, 1.0], device=device).reshape(1, 3).expand(B, 3)
+        x_up = torch.tensor([1.0, 0.0, 0.0], device=device).reshape(1, 3).expand(B, 3)
+        up = torch.where(normal[:, 2:3] < 0.9, z_up, x_up)
+        tangent = normalize(torch.linalg.cross(up, normal))
+        bitangent = normalize(torch.linalg.cross(normal, tangent))
+        # B, 3, 3
+        row_world_basis = torch.stack([tangent, bitangent, normal], dim=1).reshape(B, 3, 3)
+
+
+        # GGXVNDF
+        V_l = torch.matmul(row_world_basis, viewdir.unsqueeze(-1)).squeeze(-1)
+        V_stretch = normalize(torch.stack([roughness*V_l[..., 0], roughness*V_l[..., 1], V_l[..., 2]], dim=-1)).unsqueeze(1)
+        T1 = torch.where(V_stretch[..., 2:3] < 0.999, normalize(torch.linalg.cross(V_stretch, z_up.unsqueeze(1), dim=-1)), x_up.unsqueeze(1))
+        T2 = normalize(torch.linalg.cross(T1, V_stretch, dim=-1))
+        z = V_stretch[..., 2].reshape(-1, 1)
+        a = 1 / (1+z)
+        angs = self.draw(B, num_samples).to(device)
+        u1 = angs[..., 0]
+        u2 = angs[..., 1]
+
+        r = torch.sqrt(u1)
+        phi = torch.where(u2 < a, u2/a*math.pi, (u2-a)/(1-a)*math.pi + math.pi)
+        P1 = (r*torch.cos(phi)).unsqueeze(-1)
+        P2 = (r*torch.sin(phi)*torch.where(u2 < a, torch.tensor(1.0, device=device), z)).unsqueeze(-1)
+        N_stretch = P1*T1 + P2*T2 + (1 - P1*P1 - P2*P2).clip(min=0).sqrt() * V_stretch
+        H_l = normalize(torch.stack([roughness.unsqueeze(-1)*N_stretch[..., 0], roughness.unsqueeze(-1)*N_stretch[..., 1], N_stretch[..., 2].clip(min=0)], dim=-1))
+        H = torch.einsum('bni,bij->bnj', H_l, row_world_basis)
+
+        V = viewdir.unsqueeze(1)
+        L = (2.0 * (V * H).sum(dim=-1, keepdim=True) * H - V)
+
+        # fig = px.scatter_3d(x=L[0, :, 0].detach().cpu(), y=L[0, :, 1].detach().cpu(), z=L[0, :, 2].detach().cpu())
+        # fig.show()
+        # assert(False)
+        """
+
+
         # adapated from learnopengl.com
         # a = (roughness*roughness).reshape(B, 1).expand(B, num_samples).reshape(-1)
         a = (roughness**2).reshape(B, 1)#.expand(B, num_samples).reshape(-1)
-        angs = self.draw(B, num_samples).to(device)
+
 	    
         phi = 2.0 * math.pi * angs[..., 0]
         cosTheta2 = ((1.0 - angs[..., 1]) / (1.0 + (a - 1.0) * angs[..., 1]).clip(min=1e-8))
@@ -85,28 +134,44 @@ class GGXSampler:
             torch.sin(phi)*sinTheta,
             cosTheta,
         ], dim=-1).reshape(B, num_samples, 3)
+        # ic(torch.arccos(cosTheta))
+        # fig = px.scatter_3d(x=H[0, :, 0].detach().cpu(), y=H[0, :, 1].detach().cpu(), z=H[0, :, 2].detach().cpu())
+        # fig.show()
+        # assert(False)
+        
 	    
         # from tangent-space vector to world-space sample vector
-        # note: it's free to expand
-        z_up = torch.tensor([0.0, 0.0, 1.0], device=device).reshape(1, 3).expand(B, 3)
-        x_up = torch.tensor([1.0, 0.0, 0.0], device=device).reshape(1, 3).expand(B, 3)
-        up = torch.where(normal[:, 2:3] < 0.9, z_up, x_up)
-        tangent = normalize(torch.linalg.cross(up, normal))
-        bitangent = normalize(torch.linalg.cross(normal, tangent))
-
-        sampleVec = tangent.unsqueeze(1) * H[..., 0:1] + bitangent.unsqueeze(1) * H[..., 1:2] + normal.unsqueeze(1) * H[..., 2:3]
+        sampleVec = torch.einsum('bni,bij->bnj', H, row_world_basis)
         sampleVec = normalize(sampleVec)
-        L = normalize(2.0 * (viewdir.unsqueeze(1) * sampleVec).sum(dim=-1, keepdim=True) * sampleVec - viewdir.unsqueeze(1))
-        L[:, 0] = refdirs.reshape(-1, 3)
+        sampleVec[:, 0] = normal
+        V = viewdir.unsqueeze(1)
+        L = (2.0 * (V * sampleVec).sum(dim=-1, keepdim=True) * sampleVec - V)
+        """
 
         # calculate mipval, which will be used to calculate the mip level
-        half = normalize(L + viewdir.reshape(-1, 1, 3))
+        # half is considered to be the microfacet normal
+        # viewdir = incident direction
 
-        NdotH = (half * normal.reshape(-1, 1, 3)).sum(dim=-1).clip(min=1e-8)
-        HdotV = (half * viewdir.reshape(-1, 1, 3)).sum(dim=-1).clip(min=1e-8)
-        D = ggx_dist(NdotH, roughness.reshape(-1, 1))
-        pdf = D * NdotH / 4 / HdotV
-        mipval = 1 / (num_samples * pdf + 1e-6)
+        # H = normalize(L + viewdir.reshape(-1, 1, 3))
+
+        NdotH = ((H * normal.reshape(-1, 1, 3)).sum(dim=-1)+1e-3).clip(min=1e-20, max=1)
+        HdotV = (H * V).sum(dim=-1).abs()
+        NdotV = (normal.reshape(-1, 1, 3) * V).sum(dim=-1).abs().clip(min=1e-20, max=1)
+        D = ggx_dist(NdotH, roughness.reshape(-1, 1).clip(min=1e-3))
+        # ic(NdotH.shape, NdotH, D, D.mean())
+        # px.scatter(x=NdotH[0].detach().cpu().flatten(), y=D[0].detach().cpu().flatten()).show()
+        # assert(False)
+        # ic(NdotH.mean())
+        lpdf = torch.log(D) + torch.log(HdotV) - torch.log(NdotV) - torch.log(roughness.reshape(-1, 1))
+        # pdf = D * HdotV / NdotV / roughness.reshape(-1, 1)
+        # pdf = NdotH / 4 / HdotV
+        # pdf = D# / NdotH
+        mipval = -math.log(num_samples) - lpdf
+        # mipval = 1 / (num_samples * pdf + 1e-6)
+        # px.scatter(x=NdotH.detach().cpu().flatten()[:1000], y=mipval.detach().cpu().flatten()[:1000]).show()
+        # ic(mipval)
+        # assert(False)
+        # ic(D.mean(), mipval.mean(), pdf.mean())
         # ic(mipval.mean(dim=1).squeeze(), roughness)
         # ic(mipval[0, 0], D[0, 0], NdotH[0, 0], HdotV[0, 0])
 
@@ -236,16 +301,21 @@ class MLPBRDF(torch.nn.Module):
                         # torch.nn.BatchNorm1d(featureC)
                     ] for _ in range(num_layers-2)], []),
                 torch.nn.ReLU(inplace=True),
-                torch.nn.Linear(featureC, 6),
+                torch.nn.Linear(featureC, 3),
             )
+            torch.nn.init.constant_(self.mlp[-1].bias, 0)
             self.mlp.apply(self.init_weights)
         else:
             self.mlp = torch.nn.Identity()
-        self.activation = str2fn(activation)
+        # self.activation = str2fn(activation)
 
     def init_weights(self, m):
         if isinstance(m, torch.nn.Linear):
             torch.nn.init.xavier_uniform_(m.weight, gain=np.sqrt(2))
+
+    def activation(self, x):
+        # return torch.tanh(x/10)+1
+        return torch.sigmoid(x+1)
 
     def forward(self, incoming_light, V, L, N, features, matprop, mask, ray_mask):
         # V: (n, 3)-viewdirs, the outgoing light direction
@@ -264,9 +334,9 @@ class MLPBRDF(torch.nn.Module):
 
         cos_lamb = (L * N).sum(dim=-1, keepdim=True).clip(min=1e-8)
         cos_view = (V.reshape(-1, 1, 3) * N).sum(dim=-1, keepdim=True).clip(min=1e-8).expand(n, m, 1)
-        cos_half = (half * N).sum(dim=-1, keepdim=True)
+        NdotH = ((half * N).sum(dim=-1, keepdim=True)+1e-3).clip(min=1e-20, max=1)
 
-        indata = [features, cos_lamb.reshape(-1, 1), cos_view.reshape(-1, 1), cos_half.reshape(-1, 1).abs()]
+        indata = [features, cos_lamb.reshape(-1, 1), cos_view.reshape(-1, 1), torch.arccos(NdotH.reshape(-1, 1).clip(min=-1+1e-8, max=1-1e-8))]
         # indata = [features]
         if self.detach_roughness:
             eroughness = eroughness.detach()
@@ -288,23 +358,25 @@ class MLPBRDF(torch.nn.Module):
             indata += [self.l_encoder(L, eroughness).reshape(B, -1), L]
 
         mlp_in = torch.cat(indata, dim=-1)
-        mlp_out = self.mlp(mlp_in).reshape(n, m, -1)
+        mlp_out = self.mlp(mlp_in)
         mlp_out = self.activation(mlp_out)
+        # ic(mlp_out.mean(dim=0), mlp_out.std(dim=0))
+        mlp_out = mlp_out.reshape(n, m, -1)
         ref_weight = mlp_out[:, :, :3]
-        offset = mlp_out[:, :, 3:6]
+        # offset = mlp_out[:, :, 3:6]
 
         if self.mul_ggx:
-            alph = matprop['roughness'][mask].reshape(-1, 1, 1)
-            half = normalize(L + V)
-            cos_half = (half * N).sum(dim=-1, keepdim=True).reshape(n, m, 1)
-            a2 = alph**2
-            D_ggx = a2 / np.pi / ((cos_half**2*(a2-1)+1)**2).clip(min=1e-8)
-
-            ref_weight = ref_weight*D_ggx
+            D = ggx_dist(NdotH, roughness.reshape(-1, 1, 1))
+            cos_lamb = cos_lamb*D
 
         # ref_weight = ref_weight / (ref_weight.sum(dim=1, keepdim=True).mean(dim=2, keepdim=True)+1e-8)
         # ref_weight = ref_weight * ray_mask / ray_mask.sum(dim=1, keepdim=True)
-        ref_weight = ref_weight / m
-        offset = offset / m
-        spec_color = (ray_mask * incoming_light * ref_weight).sum(dim=1) / ray_mask.sum(dim=1)
+        ref_weight = ref_weight
+        # offset = offset
+        # spec_color = (ray_mask * incoming_light * ref_weight).sum(dim=1) / ray_mask.sum(dim=1)
+        # spec_color = (incoming_light * ref_weight * cos_lamb).sum(dim=1) / cos_lamb.sum(dim=1)
+        # ic((ref_weight * cos_lamb).sum(dim=1) / cos_lamb.sum(dim=1))
+        # ic(cos_lamb)
+        # ic(spec_color.mean(dim=1).mean(dim=0))
+        spec_color = (incoming_light * cos_lamb).sum(dim=1) / cos_lamb.sum(dim=1)
         return spec_color

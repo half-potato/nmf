@@ -14,7 +14,7 @@ def distortion_bidir_kernel(
     ddt: wp.array2d(dtype=float),
     loss: wp.array(dtype=float),
     M: int):
-    b, i = wp.tid()
+    b, i, j = wp.tid()
     mp1 = midpoint[b, i]
     fw1 = full_weight[b, i]
     pdt = dt[b, i]
@@ -22,9 +22,11 @@ def distortion_bidir_kernel(
     inner = fw1 * fw1 * pdt / 3.0
     # backward
     ddt[b, i] = fw1*fw1
-    wp.atomic_add(dw, b, i, 2.0*fw1*pdt / 3.0)
+    dw[b, i] =  2.0*fw1*pdt / 3.0
 
     inter = float(0.0)
+    dw1 = float(0.0)
+    dm1 = float(0.0)
     for j in range(M):
         mp2 = midpoint[b, j]
         fw2 = full_weight[b, j]
@@ -33,19 +35,20 @@ def distortion_bidir_kernel(
         wm = fw1 * fw2
         dut = wp.abs(aut)
         inter += dut * wm
-        wp.atomic_add(dw, b, j, dut*fw1)
-        wp.atomic_add(dw, b, i, dut*fw2)
         s = torch.sign(aut)
 
+        wp.atomic_add(dw, b, j, dut*fw1)
         wp.atomic_add(dm, b, j, -wm * s)
-        wp.atomic_add(dm, b, i, wm * s)
+        dw1 += dut*fw2
+        dm1 += wm * s
+    dw[b, i] = dw1
+    dm[b, i] = dm1
 
     wp.atomic_add(loss, 0, inter+inner)
 
 
 def distortion_bidir(midpoint, full_weight, dt):
     B, M = midpoint.shape
-    BLOCK_SIZE_M = 16
     device = midpoint.device
     device = 'cuda'
     dtype = midpoint.dtype

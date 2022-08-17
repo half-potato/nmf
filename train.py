@@ -125,7 +125,7 @@ def reconstruction(args):
     # TODO REMOVE
     # bg_sd = torch.load('log/mats360_bg.th')
     # from models import bg_modules
-    # bg_module = bg_modules.HierarchicalCubeMap(bg_resolution=1600, num_levels=7, featureC=128, activation='softplus', power=2)
+    # bg_module = bg_modules.HierarchicalCubeMap(bg_resolution=1600, num_levels=7, featureC=128, activation='softplus', power=2, lr=1e-2)
     # bg_module.load_state_dict(bg_sd, strict=False)
     # tensorf.bg_module = bg_module
 
@@ -138,20 +138,6 @@ def reconstruction(args):
     else:
         args.lr_decay_iters = params.n_iters
         lr_factor = args.lr_decay_target_ratio**(1/params.n_iters)
-
-    logger.info("lr decay", args.lr_decay_target_ratio, args.lr_decay_iters)
-    
-    # Set up schedule
-    # uplambda_list = params.uplambda_list
-    # update_AlphaMask_list = params.update_AlphaMask_list
-    # bounce_n_list = params.bounce_n_list
-    #linear in logrithmic space
-    # l_list = torch.linspace(0.7, 0.0, len(uplambda_list)+1).tolist()
-    # TODO FIX
-    # l_list = torch.linspace(0.8, 0.5, len(uplambda_list)+1).tolist()
-    # l_list = torch.linspace(params.lambda_start, params.lambda_end, len(uplambda_list)+1).tolist()
-    # tensorf.l = l_list.pop(0)
-    # tensorf.max_bounce_rays = bounce_n_list.pop(0)
 
     # smoothing_vals = [0.6, 0.7, 0.8, 0.7, 0.5]
     upsamp_bg = hasattr(params, 'bg_upsamp_res') and tensorf.bg_module is not None
@@ -252,8 +238,8 @@ def reconstruction(args):
     # scheduler = lr_scheduler.SequentialLR(optimizer, schedulers=[scheduler1, scheduler2], milestones=[3000])
     scheduler = lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=params.n_iters, T_mult=1, eta_min=1e-3)
     # scheduler = lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=1000, T_mult=1, eta_min=1e-3)
-    # if True:
-    with torch.autograd.detect_anomaly():
+    if True:
+    # with torch.autograd.detect_anomaly():
         for iteration in pbar:
 
             ray_idx, rgb_idx = trainingSampler.nextids()

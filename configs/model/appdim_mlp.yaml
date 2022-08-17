@@ -10,7 +10,7 @@ arch:
   fea2denseAct: 'softplus_shift'
   # fea2denseAct: 'relu_shift'
   max_recurs: 2
-  roughness_rays: 100
+  roughness_rays: 1000
   infinity_border: False
   enable_alpha_mask: false
   appdim_noise_std: 0.0
@@ -28,6 +28,7 @@ arch:
     _target_: samplers.alphagrid.AlphaGridSampler
     enable_alpha_mask: False
     nEnvSamples: 0
+    near_far: [2, 4]
     # _target_: samplers.raymarch.Raymarcher
 
   rf:
@@ -86,14 +87,14 @@ arch:
     # l_encoder:
     #   _target_: models.ish.ListISH
     #   degs: [0,1,2,4,8,16]
-    num_layers: 5
-    feape: 2
+    num_layers: 3
+    feape: 0
     featureC: 128
     activation: 'softplus'
-    mul_ggx: False
+    mul_ggx: True
     use_roughness: true
     detach_roughness: false
-    lr: 1e-3
+    lr: 1e-5
 
   bg_module:
     _target_: models.bg_modules.HierarchicalCubeMap
@@ -103,7 +104,8 @@ arch:
     power: 2
     stds: []
     # lr: 0.30
-    lr: 0.05
+    # lr: 0.05
+    lr: 1e-2
 
   diffuse_module:
     _partial_: True
