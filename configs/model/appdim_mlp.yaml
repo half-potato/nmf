@@ -10,7 +10,7 @@ arch:
   fea2denseAct: 'softplus_shift'
   # fea2denseAct: 'relu_shift'
   max_recurs: 2
-  roughness_rays: 1000
+  roughness_rays: 200
   infinity_border: False
   enable_alpha_mask: false
   appdim_noise_std: 0.0
@@ -48,6 +48,14 @@ arch:
     # N_voxel_final: 134217728 # 300**3
     upsamp_list: [3000,4000,5500,7000]
 
+  # brdf_sampler:
+  #   _target_: modules.brightness_sampler.BrightnessSampler
+  #   _partial_: True
+  #   n: 20
+  #   decay: 0.99
+  #   sampler:
+  #     _target_: models.brdf.GGXSampler
+  #     _partial_: True
   brdf_sampler:
     _target_: models.brdf.GGXSampler
     _partial_: True

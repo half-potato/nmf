@@ -123,11 +123,11 @@ def reconstruction(args):
         grid_size = N_to_reso(params.N_voxel_final, tensorf.rf.aabb)
         tensorf.rf.update_stepSize(grid_size)
     # TODO REMOVE
-    # bg_sd = torch.load('log/mats360_bg.th')
-    # from models import bg_modules
-    # bg_module = bg_modules.HierarchicalCubeMap(bg_resolution=1600, num_levels=7, featureC=128, activation='softplus', power=2, lr=1e-2)
-    # bg_module.load_state_dict(bg_sd, strict=False)
-    # tensorf.bg_module = bg_module
+    bg_sd = torch.load('log/mats360_bg.th')
+    from models import bg_modules
+    bg_module = bg_modules.HierarchicalCubeMap(bg_resolution=2048, num_levels=1, featureC=128, activation='softplus', power=2, lr=1e-2)
+    bg_module.load_state_dict(bg_sd, strict=False)
+    tensorf.bg_module = bg_module
 
     tensorf = tensorf.to(device)
 

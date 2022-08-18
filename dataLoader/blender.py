@@ -154,7 +154,7 @@ class BlenderDataset(Dataset):
     def define_proj_mat(self):
         self.proj_mat = self.intrinsics.unsqueeze(0) @ torch.inverse(self.poses)[:,:3]
 
-    def world2ndc(self,points,lindisp=None):
+    def world2ndc(self,points, lindisp=None):
         device = points.device
         return (points - self.center.to(device)) / self.radius.to(device)
         

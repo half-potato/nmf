@@ -61,18 +61,21 @@ class GGXSampler:
     def __init__(self, num_samples) -> None:
         self.sampler = torch.quasirandom.SobolEngine(dimension=2, scramble=True)
         self.num_samples = num_samples
-        self.angs = self.sampler.draw(num_samples*2)
+        self.angs = self.sampler.draw(num_samples)
         # plt.scatter(self.angs[:, 0], self.angs[:, 1])
         # plt.show()
 
     def draw(self, B, num_samples):
-        self.angs = self.sampler.draw(num_samples*2)
-        angs = self.angs.reshape(1, 2*self.num_samples, 2)[:, :num_samples, :].expand(B, num_samples, 2)
+        self.angs = self.sampler.draw(self.num_samples)
+        angs = self.angs.reshape(1, self.num_samples, 2)[:, :num_samples, :].expand(B, num_samples, 2)
         self.sampler = torch.quasirandom.SobolEngine(dimension=2, scramble=True)
         # add random offset
         offset = torch.rand(B, 1, 2)*0.25
         angs = (angs + offset) % 1.0
         return angs
+
+    def update(self, *args, **kwargs):
+        pass
 
     def sample(self, num_samples, refdirs, viewdir, normal, roughness):
         # viewdir: (B, 3)
@@ -112,41 +115,6 @@ class GGXSampler:
 
         V = viewdir.unsqueeze(1)
         L = (2.0 * (V * H).sum(dim=-1, keepdim=True) * H - V)
-
-        # fig = px.scatter_3d(x=L[0, :, 0].detach().cpu(), y=L[0, :, 1].detach().cpu(), z=L[0, :, 2].detach().cpu())
-        # fig.show()
-        # assert(False)
-        """
-
-
-        # adapated from learnopengl.com
-        # a = (roughness*roughness).reshape(B, 1).expand(B, num_samples).reshape(-1)
-        a = (roughness**2).reshape(B, 1)#.expand(B, num_samples).reshape(-1)
-
-	    
-        phi = 2.0 * math.pi * angs[..., 0]
-        cosTheta2 = ((1.0 - angs[..., 1]) / (1.0 + (a - 1.0) * angs[..., 1]).clip(min=1e-8))
-        cosTheta = torch.sqrt(cosTheta2.clip(min=1e-8))
-        sinTheta = torch.sqrt((1.0 - cosTheta2).clip(min=1e-8))
-
-        H = torch.stack([
-            torch.cos(phi)*sinTheta,
-            torch.sin(phi)*sinTheta,
-            cosTheta,
-        ], dim=-1).reshape(B, num_samples, 3)
-        # ic(torch.arccos(cosTheta))
-        # fig = px.scatter_3d(x=H[0, :, 0].detach().cpu(), y=H[0, :, 1].detach().cpu(), z=H[0, :, 2].detach().cpu())
-        # fig.show()
-        # assert(False)
-        
-	    
-        # from tangent-space vector to world-space sample vector
-        sampleVec = torch.einsum('bni,bij->bnj', H, row_world_basis)
-        sampleVec = normalize(sampleVec)
-        sampleVec[:, 0] = normal
-        V = viewdir.unsqueeze(1)
-        L = (2.0 * (V * sampleVec).sum(dim=-1, keepdim=True) * sampleVec - V)
-        """
 
         # calculate mipval, which will be used to calculate the mip level
         # half is considered to be the microfacet normal

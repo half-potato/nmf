@@ -18,19 +18,21 @@ epochs = 5000
 # bg_module = render_modules.BackgroundRender(3, render_modules.CubeUnwrap(), bg_resolution=2*1024, featureC=128, num_layers=0)
 tm = tonemap.LinearTonemap()
 # bg_module = bg_modules.HierarchicalCubeMap(bg_resolution=1600, num_levels=3, featureC=128, activation='softplus', power=4)
-bg_module = bg_modules.HierarchicalCubeMap(bg_resolution=1600, num_levels=7, featureC=128, activation='softplus', power=2)
+# bg_module = bg_modules.HierarchicalCubeMap(bg_resolution=1600, num_levels=5, featureC=128, activation='softplus', power=2)
+bg_module = bg_modules.HierarchicalCubeMap(bg_resolution=2048, num_levels=1, featureC=128, activation='softplus', power=2)
+# bg_module = bg_modules.HierarchicalBG(3, bg_modules.DualParaboloidUnwrap(b=1.01), bg_resolution=2000, num_levels=5, activation='softplus', power=2)
 
 # bg_module = bg_modules.HierarchicalCubeMap(bg_resolution=2048, num_levels=5, featureC=128, activation='softplus', power=2)
 # bg_module = render_modules.MLPRender_FP(0, None, ish.ListISH([0,1,2,4,8,16]), -1, 256, 6)
 ic(bg_module)
 bg_module = bg_module.to(device)
 pano = imageio.imread("ninomaru_teien_4k.exr")
-optim = torch.optim.Adam(bg_module.parameters(), lr=0.15)
+optim = torch.optim.Adam(bg_module.parameters(), lr=0.111)
 # optim = torch.optim.Adam(bg_module.parameters(), lr=1.0)
 # optim = torch.optim.SGD(bg_module.parameters(), lr=0.5, momentum=0.99, weight_decay=0)
 # optim = torch.optim.Adam(bg_module.parameters(), lr=0.001)
 # scheduler = torch.optim.lr_scheduler.StepLR(optim, step_size=5, gamma=0.94)
-scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optim, T_max=epochs)
+scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optim, T_max=epochs, eta_min=0.01)
 # ic(bg_module.bg_mats[-1].shape, pano.shape)
 
 H, W, C = pano.shape
@@ -71,6 +73,8 @@ class SimpleSampler:
 kappa = torch.tensor(20, device=device)
 sampler = SimpleSampler(N, batch_size)
 iter = tqdm(range(epochs))
+loss_fn = torch.nn.HuberLoss()
+r_v = 1e-5
 for i in iter:
     inds = sampler.nextids()
     samp = colors[inds]
@@ -92,13 +96,15 @@ for i in iter:
         -torch.sin(theta),
     ], dim=1)
     samp_vecs = vecs
-    roughness = 1e-16*torch.ones(theta.shape[0], device=device)
-    output = bg_module(samp_vecs, roughness)
+    roughness = r_v*torch.ones(theta.shape[0], device=device)
+    r_v *= 0.99
+    output = bg_module(samp_vecs, torch.log(roughness))
     # viewdotnorm = torch.ones_like(theta).reshape(-1, 1)
     # roughness = 0.01*torch.ones_like(theta).reshape(-1, 1)
     # output = bg_module(pts=torch.zeros_like(vecs), viewdirs=None, features=None, refdirs=samp_vecs, roughness=roughness, viewdotnorm=viewdotnorm)
 
-    loss = torch.sqrt((output - samp)**2+1e-8).mean()
+    # loss = torch.sqrt((output - samp)**2+1e-8).mean()
+    loss = loss_fn(output, samp)
     photo_loss = torch.sqrt((output.clip(0, 1) - samp.clip(0, 1))**2+1e-8).mean()
     loss.backward()
     optim.step()
@@ -107,16 +113,18 @@ for i in iter:
     iter.set_description(f"PSNR: {psnr}. LR: {scheduler.get_last_lr()}")
     scheduler.step()
 
+bg_module.reinit_mip_levels()
+
 torch.save(bg_module.state_dict(), 'log/mats360_bg.th')
 bg_module.save(Path('log/cubed'), tonemap=tm)
 bg_resolution = bg_module.bg_mats[-1].shape[2]
 # save
-for i, (convmat, mip) in enumerate(bg_module.create_pyramid()):
-    ic(mip)
-    convmat = convmat.squeeze(0).permute(0, 3, 1, 2)
-    bg_mat = torch.cat(convmat.unbind(0), dim=2).permute(1, 2, 0)
-    bg_mat = tm(bg_mat)
-    im = (255*(bg_mat)).short()
-    im = im.cpu().numpy()
-    im = cv2.cvtColor(im.astype(np.uint8), cv2.COLOR_RGB2BGR)
-    cv2.imwrite(str(f'log/cubed/blur{i}.png'), im)
+# for i, (convmat, mip) in enumerate(bg_module.create_pyramid()):
+#     ic(mip)
+#     convmat = convmat.squeeze(0).permute(0, 3, 1, 2)
+#     bg_mat = torch.cat(convmat.unbind(0), dim=2).permute(1, 2, 0)
+#     bg_mat = tm(bg_mat)
+#     im = (255*(bg_mat)).short()
+#     im = im.cpu().numpy()
+#     im = cv2.cvtColor(im.astype(np.uint8), cv2.COLOR_RGB2BGR)
+#     cv2.imwrite(str(f'log/cubed/blur{i}.png'), im)

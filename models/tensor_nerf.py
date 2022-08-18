@@ -453,7 +453,7 @@ class TensorNeRF(torch.nn.Module):
             reflect_rgb = torch.zeros_like(diffuse)
             roughness = matprop['roughness']
             roughness = torch.where((xyz_sampled[..., 0].abs() < 0.15) | (xyz_sampled[..., 1].abs() < 0.15), 0.30, 0.15)[papp_mask]
-            roughness = 1e-2*torch.ones_like(roughness)
+            # roughness = 1e-2*torch.ones_like(roughness)
             if recur >= self.max_recurs and self.ref_module is None:
                 ratio_diffuse = 1
                 ratio_reflected = 0
@@ -509,10 +509,12 @@ class TensorNeRF(torch.nn.Module):
                         # apply ray mask
                         incoming_light[:, self.world_bounces:, :] = self.render_just_bg(
                                 bounce_rays[:, self.world_bounces:, :].reshape(-1, D),
-                                mipval[:, self.world_bounces:].reshape(-1, 1)
+                                mipval[:, self.world_bounces:].reshape(-1)
                             ).reshape(-1, num_roughness_rays-self.world_bounces, 3)
                     else:
-                        incoming_light = self.render_just_bg(bounce_rays.reshape(-1, D), mipval).reshape(-1, num_roughness_rays, 3)
+                        incoming_light = self.render_just_bg(bounce_rays.reshape(-1, D), mipval.reshape(-1)).reshape(-1, num_roughness_rays, 3)
+
+                    self.brdf_sampler.update(bounce_rays[..., :3].reshape(-1, 3), mipval.reshape(-1), incoming_light.reshape(-1, 3))
                     # miplevel = self.bg_module.sa2mip(mipval)
                     # debug[full_bounce_mask][..., 0] += miplevel.mean(dim=1) / (self.bg_module.max_mip-1)
                     
