@@ -226,14 +226,15 @@ class MLPDiffuse(torch.nn.Module):
         mlp_out = self.mlp(mlp_in)
         rgb = torch.sigmoid(mlp_out)
 
-        ambient = F.softplus(mlp_out[..., 6:7])
+        # ambient = F.softplus(mlp_out[..., 6:7]-3)
+        ambient = torch.sigmoid(mlp_out[..., 6:7]-2)
         refraction_index = F.softplus(mlp_out[..., 7:8]-1) + self.min_refraction_index
         reflectivity = 50*F.softplus(mlp_out[..., 8:9])
         # roughness = F.softplus(mlp_out[..., 10:11]-1)
-        roughness = torch.sigmoid(mlp_out[..., 10:11]).clip(min=1e-2)
+        roughness = torch.sigmoid(mlp_out[..., 10:11]-2).clip(min=1e-2)
         f0 = torch.sigmoid(mlp_out[..., 11:14])
+        # albedo = F.softplus(mlp_out[..., 14:17]-2)
         albedo = torch.sigmoid(mlp_out[..., 14:17])
-        # ambient = torch.sigmoid(mlp_out[..., 9:10])
         ratio_diffuse = rgb[..., 9:10]
         if self.unlit_tint:
             h = mlp_out[..., 3]

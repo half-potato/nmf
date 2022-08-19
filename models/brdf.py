@@ -96,20 +96,25 @@ class GGXSampler:
 
 
         # GGXVNDF
+        # V_l = torch.matmul(torch.inverse(row_world_basis.permute(0, 2, 1)), viewdir.unsqueeze(-1)).squeeze(-1)
+        # ic((normal*viewdir).sum(dim=-1).min(), (normal*viewdir).sum(dim=-1).max())
+        # ic(1, V_l.min(dim=0), V_l.max(dim=0))
         V_l = torch.matmul(row_world_basis, viewdir.unsqueeze(-1)).squeeze(-1)
+        # ic(2, V_l.min(dim=0), V_l.max(dim=0))
         V_stretch = normalize(torch.stack([roughness*V_l[..., 0], roughness*V_l[..., 1], V_l[..., 2]], dim=-1)).unsqueeze(1)
         T1 = torch.where(V_stretch[..., 2:3] < 0.999, normalize(torch.linalg.cross(V_stretch, z_up.unsqueeze(1), dim=-1)), x_up.unsqueeze(1))
         T2 = normalize(torch.linalg.cross(T1, V_stretch, dim=-1))
         z = V_stretch[..., 2].reshape(-1, 1)
-        a = (1 / (1+z).clip(min=1e-5)).clip(min=1e-5, max=1e5)
+        a = (1 / (1+z.detach()).clip(min=1e-5)).clip(max=1e4)
         angs = self.draw(B, num_samples).to(device)
         u1 = angs[..., 0]
         u2 = angs[..., 1]
 
         r = torch.sqrt(u1)
-        phi = torch.where(u2 < a, u2/a*math.pi, (u2-a)/(1-a).clip(min=1e-5)*math.pi + math.pi)
+        phi = torch.where(u2 < a, u2/a*math.pi, (u2-a)/(1-a)*math.pi + math.pi)
         P1 = (r*safemath.safe_cos(phi)).unsqueeze(-1)
         P2 = (r*safemath.safe_sin(phi)*torch.where(u2 < a, torch.tensor(1.0, device=device), z)).unsqueeze(-1)
+        # ic((1-a).min(), a.min(), a.max(), phi.min(), phi.max(), (1-a).max())
         N_stretch = P1*T1 + P2*T2 + (1 - P1*P1 - P2*P2).clip(min=0).sqrt() * V_stretch
         H_l = normalize(torch.stack([roughness.unsqueeze(-1)*N_stretch[..., 0], roughness.unsqueeze(-1)*N_stretch[..., 1], N_stretch[..., 2].clip(min=0)], dim=-1))
         H = torch.einsum('bni,bij->bnj', H_l, row_world_basis)
@@ -292,7 +297,7 @@ class MLPBRDF(torch.nn.Module):
         # ic(x, y)
         # return y
         # return torch.sigmoid(x+1)
-        return F.softplus(x+1.0)
+        return F.softplus(x+0.0)
 
     def forward(self, incoming_light, V, L, N,
             features, roughness, matprop, mask, ray_mask):
@@ -359,5 +364,7 @@ class MLPBRDF(torch.nn.Module):
         # offset = offset
         # spec_color = (ray_mask * incoming_light * ref_weight).sum(dim=1) / ray_mask.sum(dim=1)
         spec_color = (incoming_light * ref_weight * LdotN).sum(dim=1) / LdotN.sum(dim=1)
+        # ic(spec_color.mean(dim=1).mean(dim=0))
+        # ic(incoming_light.mean(dim=1).mean(dim=0))
         # spec_color = (incoming_light * LdotN).sum(dim=1) / LdotN.sum(dim=1)
         return spec_color

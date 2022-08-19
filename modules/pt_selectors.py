@@ -7,12 +7,12 @@ class Selector:
         self.val_thres = val_thres
         self.weight_thres = weight_thres
 
-    def __call__(self, app_mask, weight, val):
+    def __call__(self, app_mask, weight, VdotL, val):
         # app_mask: (B, N) with M true elements
         # weight: (B, N)
         # val: (M)
         # bounce_mask: (M)
-        bounce_mask = self._forward(app_mask, weight, val)
+        bounce_mask = self._forward(app_mask, weight, VdotL, val)
 
         # derived masks
         full_bounce_mask = torch.zeros_like(app_mask)
@@ -24,7 +24,7 @@ class Selector:
         return bounce_mask, full_bounce_mask, inv_full_bounce_mask
 
 class TopNCombined(Selector):
-    def _forward(self, app_mask, weight, prob):
+    def _forward(self, app_mask, weight, VdotL, prob):
         # N: int max number of selected
         # t: threshold
 
@@ -41,17 +41,18 @@ class TopNCombined(Selector):
         return bounce_mask
 
 class TopNWeight(Selector):
-    def _forward(self, app_mask, weight, prob):
+    def _forward(self, app_mask, weight, VdotL, prob):
         pweight = weight[app_mask]
-        bounce_mask = pweight > self.weight_thres
+        nmask = (VdotL.reshape(pweight.shape)) > 0
+        bounce_mask = (pweight > self.weight_thres) & nmask
         if bounce_mask.sum() > self.max_selected:
-            sweight, _ = torch.sort(-pweight.flatten())
+            sweight, _ = torch.sort(-pweight[nmask].flatten())
             t = -sweight[self.max_selected]
-            bounce_mask = pweight > t
+            bounce_mask = pweight * nmask > t
         return bounce_mask
 
 class TopNRoughness(Selector):
-    def _forward(self, app_mask, weight, prob):
+    def _forward(self, app_mask, weight, VdotL, prob):
         bounce_mask = prob > self.val_thres
         if bounce_mask.sum() > self.max_selected:
             sprob, _ = torch.sort(-prob.flatten())
@@ -64,7 +65,7 @@ class Surface(Selector):
         super().__init__(max_selected=max_selected, eps=eps, weight_thres=weight_thres, **kwargs)
         self.eps = eps
 
-    def _forward(self, app_mask, weight, prob):
+    def _forward(self, app_mask, weight, VdotL, prob):
         thres = torch.max(weight, dim=1, keepdim=True).values - self.eps
         ssort, _ = torch.sort(-weight.flatten())
         t = -ssort[self.max_selected]

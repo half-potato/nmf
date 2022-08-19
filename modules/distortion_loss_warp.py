@@ -66,10 +66,11 @@ def distortion_bidir(midpoint, full_weight, dt):
               dim=(B, M),
               inputs=[midpoint_wp, full_weight_wp, dt_wp, dm, dw, ddt, loss, M],
               device=device)
-    loss = wp.to_torch(loss)
-    dm = wp.to_torch(dm)
-    dw = wp.to_torch(dw)
-    ddt = wp.to_torch(ddt)
+    n = B
+    loss = wp.to_torch(loss)/n
+    dm = wp.to_torch(dm)/n
+    dw = wp.to_torch(dw)/n
+    ddt = wp.to_torch(ddt)/n
 
     return loss, dm, dw, ddt
 
@@ -87,9 +88,6 @@ class _DistortionLoss(torch.autograd.Function):
     @staticmethod
     def backward(ctx, daccum):
         dm, dw, dt = ctx.saved_tensors
-        # ic(dm.mean(), dw.mean(), dt.mean())
-        if torch.isnan(dm).any() or torch.isnan(dw).any() or torch.isnan(dt).any():
-            print("HI")
         return daccum * dm, daccum * dw, daccum * dt
 
 distortion_loss = _DistortionLoss.apply

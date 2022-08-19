@@ -395,10 +395,10 @@ class TensorNeRF(torch.nn.Module):
         full_weight = torch.cat([weight, 1-weight.sum(dim=1, keepdim=True)], dim=1)
         # floater_loss = lossfun_distortion(midpoint, full_weight, dt).clip(min=self.max_floater_loss)
         # TODO REMOVE
-        # floater_loss = torch.tensor(0.0, device=device) 
-        floater_loss = distortion_loss(midpoint, full_weight, dt) if is_train else torch.tensor(0.0, device=device) 
-        # ic(fl, floater_loss)
-        # floater_loss2 = lossfun_distortion2(z_vals, weight, dists).clip(min=self.max_floater_loss)
+        if is_train:
+            floater_loss = distortion_loss(midpoint, full_weight, dt) if is_train else torch.tensor(0.0, device=device) 
+        else:
+            floater_loss = torch.tensor(0.0, device=device) 
 
         # app stands for appearance
         app_mask = (weight > self.rayMarch_weight_thres)
@@ -449,7 +449,8 @@ class TensorNeRF(torch.nn.Module):
             # calculate reflected ray direction
             V = -viewdirs[app_mask]
             L = v_world_normal[app_mask]
-            refdirs = 2 * (V * L).sum(-1, keepdim=True) * L - V
+            VdotL = (V * L).sum(-1, keepdim=True)
+            refdirs = 2 * VdotL * L - V
 
             reflect_rgb = torch.zeros_like(diffuse)
             roughness = matprop['roughness'].squeeze(-1)
@@ -473,7 +474,7 @@ class TensorNeRF(torch.nn.Module):
                 ratio_diffuse = matprop['ratio_diffuse']
                 ratio_reflected = 1 - ratio_diffuse
                 bounce_mask, full_bounce_mask, inv_full_bounce_mask = self.selector(
-                        app_mask, weight.detach(), 1-roughness.detach())
+                        app_mask, weight.detach(), VdotL, 1-roughness.detach())
                 # if the bounce is not calculated, set the ratio to 0 to make sure we don't get black spots
                 # if not bounce_mask.all() and not is_train:
                 #     ratio_diffuse[~bounce_mask] += ratio_reflected[~bounce_mask]
@@ -535,9 +536,9 @@ class TensorNeRF(torch.nn.Module):
                     # s = incoming_light[:, 0]
                     debug[full_bounce_mask] += s# / (s+1)
                     # debug[full_bounce_mask] += bounce_rays[:, 0, 3:6]/2 + 0.5
-                    # reflect_rgb[bounce_mask] = tint[bounce_mask] * tinted_ref_rgb
+                    reflect_rgb[bounce_mask] = tint[bounce_mask] * tinted_ref_rgb
                     # reflect_rgb[bounce_mask] = incoming_light.mean(dim=1)
-                    reflect_rgb[bounce_mask] = tinted_ref_rgb
+                    # reflect_rgb[bounce_mask] = tinted_ref_rgb
                     # reflect_rgb[bounce_mask] = s
 
                     # m = full_bounce_mask.sum(dim=1) > 0
@@ -560,7 +561,7 @@ class TensorNeRF(torch.nn.Module):
                 bounce_count = bounce_mask.sum()
             # this is a modified rendering equation where the emissive light and light under the integral is all multiplied by the base color
             # in addition, the light is interpolated between emissive and reflective
-            reflectivity = matprop['reflectivity']
+            # reflectivity = matprop['reflectivity']
             # rgb[app_mask] = tint * ((1-reflectivity)*matprop['ambient'] + reflectivity * reflect_rgb)
             # rgb[app_mask] = reflect_rgb + matprop['diffuse']
             rgb[app_mask] = reflect_rgb# + matprop['diffuse']
@@ -672,7 +673,7 @@ class TensorNeRF(torch.nn.Module):
             recur=recur,
             acc_map=acc_map.detach().cpu(),
             roughness=roughness.mean(),
-            diffuse_reg=roughness.mean() - reflectivity.mean() + diffuse.mean(),# + ((tint_brightness-0.5)**2).mean(),
+            diffuse_reg=roughness.mean() + diffuse.mean(),# + ((tint_brightness-0.5)**2).mean(),
             normal_loss=normal_loss,
             backwards_rays_loss=backwards_rays_loss,
             termination_xyz=termination_xyz,

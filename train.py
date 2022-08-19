@@ -208,19 +208,19 @@ def reconstruction(args):
     if args.ckpt is None:
         space_optim = torch.optim.Adam(tensorf.parameters(), lr=0.01, betas=(0.9,0.99))
         pbar = tqdm(range(1000))
-        xyz = torch.rand(5000, 3, device=device)*2-1
         for _ in pbar:
+            xyz = torch.rand(20000, 3, device=device)*2-1
             sigma_feat = tensorf.rf.compute_densityfeature(xyz)
 
-            sigma = 1-torch.exp(-sigma_feat * 0.025 * tensorf.rf.distance_scale)
+            alpha = 1-torch.exp(-sigma_feat * 0.015 * tensorf.rf.distance_scale)
             # sigma = 1-torch.exp(-sigma_feat)
             # sigma = sigma_feat
             # loss = (sigma-torch.rand_like(sigma)*args.start_density).abs().mean()
-            loss = (sigma-params.start_density).abs().mean()
+            loss = (alpha-params.start_density).abs().mean()
             # loss = (-sigma[mask].clip(max=1).sum() + sigma[~mask].clip(min=1e-8).sum())
             space_optim.zero_grad()
             loss.backward()
-            pbar.set_description(f"Mean sigma: {sigma.detach().mean().item():.06f}.")
+            pbar.set_description(f"Mean alpha: {alpha.detach().mean().item():.06f}.")
             space_optim.step()
     # tensorf.sampler.mark_untrained_grid(train_dataset.poses, train_dataset.intrinsics)
     tensorf.sampler.update(tensorf.rf)
@@ -237,11 +237,14 @@ def reconstruction(args):
     # scheduler = lr_scheduler.SequentialLR(optimizer, schedulers=[scheduler1, scheduler2], milestones=[3000])
     scheduler = lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=params.n_iters, T_mult=1, eta_min=1e-3)
     # scheduler = lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=1000, T_mult=1, eta_min=1e-3)
-    # if True:
-    with torch.autograd.detect_anomaly():
+    if True:
+    # with torch.autograd.detect_anomaly():
         for iteration in pbar:
 
-            ray_idx, rgb_idx = trainingSampler.nextids()
+            if iteration < 300:
+                ray_idx, rgb_idx = trainingSampler.nextids(batch=args.batch_size//3)
+            else:
+                ray_idx, rgb_idx = trainingSampler.nextids()
 
             # patches = allrgbs[ray_idx].reshape(-1, args.bundle_size, args.bundle_size, 3)
             # plt.imshow(patches[0])
@@ -288,6 +291,7 @@ def reconstruction(args):
                     params.floater_lambda*floater_loss + \
                     params.backwards_rays_lambda*backwards_rays_loss + \
                     params.diffuse_lambda * diffuse_reg
+                # ic(total_loss, params.normal_lambda*normal_loss, params.floater_lambda*floater_loss, params.backwards_rays_lambda*backwards_rays_loss, params.diffuse_lambda*diffuse_reg)
 
                 if ortho_reg_weight > 0:
                     loss_reg = tensorf.rf.vector_comp_diffs()

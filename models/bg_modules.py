@@ -112,7 +112,7 @@ class HierarchicalCubeMap(torch.nn.Module):
 
     def activation_fn(self, x):
         # return F.softplus(x-10, beta=0.2)
-        return F.softplus(x+1.0, beta=6)
+        return F.softplus(x, beta=6)
 
     def calc_weight(self, mip):
         # return 1/2**(self.num_levels-mip)

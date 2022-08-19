@@ -217,7 +217,6 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
         if gt_rgb is not None:
             try:
                 gt_normal_map = test_dataset.get_normal(im_idx)
-                vis_normal_map = (gt_normal_map * 127 + 128).clamp(0, 255).byte()
                 # vis_gt_normal_map = (gt_normal_map * 127 + 128).clamp(0, 255).byte()
                 # X = normal_map.reshape(-1, 3)
                 # Y = gt_normal_map.reshape(-1, 3)
