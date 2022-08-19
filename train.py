@@ -271,12 +271,14 @@ def reconstruction(args):
                 floater_loss = data['floater_loss'].mean()
                 diffuse_reg = data['diffuse_reg'].mean()
                 rgb_map = data['rgb_map']
+                if not train_dataset.hdr:
+                    rgb_map = rgb_map.clip(0, 1)
                 whole_valid = data['whole_valid'] 
                 if params.charbonier_loss:
                     loss = torch.sqrt((rgb_map - rgb_train[whole_valid]) ** 2 + params.charbonier_eps**2).mean()
                 else:
-                    loss = ((rgb_map - rgb_train[whole_valid]) ** 2).mean()
-                # ic(F.huber_loss(rgb_map, rgb_train, delta=1, reduction='none'))
+                    # loss = ((rgb_map - rgb_train[whole_valid]) ** 2).mean()
+                    loss = F.huber_loss(rgb_map, rgb_train, delta=1, reduction='mean')
                 # loss = torch.sqrt(F.huber_loss(rgb_map, rgb_train, delta=1, reduction='none') + params.charbonier_eps**2).mean()
                 photo_loss = ((rgb_map.clip(0, 1) - rgb_train[whole_valid].clip(0, 1)) ** 2).mean().detach()
                 backwards_rays_loss = data['backwards_rays_loss']
@@ -408,8 +410,8 @@ def reconstruction(args):
 @hydra.main(version_base=None, config_path='configs', config_name='default')
 def train(cfg: DictConfig):
     torch.set_default_dtype(torch.float32)
-    torch.manual_seed(20211202)
-    np.random.seed(20211202)
+    # torch.manual_seed(20211202)
+    # np.random.seed(20211202)
     logger.info(cfg.dataset)
     logger.info(cfg.model)
     cfg.model.arch.rf = cfg.field

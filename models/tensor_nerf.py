@@ -149,9 +149,9 @@ class TensorNeRF(torch.nn.Module):
         if isinstance(self.brdf, torch.nn.Module):
             grad_vars += [{'params': self.brdf.parameters(),
                            'lr': self.brdf.lr}]
-        if isinstance(self.bg_module, torch.nn.Module):
-            grad_vars += [{'params': self.bg_module.parameters(),
-                'lr': self.bg_module.lr, 'name': 'bg'}]
+        # if isinstance(self.bg_module, torch.nn.Module):
+        #     grad_vars += [{'params': self.bg_module.parameters(),
+        #         'lr': self.bg_module.lr, 'name': 'bg'}]
         return grad_vars
 
     def save(self, path, config):
@@ -522,7 +522,7 @@ class TensorNeRF(torch.nn.Module):
                     # incoming_light = ray_mask * incoming_light + (~ray_mask) * incoming_light[:, 0:1, :]
                     ray_mask = ray_mask | True
 
-                    tinted_ref_rgb = self.brdf(incoming_light, V[bounce_mask], bounce_rays[..., 3:6], outward.reshape(-1, 1, 3), noise_app_features[bounce_mask], matprop, bounce_mask, ray_mask)
+                    tinted_ref_rgb = self.brdf(incoming_light, V[bounce_mask], bounce_rays[..., 3:6], outward.reshape(-1, 1, 3), app_features[bounce_mask], roughness, matprop, bounce_mask, ray_mask)
                     s = incoming_light.mean(dim=1)
                     # s = incoming_light.max(dim=1).values
 
@@ -534,16 +534,14 @@ class TensorNeRF(torch.nn.Module):
                     # s = incoming_light[:, 0]
                     debug[full_bounce_mask] += s# / (s+1)
                     # debug[full_bounce_mask] += bounce_rays[:, 0, 3:6]/2 + 0.5
-                    # reflect_rgb[bounce_mask] = tint[bounce_mask] * tinted_ref_rgb
-                    # reflect_rgb[bounce_mask] = incoming_light.mean(dim=1)
                     reflect_rgb[bounce_mask] = tinted_ref_rgb
+                    # reflect_rgb[bounce_mask] = incoming_light.mean(dim=1)
+                    # reflect_rgb[bounce_mask] = tinted_ref_rgb
                     # reflect_rgb[bounce_mask] = s
 
                     # m = full_bounce_mask.sum(dim=1) > 0
                     # LOGGER.log_rays(rays_chunk[m].reshape(-1, D), recur, dict(depth_map=depth_map.detach()[m]))
                     # LOGGER.log_rays(bounce_rays.reshape(-1, D), recur+1, reflect_data)
-                bounce_count = bounce_mask.sum()
-
                 if inv_full_bounce_mask.any():
                     if self.ref_module is not None:
                         # compute other reflections using ref module

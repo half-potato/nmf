@@ -6,6 +6,7 @@ import numpy as np
 from .render_modules import positional_encoding, str2fn
 from icecream import ic
 import matplotlib.pyplot as plt
+from . import safemath
 
 import plotly.express as px
 import plotly.graph_objects as go
@@ -172,7 +173,7 @@ class PBR(torch.nn.Module):
         super().__init__()
         self.lr=0
 
-    def forward(self, incoming_light, V, L, N, features, matprop, mask, ray_mask):
+    def forward(self, incoming_light, V, L, N, features, roughness, matprop, mask, ray_mask):
         # V: (B, 3)-viewdirs, the outgoing light direction
         # L: (B, M, 3) incoming light direction. bounce_rays
         # N: (B, 3) outward normal
@@ -180,8 +181,8 @@ class PBR(torch.nn.Module):
         # mask: mask for matprop
         half = normalize(L + V.reshape(-1, 1, 3))
 
-        cos_lamb = (L * N).sum(dim=-1, keepdim=True).clip(min=1e-8)
-        cos_view = (V.reshape(-1, 1, 3) * N).sum(dim=-1, keepdim=True).clip(min=1e-8)
+        LdotN = (L * N).sum(dim=-1, keepdim=True).clip(min=1e-8)
+        VdotN = (V.reshape(-1, 1, 3) * N).sum(dim=-1, keepdim=True).clip(min=1e-8)
         cos_half = (half * N).sum(dim=-1, keepdim=True)
 
         # compute the BRDF (bidirectional reflectance distribution function)
@@ -201,19 +202,19 @@ class PBR(torch.nn.Module):
         k_d = 1-k_s
 
         # alph = 0*matprop['roughness'][mask].reshape(-1, 1, 1) + 0.1
-        alph = matprop['roughness'][mask].reshape(-1, 1, 1)
+        alph = roughness.reshape(-1, 1, 1)
         a2 = alph**2
         # k = alph**2 / 2 # ibl
         # a2 = alph**2
         D_ggx = ggx_dist(cos_half, alph)
         k = (alph+1)**2 / 8 # direct lighting
-        G_schlick_smith = 1 / ((cos_view*(1-k)+k)*(cos_lamb*(1-k)+k)).clip(min=1e-8)
+        G_schlick_smith = 1 / ((VdotN*(1-k)+k)*(LdotN*(1-k)+k)).clip(min=1e-8)
         
-        # f_s = D_ggx.clip(min=0, max=1) * G_schlick_smith.clip(min=0, max=1) / (4 * cos_lamb * cos_view).clip(min=1e-8)
-        # f_s = D_ggx / (4 * cos_lamb * cos_view).clip(min=1e-8)
+        # f_s = D_ggx.clip(min=0, max=1) * G_schlick_smith.clip(min=0, max=1) / (4 * LdotN * VdotN).clip(min=1e-8)
+        # f_s = D_ggx / (4 * LdotN * VdotN).clip(min=1e-8)
 
         f_s = D_ggx * G_schlick_smith / 4
-        # f_s = D_ggx / (4 * cos_lamb * cos_view).clip(min=1e-8)
+        # f_s = D_ggx / (4 * LdotN * VdotN).clip(min=1e-8)
 
 
         # the diffuse light is covered by other components of the rendering equation
@@ -230,8 +231,8 @@ class PBR(torch.nn.Module):
         # cos_refl = (bounce_rays[..., 3:6] * refdirs[full_bounce_mask].reshape(-1, 1, 3)).sum(dim=-1, keepdim=True).clip(min=0)
         # ref_rough = roughness[bounce_mask].reshape(-1, 1)
         # phong shading?
-        # ref_weight = (1-ref_rough) * cos_refl + ref_rough * cos_lamb
-        ref_weight = brdf * cos_lamb
+        # ref_weight = (1-ref_rough) * cos_refl + ref_rough * LdotN
+        ref_weight = brdf * LdotN
         spec_color = (incoming_light * ref_weight).sum(dim=1)
         return spec_color
 
@@ -244,7 +245,8 @@ class MLPBRDF(torch.nn.Module):
         self.use_roughness = use_roughness
         self.detach_roughness = detach_roughness
         self.mul_ggx = mul_ggx
-        self.in_mlpC = 2*feape*in_channels + in_channels + (1 if use_roughness else 0) + 3
+        self.in_mlpC = 2*feape*in_channels + in_channels + (1 if use_roughness else 0) + 6
+        # self.in_mlpC = 2*feape*in_channels + (1 if use_roughness else 0) + 6
         self.v_encoder = v_encoder
         self.n_encoder = n_encoder
         self.l_encoder = l_encoder
@@ -282,29 +284,39 @@ class MLPBRDF(torch.nn.Module):
             torch.nn.init.xavier_uniform_(m.weight, gain=np.sqrt(2))
 
     def activation(self, x):
-        # return torch.tanh(x/10)+1
-        return torch.sigmoid(x+1)
+        # y = torch.tanh(x/10)+1
+        # ic(x, y)
+        # return y
+        # return torch.sigmoid(x+1)
+        return F.softplus(x)
 
-    def forward(self, incoming_light, V, L, N, features, matprop, mask, ray_mask):
+    def forward(self, incoming_light, V, L, N,
+            features, roughness, matprop, mask, ray_mask):
         # V: (n, 3)-viewdirs, the outgoing light direction
         # L: (n, m, 3) incoming light direction. bounce_rays
         # N: (n, 1, 3) outward normal
         # features: (B, D)
         # matprop: dictionary of attributes
         # mask: mask for matprop
-        roughness = matprop['roughness'][mask]
         D = features.shape[-1]
         n, m, _ = L.shape
         features = features.reshape(n, 1, D).expand(n, m, D).reshape(-1, D)
-        eroughness = roughness.expand(n, m).reshape(-1, 1)
-        indata = [features]
+        eroughness = roughness.reshape(-1, 1).expand(n, m).reshape(-1, 1)
         half = normalize(L + V.reshape(-1, 1, 3))
 
-        cos_lamb = (L * N).sum(dim=-1, keepdim=True).clip(min=1e-8)
-        cos_view = (V.reshape(-1, 1, 3) * N).sum(dim=-1, keepdim=True).clip(min=1e-8).expand(n, m, 1)
+        LdotN = (L * N).sum(dim=-1, keepdim=True).clip(min=1e-8)
+        VdotN = (V.reshape(-1, 1, 3) * N).sum(dim=-1, keepdim=True).clip(min=1e-8).expand(n, m, 1)
         NdotH = ((half * N).sum(dim=-1, keepdim=True)+1e-3).clip(min=1e-20, max=1)
 
-        indata = [features, cos_lamb.reshape(-1, 1), cos_view.reshape(-1, 1), torch.arccos(NdotH.reshape(-1, 1).clip(min=-1+1e-8, max=1-1e-8))]
+        # indata = [LdotN.reshape(-1, 1), VdotN.reshape(-1, 1), NdotH.reshape(-1, 1)]
+        indata = [LdotN, torch.sqrt((1-LdotN**2).clip(min=1e-8)),
+                  VdotN, torch.sqrt((1-LdotN**2).clip(min=1e-8)),
+                  NdotH, torch.sqrt((1-NdotH**2).clip(min=1e-8))]
+        # indata = [safemath.arccos(LdotN.reshape(-1, 1)), safemath.arccos(VdotN.reshape(-1, 1)), safemath.arccos(NdotH.reshape(-1, 1))]
+        indata = [d.reshape(-1, 1) for d in indata]
+        indata += [features]
+
+        # ic(indata)
         # indata = [features]
         if self.detach_roughness:
             eroughness = eroughness.detach()
@@ -335,16 +347,13 @@ class MLPBRDF(torch.nn.Module):
 
         if self.mul_ggx:
             D = ggx_dist(NdotH, roughness.reshape(-1, 1, 1))
-            cos_lamb = cos_lamb*D
+            LdotN = LdotN*D
 
         # ref_weight = ref_weight / (ref_weight.sum(dim=1, keepdim=True).mean(dim=2, keepdim=True)+1e-8)
         # ref_weight = ref_weight * ray_mask / ray_mask.sum(dim=1, keepdim=True)
         ref_weight = ref_weight
         # offset = offset
         # spec_color = (ray_mask * incoming_light * ref_weight).sum(dim=1) / ray_mask.sum(dim=1)
-        # spec_color = (incoming_light * ref_weight * cos_lamb).sum(dim=1) / cos_lamb.sum(dim=1)
-        # ic((ref_weight * cos_lamb).sum(dim=1) / cos_lamb.sum(dim=1))
-        # ic(cos_lamb)
-        # ic(spec_color.mean(dim=1).mean(dim=0))
-        spec_color = (incoming_light * cos_lamb).sum(dim=1) / cos_lamb.sum(dim=1)
+        spec_color = (incoming_light * ref_weight * LdotN).sum(dim=1) / LdotN.sum(dim=1)
+        # spec_color = (incoming_light * LdotN).sum(dim=1) / LdotN.sum(dim=1)
         return spec_color

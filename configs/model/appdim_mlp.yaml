@@ -95,14 +95,14 @@ arch:
     # l_encoder:
     #   _target_: models.ish.ListISH
     #   degs: [0,1,2,4,8,16]
-    num_layers: 3
+    num_layers: 5
     feape: 0
     featureC: 128
     activation: 'softplus'
     mul_ggx: True
     use_roughness: true
     detach_roughness: false
-    lr: 1e-5
+    lr: 1e-3
 
   bg_module:
     _target_: models.bg_modules.HierarchicalCubeMap

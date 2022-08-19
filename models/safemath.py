@@ -2,6 +2,9 @@ import torch
 import numpy as np
 from icecream import ic
 
+def arccos(x):
+    return torch.arccos(x.clip(min=-1+1e-8, max=1-1e-8))
+
 class safe_atan2(torch.autograd.Function):
     def __init__(self) -> None:
         super().__init__()

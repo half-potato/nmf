@@ -129,6 +129,10 @@ class BlenderDataset(Dataset):
             c = img.shape[1]
             if c == 4:
                 img[:, :3] = img[:, :3] * img[:, -1:] + (1 - img[:, -1:])  # blend A to RGB
+            if img.max() > 1:
+                self.hdr = True
+            else:
+                self.hdr = False
             # img = img.clip(0, 1)
             self.all_rgbs += [img]
 
