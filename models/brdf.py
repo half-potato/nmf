@@ -15,7 +15,7 @@ def schlick(f0, n, l):
     return f0 + (1-f0)*(1-(n*l).sum(dim=-1, keepdim=True).clip(min=1e-20))**5
 
 def normalize(x):
-    return x / (torch.linalg.norm(x, dim=-1, keepdim=True)+1e-20)
+    return x / (torch.linalg.norm(x, dim=-1, keepdim=True)+1e-8)
 
 def ggx_dist(NdotH, roughness):
     # takes the cos of the zenith angle between the micro surface and the macro surface
@@ -101,15 +101,15 @@ class GGXSampler:
         T1 = torch.where(V_stretch[..., 2:3] < 0.999, normalize(torch.linalg.cross(V_stretch, z_up.unsqueeze(1), dim=-1)), x_up.unsqueeze(1))
         T2 = normalize(torch.linalg.cross(T1, V_stretch, dim=-1))
         z = V_stretch[..., 2].reshape(-1, 1)
-        a = 1 / (1+z)
+        a = (1 / (1+z).clip(min=1e-5)).clip(min=1e-5, max=1e5)
         angs = self.draw(B, num_samples).to(device)
         u1 = angs[..., 0]
         u2 = angs[..., 1]
 
         r = torch.sqrt(u1)
-        phi = torch.where(u2 < a, u2/a*math.pi, (u2-a)/(1-a)*math.pi + math.pi)
-        P1 = (r*torch.cos(phi)).unsqueeze(-1)
-        P2 = (r*torch.sin(phi)*torch.where(u2 < a, torch.tensor(1.0, device=device), z)).unsqueeze(-1)
+        phi = torch.where(u2 < a, u2/a*math.pi, (u2-a)/(1-a).clip(min=1e-5)*math.pi + math.pi)
+        P1 = (r*safemath.safe_cos(phi)).unsqueeze(-1)
+        P2 = (r*safemath.safe_sin(phi)*torch.where(u2 < a, torch.tensor(1.0, device=device), z)).unsqueeze(-1)
         N_stretch = P1*T1 + P2*T2 + (1 - P1*P1 - P2*P2).clip(min=0).sqrt() * V_stretch
         H_l = normalize(torch.stack([roughness.unsqueeze(-1)*N_stretch[..., 0], roughness.unsqueeze(-1)*N_stretch[..., 1], N_stretch[..., 2].clip(min=0)], dim=-1))
         H = torch.einsum('bni,bij->bnj', H_l, row_world_basis)
@@ -123,19 +123,23 @@ class GGXSampler:
 
         # H = normalize(L + viewdir.reshape(-1, 1, 3))
 
-        NdotH = ((H * normal.reshape(-1, 1, 3)).sum(dim=-1)+1e-3).clip(min=1e-20, max=1)
+        NdotH = ((H * normal.reshape(-1, 1, 3)).sum(dim=-1)+1e-3).clip(min=1e-8, max=1)
         HdotV = (H * V).sum(dim=-1).abs()
-        NdotV = (normal.reshape(-1, 1, 3) * V).sum(dim=-1).abs().clip(min=1e-20, max=1)
+        NdotV = (normal.reshape(-1, 1, 3) * V).sum(dim=-1).abs().clip(min=1e-8, max=1)
         D = ggx_dist(NdotH, roughness.reshape(-1, 1).clip(min=1e-3))
         # ic(NdotH.shape, NdotH, D, D.mean())
         # px.scatter(x=NdotH[0].detach().cpu().flatten(), y=D[0].detach().cpu().flatten()).show()
         # assert(False)
         # ic(NdotH.mean())
-        lpdf = torch.log(D) + torch.log(HdotV) - torch.log(NdotV) - torch.log(roughness.reshape(-1, 1))
+        lpdf = torch.log(D.clip(min=1e-5)) + torch.log(HdotV.clip(min=1e-5)) - torch.log(NdotV) - torch.log(roughness.reshape(-1, 1).clip(min=1e-5))
         # pdf = D * HdotV / NdotV / roughness.reshape(-1, 1)
         # pdf = NdotH / 4 / HdotV
         # pdf = D# / NdotH
         mipval = -math.log(num_samples) - lpdf
+        # ic(phi.max(), phi.min(), a.min(), a.max(), mipval.min(), mipval.max(), roughness.min(), roughness.max())
+        # ic(roughness.grad, lpdf.grad)
+        # if phi.grad is not None:
+        #     ic(phi.grad.max(), phi.grad.min(), a.grad.min(), a.grad.max(), mipval.grad.min(), mipval.grad.max(), roughness.grad.min(), roughness.grad.max())
         # mipval = 1 / (num_samples * pdf + 1e-6)
         # px.scatter(x=NdotH.detach().cpu().flatten()[:1000], y=mipval.detach().cpu().flatten()[:1000]).show()
         # ic(mipval)
@@ -288,7 +292,7 @@ class MLPBRDF(torch.nn.Module):
         # ic(x, y)
         # return y
         # return torch.sigmoid(x+1)
-        return F.softplus(x)
+        return F.softplus(x+1.0)
 
     def forward(self, incoming_light, V, L, N,
             features, roughness, matprop, mask, ray_mask):

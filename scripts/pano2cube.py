@@ -85,11 +85,6 @@ for i in iter:
     theta = brows/(H-1) * np.pi - np.pi/2
     phi = -bcols/(W-1) * 2*np.pi - np.pi
 
-    # TODO REMOVE
-    # theta = (rows[inds]+0.5+0*torch.rand(batch_size, device=device))/H * np.pi - np.pi/2
-    # phi = (cols[inds]+0.5+0*torch.rand(batch_size, device=device))/W * 2*np.pi
-    # ic(rows[inds], cols[inds], theta)
-
     vecs = torch.stack([
         torch.cos(phi)*torch.cos(theta),
         torch.sin(phi)*torch.cos(theta),

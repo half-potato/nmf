@@ -109,9 +109,9 @@ def reconstruction(args):
 
     tensorf = hydra.utils.instantiate(args.model.arch)(aabb=aabb)
     if args.ckpt is not None:
+        # TODO REMOVE
         ckpt = torch.load(args.ckpt)
         # tensorf = TensorNeRF.load(ckpt)
-        # TODO REMOVE PRIORITY
         del ckpt['state_dict']['bg_module.bg_mats.0']
         del ckpt['state_dict']['bg_module.bg_mats.1']
         del ckpt['state_dict']['bg_module.bg_mats.2']
@@ -119,15 +119,14 @@ def reconstruction(args):
         tensorf.normal_module = tensorf2.normal_module
         tensorf.rf = tensorf2.rf
         tensorf.diffuse_module = tensorf2.diffuse_module
-        # TODO REMOVE PRIORITY
         grid_size = N_to_reso(params.N_voxel_final, tensorf.rf.aabb)
         tensorf.rf.update_stepSize(grid_size)
     # TODO REMOVE
-    bg_sd = torch.load('log/mats360_bg.th')
-    from models import bg_modules
-    bg_module = bg_modules.HierarchicalCubeMap(bg_resolution=2048, num_levels=1, featureC=128, activation='softplus', power=2, lr=1e-2)
-    bg_module.load_state_dict(bg_sd, strict=False)
-    tensorf.bg_module = bg_module
+    # bg_sd = torch.load('log/mats360_bg.th')
+    # from models import bg_modules
+    # bg_module = bg_modules.HierarchicalCubeMap(bg_resolution=2048, num_levels=1, featureC=128, activation='softplus', power=2, lr=1e-2)
+    # bg_module.load_state_dict(bg_sd, strict=False)
+    # tensorf.bg_module = bg_module
 
     tensorf = tensorf.to(device)
 
@@ -238,8 +237,8 @@ def reconstruction(args):
     # scheduler = lr_scheduler.SequentialLR(optimizer, schedulers=[scheduler1, scheduler2], milestones=[3000])
     scheduler = lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=params.n_iters, T_mult=1, eta_min=1e-3)
     # scheduler = lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=1000, T_mult=1, eta_min=1e-3)
-    if True:
-    # with torch.autograd.detect_anomaly():
+    # if True:
+    with torch.autograd.detect_anomaly():
         for iteration in pbar:
 
             ray_idx, rgb_idx = trainingSampler.nextids()
@@ -313,6 +312,7 @@ def reconstruction(args):
 
             optimizer.zero_grad()
             total_loss.backward()
+            # torch.nn.utils.clip_grad_norm_(tensorf.parameters(), 1e-3)
             optimizer.step()
             if not old_decay:
                 scheduler.step()
@@ -410,8 +410,8 @@ def reconstruction(args):
 @hydra.main(version_base=None, config_path='configs', config_name='default')
 def train(cfg: DictConfig):
     torch.set_default_dtype(torch.float32)
-    # torch.manual_seed(20211202)
-    # np.random.seed(20211202)
+    torch.manual_seed(20211202)
+    np.random.seed(20211202)
     logger.info(cfg.dataset)
     logger.info(cfg.model)
     cfg.model.arch.rf = cfg.field

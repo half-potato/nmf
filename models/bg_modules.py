@@ -105,14 +105,14 @@ class HierarchicalCubeMap(torch.nn.Module):
             self.max_mip += math.log(2*max(self.stds)) / math.log(self.power)
 
         self.bg_mats = nn.ParameterList([
-            nn.Parameter(0.5 * torch.rand((1, 6, bg_resolution // self.power**i , bg_resolution // self.power**i, 3)) / (self.num_levels - i))
+            nn.Parameter(0.5 * torch.randn((1, 6, bg_resolution // self.power**i , bg_resolution // self.power**i, 3)) / (self.num_levels - i))
             # nn.Parameter(0.5 * torch.ones((1, 6, bg_resolution // self.power**i , bg_resolution // self.power**i, 3)) / (self.num_levels - i))
             for i in range(num_levels-1, -1, -1)])
         # self.activation_fn = torch.nn.Softplus(beta=3)
 
     def activation_fn(self, x):
         # return F.softplus(x-10, beta=0.2)
-        return F.softplus(x+0.5, beta=6)
+        return F.softplus(x+1.0, beta=6)
 
     def calc_weight(self, mip):
         # return 1/2**(self.num_levels-mip)
@@ -399,8 +399,6 @@ class BackgroundRender(torch.nn.Module):
         self.bg_rank = bg_rank
         d = self.view_encoder.dim() if self.view_encoder is not None else 0
         if num_layers == 0 and bg_rank == 3:
-            # TODO REMOVE
-            # self.bg_net = nn.Softplus()
             self.bg_net = nn.Identity()
         else:
             self.bg_net = nn.Sequential(

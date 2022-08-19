@@ -61,10 +61,10 @@ class AlphaGridSampler:
     def update(self, rf):
         # self.nSamples = rf.nSamples//8
         # self.stepSize = rf.stepSize*8
-        self.nSamples = rf.nSamples*8
-        self.stepSize = rf.stepSize/8
-        # self.nSamples = rf.nSamples
-        # self.stepSize = rf.stepSize
+        # self.nSamples = rf.nSamples*8
+        # self.stepSize = rf.stepSize/8
+        self.nSamples = rf.nSamples
+        self.stepSize = rf.stepSize
 
         self.aabb = rf.aabb
         self.units = rf.units

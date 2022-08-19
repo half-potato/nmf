@@ -145,10 +145,10 @@ class GridSampler2D(torch.autograd.Function):
             else:  # padding_mode == 'reflection'
                 padding_mode_enum = 2
             if is_3d:
-                op = torch._C._jit_get_operation('aten::grid_sampler_3d_backward')
+                op = torch._C._jit_get_operation('aten::grid_sampler_3d_backward')[0]
                 grad_input, _ = op(grad_output, input, grid, mode_enum, padding_mode_enum, ctx.align_corners)
             else:
-                op = torch._C._jit_get_operation('aten::grid_sampler_2d_backward')
+                op = torch._C._jit_get_operation('aten::grid_sampler_2d_backward')[0]
                 grad_input, _ = op(grad_output, input, grid, mode_enum, padding_mode_enum, ctx.align_corners, (ctx.needs_input_grad[0], False))
 
         return grad_input, grad_grid, None, None, None, None

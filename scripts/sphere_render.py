@@ -87,7 +87,6 @@ def main(cfg: DictConfig):
     optim = torch.optim.Adam(tensorf.parameters(), lr=0.1, betas=(0.9,0.99))
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optim, T_max=500, eta_min=1e-3)
     with torch.enable_grad():
-        # TODO REMOVE
         pbar = tqdm(range(500))
         for _ in pbar:
             noise = torch.rand(1, N, 4, device=device)/H

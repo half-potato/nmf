@@ -78,6 +78,7 @@ class _DistortionLoss(torch.autograd.Function):
     @staticmethod
     def forward(ctx, midpoint, full_weight, dt):
         accum, dm, dw, dt = distortion_bidir(midpoint, full_weight, dt)
+        # ic(full_weight.mean())
 
         # ic(dm, dw, dt)
         ctx.save_for_backward(dm, dw, dt)
@@ -86,6 +87,9 @@ class _DistortionLoss(torch.autograd.Function):
     @staticmethod
     def backward(ctx, daccum):
         dm, dw, dt = ctx.saved_tensors
+        # ic(dm.mean(), dw.mean(), dt.mean())
+        if torch.isnan(dm).any() or torch.isnan(dw).any() or torch.isnan(dt).any():
+            print("HI")
         return daccum * dm, daccum * dw, daccum * dt
 
 distortion_loss = _DistortionLoss.apply
