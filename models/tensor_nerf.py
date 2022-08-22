@@ -232,18 +232,11 @@ class TensorNeRF(torch.nn.Module):
         xyz = samps[inds[ind]]
         return xyz
 
-    def shrink(self, new_aabb, voxel_size):
-        if self.rf.contract_space:
-            return
-        else:
-            self.rf.shrink(new_aabb, voxel_size)
-        self.sampler.update(self.rf)
-
     def check_schedule(self, iter):
         require_reassignment = False
         require_reassignment |= self.rf.check_schedule(iter)
         require_reassignment |= self.sampler.check_schedule(iter, self.rf)
-        if iter in self.update_sampler_list or require_reassignment:
+        if require_reassignment:
             self.sampler.update(self.rf)
         return require_reassignment
 
@@ -362,6 +355,8 @@ class TensorNeRF(torch.nn.Module):
         world_normal = torch.zeros((M, 3), device=device)
         p_world_normal = torch.zeros((M, 3), device=device)
 
+        # sigma[ray_valid] = torch.where(torch.linalg.norm(xyz_sampled, dim=-1) < 1, 99999999.0, 0.0)
+
         if ray_valid.any():
             if self.rf.separate_appgrid:
                 psigma = self.rf.compute_densityfeature(xyz_normed)
@@ -392,7 +387,9 @@ class TensorNeRF(torch.nn.Module):
         # floater_loss = lossfun_distortion(midpoint, full_weight, dt).clip(min=self.max_floater_loss)
         # TODO REMOVE
         if is_train:
-            floater_loss = distortion_loss(midpoint, full_weight, dt) if is_train else torch.tensor(0.0, device=device) 
+            # floater_loss = distortion_loss(midpoint, full_weight, dt) if is_train else torch.tensor(0.0, device=device) 
+            floater_loss = torch.tensor(0.0, device=device) 
+            # ic(floater_loss)
         else:
             floater_loss = torch.tensor(0.0, device=device) 
 
@@ -440,8 +437,8 @@ class TensorNeRF(torch.nn.Module):
                 v_world_normal = ((1-l)*p_world_normal + l*world_normal)
                 v_world_normal = v_world_normal / (v_world_normal.norm(dim=-1, keepdim=True) + 1e-8)
                 # TODO REMOVE
-                # v_world_normal[ray_valid] = xyz_sampled[..., :3] / (xyz_sampled[..., :3].norm(dim=-1, keepdim=True) + 1e-8)
-                # world_normal[ray_valid] = xyz_sampled[..., :3] / (xyz_sampled[..., :3].norm(dim=-1, keepdim=True) + 1e-8)
+                # v_world_normal = xyz_sampled[..., :3] / (xyz_sampled[..., :3].norm(dim=-1, keepdim=True) + 1e-8)
+                # world_normal = xyz_sampled[..., :3] / (xyz_sampled[..., :3].norm(dim=-1, keepdim=True) + 1e-8)
             else:
                 v_world_normal = world_normal
 
@@ -497,9 +494,15 @@ class TensorNeRF(torch.nn.Module):
                     ray_mask = ((noise_rays * brefdirs).sum(dim=-1, keepdim=True) < 1-5e-5)
                     ray_mask[:, 0] = True
                     # ray_mask = torch.sigmoid(torch.arange(num_roughness_rays, device=device).reshape(1, -1, 1) - (roughness[bounce_mask] * num_roughness_rays).clip(min=1).reshape(-1, 1, 1))
+                    # with torch.no_grad():
+                    #     bounce_weight = weight.clone()
+                    #     bounce_weight[app_mask] *= roughness
+                    #     bounce_weight /= bounce_weight.sum(dim=1, keepdim=True)
+                    #     pt_limit = bounce_weight * self.bounces_per_ray
+                    #     ray_mask = torch.arange(num_roughness_rays, device=device).reshape(1, -1, 1) < pt_limit[full_bounce_mask]
 
+                    incoming_light = torch.empty((bounce_rays.shape[0], bounce_rays.shape[1], 3), device=device)
                     if recur == 0 and self.world_bounces > 0:
-                        incoming_light = torch.empty((bounce_rays.shape[0], bounce_rays.shape[1], 3), device=device)
                         with torch.no_grad():
                             reflect_data = self(bounce_rays[:, :self.world_bounces, :].reshape(-1, D), focal, recur=recur+1, white_bg=False,
                                                 override_near=0.15, is_train=is_train, ndc_ray=ndc_ray, N_samples=N_samples, tonemap=False)
@@ -513,16 +516,12 @@ class TensorNeRF(torch.nn.Module):
                                 mipval[:, self.world_bounces:].reshape(-1)
                             ).reshape(-1, num_roughness_rays-self.world_bounces, 3)
                     else:
-                        incoming_light = self.render_just_bg(bounce_rays.reshape(-1, D), mipval.reshape(-1)).reshape(-1, num_roughness_rays, 3)
+                        incoming_light[ray_mask] = self.render_just_bg(bounce_rays.reshape(-1, D), mipval.reshape(-1))
 
                     self.brdf_sampler.update(bounce_rays[..., :3].reshape(-1, 3), mipval.reshape(-1), incoming_light.reshape(-1, 3))
                     # miplevel = self.bg_module.sa2mip(mipval)
                     # debug[full_bounce_mask][..., 0] += miplevel.mean(dim=1) / (self.bg_module.max_mip-1)
                     
-
-                    # incoming_light = ray_mask * incoming_light + (~ray_mask) * incoming_light[:, 0:1, :]
-                    ray_mask = ray_mask | True
-
                     tinted_ref_rgb = self.brdf(incoming_light, V[bounce_mask], bounce_rays[..., 3:6], outward.reshape(-1, 1, 3), app_features[bounce_mask], roughness[bounce_mask], matprop, bounce_mask, ray_mask)
                     s = incoming_light.mean(dim=1)
                     # s = incoming_light.max(dim=1).values
@@ -581,8 +580,7 @@ class TensorNeRF(torch.nn.Module):
             reflectivity = torch.tensor(0.0)
         
         # viewdirs point inward. -viewdirs aligns with p_world_normal. So we want it below 0
-        # backwards_rays_loss = torch.matmul(viewdirs[ray_valid].reshape(-1, 1, 3), p_world_normal.reshape(-1, 3, 1)).reshape(pweight.shape).clamp(min=0)**2
-        backwards_rays_loss = torch.matmul(viewdirs[ray_valid].reshape(-1, 1, 3), world_normal.reshape(-1, 3, 1)).reshape(pweight.shape).clamp(min=0)**2
+        backwards_rays_loss = torch.matmul(viewdirs[ray_valid].reshape(-1, 1, 3), p_world_normal.reshape(-1, 3, 1)).reshape(pweight.shape).clamp(min=0)**2
         backwards_rays_loss = (pweight * backwards_rays_loss).sum() / B
 
         # calculate depth

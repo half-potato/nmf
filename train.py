@@ -222,7 +222,7 @@ def reconstruction(args):
             pbar.set_description(f"Mean alpha: {alpha.detach().mean().item():.06f}.")
             space_optim.step()
     # tensorf.sampler.mark_untrained_grid(train_dataset.poses, train_dataset.intrinsics)
-    tensorf.sampler.update(tensorf.rf)
+    tensorf.sampler.update(tensorf.rf, init=True)
 
 
     pbar = tqdm(range(params.n_iters), miniters=args.progress_refresh_rate, file=sys.stdout)
@@ -343,8 +343,8 @@ def reconstruction(args):
                     f'train_psnr = {float(np.mean(PSNRs)):.2f}'
                     + f' test_psnr = {float(np.mean(PSNRs_test)):.2f}'
                     + f' roughness = {data["roughness"].mean().item():.5f}'
-                    # + f' backnormal_loss = {backwards_rays_loss:.5f}'
-                    + f' floater_loss = {floater_loss:.1f}'
+                    + f' back = {backwards_rays_loss:.5e}'
+                    + f' floater = {floater_loss:.1e}'
                     # + f' mse = {photo_loss:.6f}'
                 )
                 PSNRs = []

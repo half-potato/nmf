@@ -363,7 +363,7 @@ class MLPBRDF(torch.nn.Module):
         ref_weight = ref_weight
         # offset = offset
         # spec_color = (ray_mask * incoming_light * ref_weight).sum(dim=1) / ray_mask.sum(dim=1)
-        spec_color = (incoming_light * ref_weight * LdotN).sum(dim=1) / LdotN.sum(dim=1)
+        spec_color = (incoming_light * ref_weight * LdotN * ray_mask).sum(dim=1) / (LdotN*ray_mask).sum(dim=1)
         # ic(spec_color.mean(dim=1).mean(dim=0))
         # ic(incoming_light.mean(dim=1).mean(dim=0))
         # spec_color = (incoming_light * LdotN).sum(dim=1) / LdotN.sum(dim=1)

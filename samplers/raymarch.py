@@ -191,7 +191,7 @@ class Raymarcher(torch.nn.Module):
         return False
 
     @torch.no_grad()
-    def update(self, rf, decay=0.95, S=128):
+    def update(self, rf, decay=0.95, S=128, init=False):
         # call before each epoch to update extra states.
 
         ### update density grid

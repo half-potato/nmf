@@ -18,6 +18,9 @@ class TensorBase(torch.nn.Module):
         self.set_register('aabbSize', self.aabb[1] - self.aabb[0])
         self.set_register('invaabbSize', 2.0/self.aabbSize)
         self.set_register('aabbDiag', torch.sqrt(torch.sum(torch.square(self.aabbSize))))
+
+    def get_device(self):
+        return self.aabbSize.device
         
     def normalize_coord(self, xyz_sampled):
         coords = (xyz_sampled[..., :3]-self.aabb[0]) * self.invaabbSize - 1

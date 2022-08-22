@@ -3,7 +3,7 @@ import torch.nn.functional as F
 from icecream import ic
 
 class AlphaGridMask(torch.nn.Module):
-    def __init__(self, aabb, alpha_volume):
+    def __init__(self, aabb, alpha_volume, align_corners=True):
         super(AlphaGridMask, self).__init__()
         self.register_buffer('aabb', aabb)
 
@@ -11,19 +11,22 @@ class AlphaGridMask(torch.nn.Module):
         invgrid_size = 1.0/aabbSize * 2
         grid_size = torch.LongTensor(
             [alpha_volume.shape[-1], alpha_volume.shape[-2], alpha_volume.shape[-3]])
+        self.align_corners = align_corners
         self.register_buffer('grid_size', grid_size)
         self.register_buffer('invgrid_size', invgrid_size)
         self.register_buffer('alpha_volume', alpha_volume)
 
     def sample_alpha(self, xyz_sampled, contract_space=False):
         xyz_sampled = self.normalize_coord(xyz_sampled, contract_space)
+        # ic(xyz_sampled.shape, self.alpha_volume.shape)
         H, W, D = self.alpha_volume.shape
-        i = ((xyz_sampled[..., 0]/2+0.5)*(H-1)).long()
-        j = ((xyz_sampled[..., 1]/2+0.5)*(W-1)).long()
-        k = ((xyz_sampled[..., 2]/2+0.5)*(D-1)).long()
+        i = ((xyz_sampled[..., 0]/2+0.5)*(H-1)).long().clip(0, H-1)
+        j = ((xyz_sampled[..., 1]/2+0.5)*(W-1)).long().clip(0, W-1)
+        k = ((xyz_sampled[..., 2]/2+0.5)*(D-1)).long().clip(0, D-1)
         alpha_vals = self.alpha_volume[i, j, k]
-        # alpha_vals = F.grid_sample(self.alpha_volume, xyz_sampled[..., :3].view(
-        #     1, -1, 1, 1, 3), align_corners=False).view(-1)
+        # ic(alpha_vals.sum(), alpha_vals.shape)
+        # alpha_vals = F.grid_sample(xyz_sampled[..., :3].view(
+        #     1, -1, 1, 1, 3), self.alpha_volume.reshape(1, 1, H, W, D), align_corners=self.align_corners).view(-1)
 
         return alpha_vals
 
@@ -46,19 +49,21 @@ class AlphaGridMask(torch.nn.Module):
         return torch.cat([ contracted, xyz_sampled[..., 3:] ], dim=-1)
 
 class AlphaGridSampler:
-    def __init__(self, enable_alpha_mask=False, near_far=[2, 6], nEnvSamples=0, update_list=[]):
+    def __init__(self, enable_alpha_mask=False, threshold=1e-4, near_far=[2, 6], nEnvSamples=0, update_list=[]):
         self.enable_alpha_mask = enable_alpha_mask
         self.alphaMask = None
+        self.threshold = threshold
         self.nEnvSamples = nEnvSamples
         self.near_far = near_far
         self.update_list = update_list
+        self.grid_size = 0
 
     def check_schedule(self, iteration, rf):
         if iteration in self.update_list:
             self.update(rf)
         return False
 
-    def update(self, rf):
+    def update(self, rf, init=False):
         # self.nSamples = rf.nSamples//8
         # self.stepSize = rf.stepSize*8
         # self.nSamples = rf.nSamples*8
@@ -69,12 +74,12 @@ class AlphaGridSampler:
         self.aabb = rf.aabb
         self.units = rf.units
         self.contract_space = rf.contract_space
-        self.grid_size = rf.grid_size
         # reso_mask = reso_cur
-        # new_aabb = tensorf.updateAlphaMask(tuple(reso_mask))
-        # if iteration == update_AlphaMask_list[0]:
-        #     apply_correction = not torch.all(tensorf.alphaMask.grid_size == tensorf.rf.grid_size)
-        #     rf.shrink(new_aabb, apply_correction)
+        if not init:
+            new_aabb = self.updateAlphaMask(rf, rf.grid_size)
+            apply_correction = not torch.all(self.grid_size == rf.grid_size)
+            rf.shrink(new_aabb, apply_correction)
+            self.grid_size = rf.grid_size
 
     def sample_ray_ndc(self, rays_o, rays_d, focal, is_train=True, N_samples=-1):
         N_samples = N_samples if N_samples > 0 else self.nSamples
@@ -146,30 +151,38 @@ class AlphaGridSampler:
         return rays_pts, interpx, ~mask_outbbox, env_mask
 
     @torch.no_grad()
-    def getDenseAlpha(self, grid_size=None):
+    def getDenseAlpha(self, rf, grid_size=None):
         grid_size = self.grid_size if grid_size is None else grid_size
 
-        dense_xyz = torch.stack([*torch.meshgrid(
-            torch.linspace(-1, 1, grid_size[0]),
-            torch.linspace(-1, 1, grid_size[1]),
-            torch.linspace(-1, 1, grid_size[2])),
-            torch.ones((grid_size[0], grid_size[1],
-                       grid_size[2]))*self.units.min().cpu()*0.5
-        ], -1).to(self.device)
+        # dense_xyz = torch.stack([*torch.meshgrid(
+        #     torch.linspace(-1, 1, grid_size[0]),
+        #     torch.linspace(-1, 1, grid_size[1]),
+        #     torch.linspace(-1, 1, grid_size[2])),
+        #     torch.ones((grid_size[0], grid_size[1],
+        #                grid_size[2]))*self.units.min().cpu()*0.5
+        # ], -1).to(self.device)
+
+        samples = torch.stack(torch.meshgrid(
+            torch.linspace(0, 1, grid_size[0]),
+            torch.linspace(0, 1, grid_size[1]),
+            torch.linspace(0, 1, grid_size[2]),
+        ), -1).to(rf.get_device())
+        dense_xyz = self.aabb[0] * (1-samples) + self.aabb[1] * samples
 
         alpha = torch.zeros_like(dense_xyz[..., 0])
         for i in range(grid_size[0]):
-            xyz_norm = dense_xyz[i].view(-1, 4)
-            sigma_feature = self.compute_densityfeature(xyz_norm)
-            sigma = self.feature2density(sigma_feature)
-            alpha[i] = 1 - torch.exp(-sigma*self.stepSize).reshape(*alpha[i].shape)
+            xyz_norm = dense_xyz[i].view(-1, 3)
+            xyz_norm = torch.cat([xyz_norm, torch.ones((xyz_norm.shape[0], 1), device=rf.get_device())], dim=1)
+            xyz_norm = rf.normalize_coord(xyz_norm)
+            sigma = rf.compute_densityfeature(xyz_norm)
+            alpha[i] = 1 - torch.exp(-sigma*self.stepSize*rf.distance_scale).reshape(*alpha[i].shape)
 
         return alpha, dense_xyz
 
     @torch.no_grad()
-    def updateAlphaMask(self, grid_size=(200, 200, 200)):
+    def updateAlphaMask(self, rf, grid_size=(200, 200, 200)):
 
-        alpha, dense_xyz = self.getDenseAlpha(grid_size)
+        alpha, dense_xyz = self.getDenseAlpha(rf, grid_size)
 
         dense_xyz = dense_xyz.transpose(0, 2).contiguous()
         alpha = alpha.clamp(0, 1).transpose(0, 2).contiguous()[None, None]
@@ -177,11 +190,11 @@ class AlphaGridSampler:
 
         ks = 3
         alpha = F.max_pool3d(alpha, kernel_size=ks,
-                             padding=ks // 2, stride=1).view(grid_size[::-1])
+                             padding=ks // 2, stride=1).view(list(grid_size)[::-1])
         # alpha[alpha >= self.alphaMask_thres] = 1
         # alpha[alpha < self.alphaMask_thres] = 0
 
-        self.alphaMask = AlphaGridMask(self.aabb, alpha > self.alphaMask_thres).to(self.device)
+        self.alphaMask = AlphaGridMask(self.aabb, alpha > self.threshold).to(rf.get_device())
 
         valid_xyz = dense_xyz[alpha > 0.0]
         if valid_xyz.shape[0] < 1:
@@ -218,18 +231,13 @@ class AlphaGridSampler:
         device = rays_chunk.device
         N, M = xyz_sampled.shape[:2]
         # sample alphas and cull samples from the ray
-        alpha_mask = torch.zeros((M), device=device, dtype=bool)
         if self.alphaMask is not None and self.enable_alpha_mask:
-            alpha_mask[ray_valid] = self.alphaMask.sample_alpha(
+            alpha_mask = self.alphaMask.sample_alpha(
                 xyz_sampled[ray_valid], contract_space=self.contract_space)
 
-            # T = torch.cumprod(torch.cat([
-            #     torch.ones(alphas.shape[0], 1, device=alphas.device),
-            #     1. - alphas + 1e-10
-            # ], dim=-1), dim=-1)[:, :-1]
-            # ray_invalid = ~ray_valid
-            # ray_invalid |= (~alpha_mask)
-            ray_valid ^= alpha_mask
+            ray_invalid = ~ray_valid
+            ray_invalid[ray_valid] |= (~alpha_mask)
+            ray_valid = ~ray_invalid
 
         dists = torch.cat((z_vals[:, 1:] - z_vals[:, :-1], torch.zeros_like(z_vals[:, :1])), dim=-1)
         return xyz_sampled[ray_valid], ray_valid, M, z_vals, dists, torch.ones((N), dtype=bool, device=device)

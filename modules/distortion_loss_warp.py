@@ -45,6 +45,7 @@ def distortion_bidir_kernel(
     dm[b, i] = dm1
 
     wp.atomic_add(loss, 0, inter+inner)
+    wp.atomic_add(loss, 0, inter)
 
 
 def distortion_bidir(midpoint, full_weight, dt):

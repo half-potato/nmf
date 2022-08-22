@@ -180,7 +180,7 @@ class TensorVMSplit(TensorVoxelBase):
     def shrink(self, new_aabb, apply_correction):
         # the new_aabb is in normalized coordinates, from -1 to 1
         print("====> shrinking ...")
-        xyz_min, xyz_max = new_aabb * self.aabb.abs()
+        xyz_min, xyz_max = new_aabb
         # t_l, b_r = xyz_min * self.grid_size // 2, xyz_max * self.grid_size // 2 - 1
         t_l, b_r = (xyz_min - self.aabb[0]) / self.units, (xyz_max - self.aabb[0]) / self.units
         # print(new_aabb, self.aabb)
@@ -218,7 +218,7 @@ class TensorVMSplit(TensorVoxelBase):
             new_aabb = correct_aabb
 
         newSize = b_r - t_l
-        self.aabb *= new_aabb.abs()
+        # self.aabb *= new_aabb.abs()
         self.update_stepSize((newSize[0], newSize[1], newSize[2]))
 
 
