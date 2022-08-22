@@ -49,11 +49,12 @@ class AlphaGridMask(torch.nn.Module):
         return torch.cat([ contracted, xyz_sampled[..., 3:] ], dim=-1)
 
 class AlphaGridSampler:
-    def __init__(self, enable_alpha_mask=False, threshold=1e-4, near_far=[2, 6], nEnvSamples=0, update_list=[]):
+    def __init__(self, enable_alpha_mask=False, threshold=1e-4, multiplier=1, near_far=[2, 6], nEnvSamples=0, update_list=[]):
         self.enable_alpha_mask = enable_alpha_mask
         self.alphaMask = None
         self.threshold = threshold
         self.nEnvSamples = nEnvSamples
+        self.multiplier = int(multiplier)
         self.near_far = near_far
         self.update_list = update_list
         self.grid_size = 0
@@ -64,12 +65,8 @@ class AlphaGridSampler:
         return False
 
     def update(self, rf, init=False):
-        # self.nSamples = rf.nSamples//8
-        # self.stepSize = rf.stepSize*8
-        # self.nSamples = rf.nSamples*8
-        # self.stepSize = rf.stepSize/8
-        self.nSamples = rf.nSamples
-        self.stepSize = rf.stepSize
+        self.nSamples = rf.nSamples*self.multiplier
+        self.stepSize = rf.stepSize/self.multiplier
 
         self.aabb = rf.aabb
         self.units = rf.units

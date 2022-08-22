@@ -4,20 +4,18 @@ arch:
 
   alphaMask_thres: 0.0001
   rayMarch_weight_thres: 0.0001
-  nEnvSamples: 0
-  fea2denseAct: 'softplus_shift'
-  # fea2denseAct: 'relu_shift'
   max_recurs: 2
-  roughness_rays: 100
+  roughness_rays: 200
   infinity_border: False
   appdim_noise_std: 0.0
   world_bounces: 0
   max_normal_similarity: 0.99
   max_floater_loss: 1
+  bounces_per_ray: 500
   selector:
     # _target_: models.modules.selectors.Surface
     _target_: modules.pt_selectors.TopNWeight
-    max_selected: 25000
+    max_selected: 50000
     weight_thres: 1e-3
     eps: 1e-1
 

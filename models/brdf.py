@@ -308,6 +308,7 @@ class MLPBRDF(torch.nn.Module):
         # matprop: dictionary of attributes
         # mask: mask for matprop
         D = features.shape[-1]
+        device = incoming_light.device
         n, m, _ = L.shape
         features = features.reshape(n, 1, D).expand(n, m, D).reshape(-1, D)
         eroughness = roughness.reshape(-1, 1).expand(n, m).reshape(-1, 1)
@@ -347,10 +348,11 @@ class MLPBRDF(torch.nn.Module):
             indata += [self.l_encoder(L, eroughness).reshape(B, -1), L]
 
         mlp_in = torch.cat(indata, dim=-1)
-        mlp_out = self.mlp(mlp_in)
-        mlp_out = self.activation(mlp_out)
+        raw_mlp_out = self.mlp(mlp_in[ray_mask.reshape(-1)])
+        mlp_out = torch.zeros((ray_mask.shape[0], ray_mask.shape[1], raw_mlp_out.shape[-1]), device=device)
+        mlp_out[ray_mask.squeeze(-1)] = self.activation(raw_mlp_out)
         # ic(mlp_out.mean(dim=0), mlp_out.std(dim=0))
-        mlp_out = mlp_out.reshape(n, m, -1)
+        # mlp_out = mlp_out.reshape(n, m, -1)
         ref_weight = mlp_out[:, :, :3]
         # offset = mlp_out[:, :, 3:6]
 

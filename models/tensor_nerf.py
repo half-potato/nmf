@@ -86,7 +86,7 @@ class TensorNeRF(torch.nn.Module):
                  max_normal_similarity=1, infinity_border=False, min_refraction=1.1, enable_refraction=True,
                  alphaMask_thres=0.001, rayMarch_weight_thres=0.0001,
                  max_bounce_rays=4000, roughness_rays=3, bounce_min_weight=0.001, appdim_noise_std=0.0,
-                 world_bounces=0, enable_alpha_mask=True, selector=None,
+                 world_bounces=0, selector=None, bounces_per_ray=1000,
                  update_sampler_list=[5000], max_floater_loss=6, **kwargs):
         super(TensorNeRF, self).__init__()
         self.rf = rf(aabb=aabb)
@@ -105,9 +105,9 @@ class TensorNeRF(torch.nn.Module):
             self.tonemap = tonemap
 
         self.world_bounces = world_bounces
+        self.bounces_per_ray = bounces_per_ray
         self.alphaMask = alphaMask
         self.infinity_border = infinity_border
-        self.enable_alpha_mask = enable_alpha_mask
         self.max_floater_loss = max_floater_loss
         self.alphaMask_thres = alphaMask_thres
         self.rayMarch_weight_thres = rayMarch_weight_thres
@@ -491,15 +491,16 @@ class TensorNeRF(torch.nn.Module):
 
                     # ray_mask = (torch.arange(num_roughness_rays, device=device).reshape(1, -1, 1) < (roughness[bounce_mask] * num_roughness_rays).clip(min=1).reshape(-1, 1, 1))
                     # ray_mask[:, 1:] &= ((noise_rays * brefdirs).sum(dim=-1, keepdim=True) < 0.99999)[:, 1:]
-                    ray_mask = ((noise_rays * brefdirs).sum(dim=-1, keepdim=True) < 1-5e-5)
-                    ray_mask[:, 0] = True
+                    # ray_mask = ((noise_rays * brefdirs).sum(dim=-1, keepdim=True) < 1-5e-5)
+                    # ray_mask[:, 0] = True
                     # ray_mask = torch.sigmoid(torch.arange(num_roughness_rays, device=device).reshape(1, -1, 1) - (roughness[bounce_mask] * num_roughness_rays).clip(min=1).reshape(-1, 1, 1))
-                    # with torch.no_grad():
-                    #     bounce_weight = weight.clone()
-                    #     bounce_weight[app_mask] *= roughness
-                    #     bounce_weight /= bounce_weight.sum(dim=1, keepdim=True)
-                    #     pt_limit = bounce_weight * self.bounces_per_ray
-                    #     ray_mask = torch.arange(num_roughness_rays, device=device).reshape(1, -1, 1) < pt_limit[full_bounce_mask]
+                    with torch.no_grad():
+                        bounce_weight = weight.clone()
+                        bounce_weight[app_mask] *= roughness
+                        bounce_weight /= bounce_weight.sum(dim=1, keepdim=True)
+                        pt_limit = bounce_weight * self.bounces_per_ray
+                        ray_mask = torch.arange(num_roughness_rays, device=device).reshape(1, -1, 1) < pt_limit[full_bounce_mask].reshape(-1, 1, 1)
+                        # ic(ray_mask.numel(), ray_mask.sum())
 
                     incoming_light = torch.empty((bounce_rays.shape[0], bounce_rays.shape[1], 3), device=device)
                     if recur == 0 and self.world_bounces > 0:
@@ -516,7 +517,7 @@ class TensorNeRF(torch.nn.Module):
                                 mipval[:, self.world_bounces:].reshape(-1)
                             ).reshape(-1, num_roughness_rays-self.world_bounces, 3)
                     else:
-                        incoming_light[ray_mask] = self.render_just_bg(bounce_rays.reshape(-1, D), mipval.reshape(-1))
+                        incoming_light[ray_mask.squeeze(-1)] = self.render_just_bg(bounce_rays[ray_mask.squeeze(-1)].reshape(-1, D), mipval[ray_mask.squeeze(-1)].reshape(-1))
 
                     self.brdf_sampler.update(bounce_rays[..., :3].reshape(-1, 3), mipval.reshape(-1), incoming_light.reshape(-1, 3))
                     # miplevel = self.bg_module.sa2mip(mipval)
