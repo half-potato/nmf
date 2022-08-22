@@ -1,0 +1,4 @@
+# ninja log v5
+0	17442	1660321156707790828	/home/dronelab/patchnerf/raymarching/build/temp.linux-x86_64-3.10/home/dronelab/patchnerf/raymarching/src/bindings.o	d22230c32ca2588a
+0	38401	1660321177683554844	/home/dronelab/patchnerf/raymarching/build/temp.linux-x86_64-3.10/home/dronelab/patchnerf/raymarching/src/raymarching.o	891b83168be262b5
+13	40258	1660333652601600832	/home/dronelab/patchnerf/raymarching/build/temp.linux-x86_64-3.10/home/dronelab/patchnerf/raymarching/src/raymarching.o	be049a65faa3fe69

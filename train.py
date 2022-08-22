@@ -214,7 +214,6 @@ def reconstruction(args):
 
             alpha = 1-torch.exp(-sigma_feat * 0.015 * tensorf.rf.distance_scale)
             # sigma = 1-torch.exp(-sigma_feat)
-            # sigma = sigma_feat
             # loss = (sigma-torch.rand_like(sigma)*args.start_density).abs().mean()
             loss = (alpha-params.start_density).abs().mean()
             # loss = (-sigma[mask].clip(max=1).sum() + sigma[~mask].clip(min=1e-8).sum())
@@ -280,7 +279,7 @@ def reconstruction(args):
                     loss = torch.sqrt((rgb_map - rgb_train[whole_valid]) ** 2 + params.charbonier_eps**2).mean()
                 else:
                     # loss = ((rgb_map - rgb_train[whole_valid]) ** 2).mean()
-                    loss = F.huber_loss(rgb_map, rgb_train, delta=1, reduction='mean')
+                    loss = F.huber_loss(rgb_map, rgb_train[whole_valid], delta=1, reduction='mean')
                 # loss = torch.sqrt(F.huber_loss(rgb_map, rgb_train, delta=1, reduction='none') + params.charbonier_eps**2).mean()
                 photo_loss = ((rgb_map.clip(0, 1) - rgb_train[whole_valid].clip(0, 1)) ** 2).mean().detach()
                 backwards_rays_loss = data['backwards_rays_loss']

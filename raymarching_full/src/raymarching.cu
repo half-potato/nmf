@@ -435,9 +435,11 @@ __global__ void kernel_march_rays_train(
 
 }
 
-void march_rays_train(const at::Tensor rays_o, const at::Tensor rays_d, const at::Tensor grid, const float bound, const float dt_gamma, const uint32_t max_steps, const uint32_t N, const uint32_t C, const uint32_t H, const uint32_t M, const at::Tensor nears, const at::Tensor fars, at::Tensor xyzs, at::Tensor deltas, at::Tensor rays, at::Tensor counter, at::Tensor noises) {
+void march_rays_train(const at::Tensor rays_o, const at::Tensor rays_d, const at::Tensor grid, const float bound, const float dt_gamma, const uint32_t max_steps, const uint32_t N, const uint32_t C,
+                      const uint32_t H, const uint32_t M, const at::Tensor nears, const at::Tensor fars, at::Tensor xyzs, at::Tensor deltas, at::Tensor rays, at::Tensor counter, at::Tensor noises) {
 
     static constexpr uint32_t N_THREAD = 128;
+    // printf("C: %i, H: %i\n", C, H);
     
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(
     rays_o.scalar_type(), "march_rays_train", ([&] {

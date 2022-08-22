@@ -1,6 +1,6 @@
 import torch
 import math
-import raymarching
+import raymarching_full as raymarching 
 import torch.nn.functional as F
 from numba import jit
 import numpy as np
@@ -12,14 +12,17 @@ class Raymarcher(torch.nn.Module):
                  min_near=0.2,
                  density_thresh=0.002,
                  max_steps=1024,
-                 max_samples=int(3e5),
+                 max_samples=int(1.1e6),
                  dt_gamma=0,
+                 grid_size=128,
                  perturb=False):
         super().__init__()
 
         self.bound = bound
-        self.cascade = 1 + math.floor(math.log2(bound))
+        self.cascade = int(1 + math.ceil(math.log2(bound)))
         self.grid_size = 128
+        # self.cascade = 1 + math.ceil(math.log2(bound))
+        self.grid_size = grid_size
         self.min_near = min_near
         self.density_thresh = density_thresh
         self.dt_gamma = dt_gamma
@@ -73,7 +76,7 @@ class Raymarcher(torch.nn.Module):
         retained[i, j] = True
         whole_valid = retained.sum(dim=1) == ray_valid.sum(dim=1) if is_train else torch.ones((N), dtype=bool, device=device)
 
-        M = ray_valid.sum(dim=1).max(dim=0).values
+        M = max(ray_valid.sum(dim=1).max(dim=0).values, 1)
         ray_valid = ray_valid[whole_valid, :M] 
         fxyzs = fxyzs[whole_valid, :M] 
         z_vals = deltas[whole_valid, :M, 1]
@@ -84,7 +87,7 @@ class Raymarcher(torch.nn.Module):
             (z_vals / focal)[..., None]
         ], dim=-1)
         xyzs = fxyzs[ray_valid]
-        # ic(whole_valid.sum(), ray_valid.sum(), xyzs.shape)
+        # ic(whole_valid.sum(), ray_valid.sum(dim=1).float().mean(), xyzs.shape)
 
         # print(self.density_bitfield.sum())
         # xyzs: (M, 4) values

@@ -100,7 +100,7 @@ class ListISH(torch.nn.Module):
         return sum([2*deg+1 for deg in self.degs])
 
     def forward(self, vecs, roughness):
-        kappa = 1/(roughness+1e-8)
+        kappa = 1/(roughness+1e-3)
         base = sh_basis(self.degs, vecs, kappa)
         return base
 

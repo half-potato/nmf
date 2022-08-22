@@ -43,13 +43,8 @@ class TCNNRF(TensorBase):
         return feat
 
     def compute_densityfeature(self, xyz_normed):
-        feat = self.encoding(xyz_normed[..., :3].contiguous()).type(xyz_normed.dtype)
-        # p = list(self.encoding.parameters())[0]
-        # ic(feat.mean(), p.mean(), p.grad if p.grad is None else p.grad.abs().max())
-        # p = list(self.sigma_net.parameters())[0]
-        # ic(feat.mean(), p.mean(), p.grad if p.grad is None else p.grad.abs().max())
+        feat = self.encoding(xyz_normed[..., :3].reshape(-1, 3).contiguous()).type(xyz_normed.dtype)
         sigfeat = self.sigma_net(feat)
-        # ic(feat, sigfeat)
         return self.feature2density(sigfeat).reshape(-1)
 
     def shrink(self, new_aabb, voxel_size):

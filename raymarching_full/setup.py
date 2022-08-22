@@ -6,6 +6,7 @@ _src_path = os.path.dirname(os.path.abspath(__file__))
 
 nvcc_flags = [
     '-O3', '-std=c++14',
+    '-g', '-G',
     '-U__CUDA_NO_HALF_OPERATORS__', '-U__CUDA_NO_HALF_CONVERSIONS__', '-U__CUDA_NO_HALF2_OPERATORS__',
 ]
 
@@ -42,10 +43,10 @@ pip install -e . # ditto but better (e.g., dependency & metadata handling)
 
 '''
 setup(
-    name='raymarching', # package name, import this to use python API
+    name='raymarching_full', # package name, import this to use python API
     ext_modules=[
         CUDAExtension(
-            name='_raymarching', # extension name, import this to use CUDA API
+            name='_raymarching_full', # extension name, import this to use CUDA API
             sources=[os.path.join(_src_path, 'src', f) for f in [
                 'raymarching.cu',
                 'bindings.cpp',
