@@ -67,6 +67,7 @@ class AlphaGridSampler:
     def update(self, rf, init=False):
         self.nSamples = rf.nSamples*self.multiplier
         self.stepSize = rf.stepSize/self.multiplier
+        ic(self.nSamples)
 
         self.aabb = rf.aabb
         self.units = rf.units

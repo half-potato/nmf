@@ -2,13 +2,7 @@ _partial_: True
 _target_: fields.tcnn.TCNNRF
 distance_scale: 5
 density_shift: 0
-activation: 'softplus_shift'
-network_config:
-    otype: "FullyFusedMLP"
-    activation: "ReLU"
-    output_activation: "None"
-    n_neurons: 64
-    n_hidden_layers: 2
+activation: 'softplus'
 featureC: 64
 num_layers: 3
 encoder_conf:

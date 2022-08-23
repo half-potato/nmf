@@ -421,7 +421,8 @@ class TensorNeRF(torch.nn.Module):
             if self.rf.separate_appgrid:
                 app_features = self.rf.compute_appfeature(app_xyz)
             else:
-                app_features = all_app_features[papp_mask]
+                # app_features = all_app_features[papp_mask]
+                _, app_features = self.rf.compute_feature(app_xyz)
 
             # get base color of the point
             diffuse, tint, matprop = self.diffuse_module(
