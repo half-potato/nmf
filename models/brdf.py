@@ -319,9 +319,9 @@ class MLPBRDF(torch.nn.Module):
         NdotH = ((half * N).sum(dim=-1, keepdim=True)+1e-3).clip(min=1e-20, max=1)
 
         # indata = [LdotN.reshape(-1, 1), VdotN.reshape(-1, 1), NdotH.reshape(-1, 1)]
-        indata = [LdotN, torch.sqrt((1-LdotN**2).clip(min=1e-8)),
-                  VdotN, torch.sqrt((1-LdotN**2).clip(min=1e-8)),
-                  NdotH, torch.sqrt((1-NdotH**2).clip(min=1e-8))]
+        indata = [LdotN, torch.sqrt((1-LdotN**2).clip(min=1e-8, max=1)),
+                  VdotN, torch.sqrt((1-LdotN**2).clip(min=1e-8, max=1)),
+                  NdotH, torch.sqrt((1-NdotH**2).clip(min=1e-8, max=1))]
         # indata = [safemath.arccos(LdotN.reshape(-1, 1)), safemath.arccos(VdotN.reshape(-1, 1)), safemath.arccos(NdotH.reshape(-1, 1))]
         indata = [d.reshape(-1, 1) for d in indata]
         indata += [features]

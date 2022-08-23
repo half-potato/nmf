@@ -11,7 +11,7 @@ arch:
   world_bounces: 0
   max_normal_similarity: 0.99
   max_floater_loss: 1
-  bounces_per_ray: 500
+  bounces_per_ray: 1000
   selector:
     # _target_: models.modules.selectors.Surface
     _target_: modules.pt_selectors.TopNWeight
@@ -25,6 +25,7 @@ arch:
     nEnvSamples: 0
     near_far: [2, 4]
     update_list: [4000, 8000]
+    multiplier: 8
     # _target_: samplers.raymarch.Raymarcher
 
   rf:
@@ -81,7 +82,7 @@ arch:
     feape: 0
     featureC: 128
     activation: 'softplus'
-    mul_ggx: True
+    mul_ggx: False
     use_roughness: true
     detach_roughness: false
     lr: 1e-3
@@ -96,7 +97,7 @@ arch:
     stds: []
     # lr: 0.30
     # lr: 0.05
-    lr: 0.10
+    lr: 0.01
 
   diffuse_module:
     _partial_: True
