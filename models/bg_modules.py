@@ -113,6 +113,16 @@ class HierarchicalCubeMap(torch.nn.Module):
             for i in range(num_levels-1, -1, -1)])
         # self.activation_fn = torch.nn.Softplus(beta=3)
 
+    def get_optparam_groups(self):
+        return [
+            {'params': self.bg_mats,
+             'lr': self.lr,
+             'name': 'bg'},
+            {'params': self.mipbias,
+             'lr': 1e-4,
+             'name': 'mipbias'}
+        ]
+
     def activation_fn(self, x):
         # return F.softplus(x-10, beta=0.2)
         return F.softplus(x, beta=6)

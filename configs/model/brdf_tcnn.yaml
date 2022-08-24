@@ -5,7 +5,7 @@ arch:
   alphaMask_thres: 0.0001
   rayMarch_weight_thres: 0.0001
   max_recurs: 2
-  roughness_rays: 200
+  roughness_rays: 300
   infinity_border: False
   appdim_noise_std: 0.0
   world_bounces: 0
@@ -69,7 +69,6 @@ arch:
 
   brdf:
     _target_: models.brdf.MLPBRDF
-    # _target_: models.brdf.LightTinter
     _partial_: True
     # pbr: True
 
@@ -79,7 +78,7 @@ arch:
     # l_encoder:
     #   _target_: models.ish.ListISH
     #   degs: [0,1,2,4]
-    num_layers: 5
+    num_layers: 4
     feape: 0
     featureC: 128
     activation: 'softplus'
@@ -97,8 +96,8 @@ arch:
     power: 2
     stds: []
     # lr: 0.30
-    # lr: 0.05
-    lr: 0.025
+    lr: 0.05
+    # lr: 0.025
 
   diffuse_module:
     _partial_: True

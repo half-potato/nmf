@@ -152,8 +152,7 @@ class TensorNeRF(torch.nn.Module):
             grad_vars += [{'params': self.brdf.parameters(),
                            'lr': self.brdf.lr}]
         if isinstance(self.bg_module, torch.nn.Module):
-            grad_vars += [{'params': self.bg_module.parameters(),
-                'lr': self.bg_module.lr, 'name': 'bg'}]
+            grad_vars += self.bg_module.get_optparam_groups()
         return grad_vars
 
     def save(self, path, config):
@@ -610,7 +609,7 @@ class TensorNeRF(torch.nn.Module):
             # d_world_normal_map = torch.sum(weight[..., None] * world_normal, 1)
             # d_world_normal_map = d_world_normal_map / (torch.linalg.norm(d_world_normal_map, dim=-1, keepdim=True)+1e-8)
             full_v_world_normal = torch.zeros(full_shape, device=device)
-            full_v_world_normal[ray_valid] = p_world_normal
+            full_v_world_normal[ray_valid] = v_world_normal
             v_world_normal_map = torch.sum(weight[..., None] * full_v_world_normal, 1)
             v_world_normal_map = v_world_normal_map / (torch.linalg.norm(v_world_normal_map, dim=-1, keepdim=True)+1e-8)
             # d_normal_map = torch.matmul(row_basis, d_world_normal_map.unsqueeze(-1)).squeeze(-1)

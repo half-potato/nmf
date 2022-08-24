@@ -345,6 +345,7 @@ def reconstruction(args):
                     + f' roughness = {data["roughness"].mean().item():.5f}'
                     + f' back = {backwards_rays_loss:.5e}'
                     + f' floater = {floater_loss:.1e}'
+                    + f' mipbias = {float(tensorf.bg_module.mipbias):.1e}'
                     # + f' mse = {photo_loss:.6f}'
                 )
                 PSNRs = []
