@@ -240,7 +240,7 @@ def reconstruction(args):
     # with torch.autograd.detect_anomaly():
         for iteration in pbar:
 
-            if iteration < 300:
+            if iteration < 500:
                 ray_idx, rgb_idx = trainingSampler.nextids(batch=args.batch_size//3)
             else:
                 ray_idx, rgb_idx = trainingSampler.nextids()

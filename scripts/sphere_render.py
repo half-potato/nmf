@@ -29,6 +29,7 @@ class AddBasis(torch.nn.Module):
 @hydra.main(version_base=None, config_path=str(Path(__file__).parent.parent / 'configs'), config_name='default')
 # @torch.no_grad()
 def main(cfg: DictConfig):
+    cfg.model.arch.rf = cfg.field
     device = torch.device('cuda')
     torch.set_default_dtype(torch.float32)
     torch.manual_seed(20211202)
@@ -42,27 +43,30 @@ def main(cfg: DictConfig):
     # ckpt['config']['bg_module']['bg_resolution'] = 256
     # del ckpt['state_dict']['diffuse_module.mlp.6.weight']
     # del ckpt['state_dict']['diffuse_module.mlp.6.bias']
-    cfg.model.arch.rf.appearance_n_comp = 48
-    cfg.model.arch.rf.app_dim = 48
-    tensorf = hydra.utils.instantiate(cfg.model.arch)(aabb=torch.tensor([[-1.0, -1.0, -1.0], [1.0, 1.0, 1.0]]), grid_size=[128]*3)
-    bg_sd = torch.load('log/mats360_bg.th')
-    from models import render_modules
-    bg_module = bg_modules.HierarchicalCubeMap(bg_resolution=1600, num_levels=7, featureC=128, activation='softplus', power=2)
-    bg_module.load_state_dict(bg_sd)
-    tensorf.bg_module = bg_module
-    # tensorf.brdf = brdf.PBR(0)
-    tensorf.brdf = brdf.Phong(0)
-    tensorf.rf.set_smoothing(1.5)
-    tensorf = tensorf.to(device)
-    ic(tensorf)
+    tensorf = hydra.utils.instantiate(cfg.model.arch)(aabb=torch.tensor([[-1.0, -1.0, -1.0], [1.0, 1.0, 1.0]]))
 
-    H, W = tensorf.rf.density_plane[0].shape[-2:]
-    C = tensorf.rf.density_plane[0].shape[1]
+    bg_sd = torch.load('log/mats360_bg.th')
+    from models import bg_modules
+    bg_module = bg_modules.HierarchicalCubeMap(bg_resolution=2048, num_levels=1, featureC=128, activation='softplus', power=2, lr=1e-2)
+    bg_module.load_state_dict(bg_sd, strict=False)
+    tensorf.bg_module = bg_module
+
+    tensorf.brdf = brdf.PBR(0)
+    # tensorf.brdf = brdf.Phong(0)
+    tensorf = tensorf.to(device)
+    tensorf.sampler.update(tensorf.rf, init=True)
+    ic(tensorf)
+    ic(tensorf.rf.aabb)
+    ic(tensorf.sampler.aabb)
+
+    G = tensorf.rf.grid_size[0] // 4
+    G = 64
 
     d = 1
-    row, col, line = torch.meshgrid(torch.linspace(-d, d, H, device=device), torch.linspace(-d, d, W, device=device), torch.linspace(-d, d, H, device=device), indexing='ij')
+    row, col, line = torch.meshgrid(torch.linspace(-d, d, G, device=device), torch.linspace(-d, d, G, device=device), torch.linspace(-d, d, G, device=device), indexing='ij')
     grid = torch.stack([row, col, line, torch.ones_like(row)], dim=-1).reshape(1, -1, 4)
     N = grid.shape[1]
+    ic(N, G)
 
     ord = torch.inf
     ord = 2
@@ -84,23 +88,24 @@ def main(cfg: DictConfig):
 
 
     # train shape
-    optim = torch.optim.Adam(tensorf.parameters(), lr=0.1, betas=(0.9,0.99))
+    optim = torch.optim.Adam(tensorf.rf.get_optparam_groups(), betas=(0.9,0.99))
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optim, T_max=500, eta_min=1e-3)
     with torch.enable_grad():
         pbar = tqdm(range(500))
         for _ in pbar:
-            noise = torch.rand(1, N, 4, device=device)/H
+            noise = torch.rand(1, N, 4, device=device)/G
             noise[..., -1] = 0
             xyz = (grid + noise).reshape(-1, 4)
             # inds = np.random.permutation(xyz.shape[0])[:xyz.shape[0]//2]
             mask = gen_mask(xyz[:, :3])
             # mask2 = (dist > outer_r+eps)
             # mask = (dist < outer_r) & (dist > inner_r) & (y.reshape(-1) > 0)
-            feat = tensorf.rf.compute_densityfeature(xyz)
-            sigma_feat = tensorf.feature2density(feat)
+            # sigma_feat = tensorf.rf.compute_densityfeature(xyz.clip(-1, 1))
+            sigma_feat = tensorf.rf.compute_densityfeature(xyz)
 
             # sigma = 1-torch.exp(-sigma_feat * 0.025 * 25)
             sigma = 1-torch.exp(-sigma_feat)
+            # ic(sigma[mask], sigma[~mask])
             # sigma = sigma_feat
             loss = (sigma[mask]-1).abs().mean() + 100*sigma[~mask].abs().mean()
             # loss = (-sigma[mask].clip(max=1).sum() + sigma[~mask].clip(min=1e-8).sum())
@@ -118,7 +123,7 @@ def main(cfg: DictConfig):
     # train normals
     # f0_col = torch.tensor([0.955, 0.638, 0.538]).to(device)
     # optim = torch.optim.Adam(tensorf.parameters(), lr=0.0100)
-    optim = torch.optim.Adam(tensorf.parameters(), lr=0.0025)
+    optim = torch.optim.Adam(tensorf.get_optparam_groups(), lr=0.0025)
     # optim = torch.optim.Adam(tensorf.parameters(), lr=0.0010)
     # optim = torch.optim.RMSprop(tensorf.parameters(), lr=0.0500)
     # scheduler = torch.optim.lr_scheduler.StepLR(optim, step_size=5, gamma=0.99)
@@ -126,7 +131,7 @@ def main(cfg: DictConfig):
     with torch.enable_grad():
         pbar = tqdm(range(1000))
         for _ in pbar:
-            noise = torch.rand(1, N, 4, device=device)/H
+            noise = torch.rand(1, N, 4, device=device)/G
             noise[..., -1] = 0
             xyz = (grid + noise).reshape(-1, 4)
 
@@ -205,8 +210,7 @@ def main(cfg: DictConfig):
     os.makedirs(folder, exist_ok=True)
     print(f"Saving test to {folder}")
     evaluation(test_dataset,tensorf, cfg, renderer, folder,
-               N_vis=-1, N_samples=-1, white_bg = white_bg, ndc_ray=ndc_ray,device=device,
-               render_mode=cfg.render_mode)
+               N_vis=-1, N_samples=-1, white_bg = white_bg, ndc_ray=ndc_ray,device=device)
 
 
 if __name__ == '__main__':

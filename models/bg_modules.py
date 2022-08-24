@@ -226,7 +226,7 @@ class HierarchicalCubeMap(torch.nn.Module):
         saTexel = 4 * math.pi / (6*h*w) * 4
         # TODO calculate distortion of cube map for saTexel
         # distortion = 4 * math.pi / 6
-        distortion = 1/torch.linalg.norm(u, dim=-1, ord=torch.inf)
+        distortion = 1/torch.linalg.norm(u, dim=-1, ord=torch.inf).reshape(*saSample.shape)
         saTexel = distortion / h / w
         # saTexel is the ratio to the solid angle subtended by one pixel of the 0th mipmap level
         num_pixels = self.bg_mats[-1].numel() // 3

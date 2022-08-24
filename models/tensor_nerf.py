@@ -20,6 +20,7 @@ from samplers.alphagrid import AlphaGridSampler
 from modules import distortion_loss
 
 LOGGER = Logger(enable=False)
+FIXED_SPHERE = False
 
 
 def raw2alpha(sigma, dist):
@@ -96,7 +97,7 @@ class TensorNeRF(torch.nn.Module):
         self.brdf = brdf(in_channels=self.rf.app_dim) if brdf is not None else None
         self.brdf_sampler = brdf_sampler if brdf_sampler is None else brdf_sampler(num_samples=roughness_rays)
         self.sampler = sampler
-        # self.sampler2 = AlphaGridSampler(near_far=[2, 6])
+        self.sampler2 = AlphaGridSampler(near_far=[2, 6])
         self.selector = selector
         self.bg_module = bg_module
         if tonemap is None:
@@ -130,7 +131,8 @@ class TensorNeRF(torch.nn.Module):
 
         self.max_normal_similarity = max_normal_similarity
         self.l = 0
-        # self.sampler2.update(self.rf)
+        self.sampler.update(self.rf, init=True)
+        self.sampler2.update(self.rf, init=True)
 
     def get_device(self):
         return self.rf.units.device
@@ -355,14 +357,16 @@ class TensorNeRF(torch.nn.Module):
         world_normal = torch.zeros((M, 3), device=device)
         p_world_normal = torch.zeros((M, 3), device=device)
 
-        sigma[ray_valid] = torch.where(torch.linalg.norm(xyz_sampled, dim=-1) < 1, 99999999.0, 0.0)
-
-        # if ray_valid.any():
-        #     if self.rf.separate_appgrid:
-        #         psigma = self.rf.compute_densityfeature(xyz_normed)
-        #     else:
-        #         psigma, all_app_features = self.rf.compute_feature(xyz_normed)
-        #     sigma[ray_valid] = psigma
+        all_app_features = None
+        if FIXED_SPHERE:
+            sigma[ray_valid] = torch.where(torch.linalg.norm(xyz_sampled, dim=-1) < 1, 99999999.0, 0.0)
+        else:
+            if ray_valid.any():
+                if self.rf.separate_appgrid:
+                    psigma = self.rf.compute_densityfeature(xyz_normed)
+                else:
+                    psigma, all_app_features = self.rf.compute_feature(xyz_normed)
+                sigma[ray_valid] = psigma
 
 
         if self.rf.contract_space and self.infinity_border:
@@ -386,12 +390,8 @@ class TensorNeRF(torch.nn.Module):
         full_weight = torch.cat([weight, 1-weight.sum(dim=1, keepdim=True)], dim=1)
         # floater_loss = lossfun_distortion(midpoint, full_weight, dt).clip(min=self.max_floater_loss)
         # TODO REMOVE
-        if is_train:
-            # floater_loss = distortion_loss(midpoint, full_weight, dt) if is_train else torch.tensor(0.0, device=device) 
-            floater_loss = torch.tensor(0.0, device=device) 
-            # ic(floater_loss)
-        else:
-            floater_loss = torch.tensor(0.0, device=device) 
+        # floater_loss = distortion_loss(midpoint, full_weight, dt) if is_train else torch.tensor(0.0, device=device) 
+        floater_loss = torch.tensor(0.0, device=device) 
 
         # app stands for appearance
         pweight = weight[ray_valid]
@@ -418,7 +418,7 @@ class TensorNeRF(torch.nn.Module):
 
             app_xyz = xyz_normed[papp_mask]
 
-            if self.rf.separate_appgrid:
+            if all_app_features is None:
                 app_features = self.rf.compute_appfeature(app_xyz)
             else:
                 # app_features = all_app_features[papp_mask]
@@ -438,7 +438,9 @@ class TensorNeRF(torch.nn.Module):
                 v_world_normal = ((1-l)*p_world_normal + l*world_normal)
                 v_world_normal = v_world_normal / (v_world_normal.norm(dim=-1, keepdim=True) + 1e-8)
                 # TODO REMOVE
-                v_world_normal = xyz_sampled[..., :3] / (xyz_sampled[..., :3].norm(dim=-1, keepdim=True) + 1e-8)
+                if FIXED_SPHERE:
+                    v_world_normal = xyz_sampled[..., :3] / (xyz_sampled[..., :3].norm(dim=-1, keepdim=True) + 1e-8)
+                # v_world_normal = xyz_sampled[..., :3] / (xyz_sampled[..., :3].norm(dim=-1, keepdim=True) + 1e-8)
                 # world_normal = xyz_sampled[..., :3] / (xyz_sampled[..., :3].norm(dim=-1, keepdim=True) + 1e-8)
             else:
                 v_world_normal = world_normal
@@ -608,7 +610,7 @@ class TensorNeRF(torch.nn.Module):
             # d_world_normal_map = torch.sum(weight[..., None] * world_normal, 1)
             # d_world_normal_map = d_world_normal_map / (torch.linalg.norm(d_world_normal_map, dim=-1, keepdim=True)+1e-8)
             full_v_world_normal = torch.zeros(full_shape, device=device)
-            full_v_world_normal[ray_valid] = v_world_normal
+            full_v_world_normal[ray_valid] = p_world_normal
             v_world_normal_map = torch.sum(weight[..., None] * full_v_world_normal, 1)
             v_world_normal_map = v_world_normal_map / (torch.linalg.norm(v_world_normal_map, dim=-1, keepdim=True)+1e-8)
             # d_normal_map = torch.matmul(row_basis, d_world_normal_map.unsqueeze(-1)).squeeze(-1)

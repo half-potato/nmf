@@ -7,16 +7,21 @@ from icecream import ic
 class TCNNRF(TensorBase):
     def __init__(self, aabb, encoder_conf, featureC=128, num_layers=4, **kwargs):
         super().__init__(aabb, **kwargs)
-        self.separate_appgrid = False
 
-        self.nSamples = 4096
-        self.stepSize = 0.015
-        g = 128
+        # self.nSamples = 1024                                                                                                                                                                                        
+        self.nSamples = 512                                                                                                                                                                                        
+        diag = (aabb**2).sum().sqrt()
+        self.stepSize = diag / self.nSamples
+        g = self.nSamples
         self.grid_size = torch.tensor([g, g, g])
         self.units = self.stepSize
 
+
+        self.separate_appgrid = False
+
         self.bound = torch.abs(aabb).max()
-        per_level_scale = np.exp2(np.log2(2048 * 1 / 16) / (16 - 1))
+        bound = 1
+        per_level_scale = np.exp2(np.log2(2048 * bound / 16) / (16 - 1))
         self.encoding = tcnn.Encoding(3, encoding_config=dict(per_level_scale=per_level_scale, **encoder_conf))
         self.app_dim = encoder_conf.n_features_per_level * encoder_conf.n_levels
         # self.sigma_net = tcnn.Network(n_input_dims=self.app_dim, n_output_dims=1, network_config=dict(**network_config))
@@ -49,7 +54,7 @@ class TCNNRF(TensorBase):
         return self.feature2density(sigfeat).reshape(-1), feat
 
     def compute_appfeature(self, xyz_normed):
-        feat = self.encoding(self.coords2input(xyz_normed)).type(xyz_normed.dtype)
+        feat = self.encoding(xyz_normed[..., :3].reshape(-1, 3).contiguous()).type(xyz_normed.dtype)
         return feat
 
     def compute_densityfeature(self, xyz_normed):
