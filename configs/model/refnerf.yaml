@@ -142,3 +142,4 @@ params:
   charbonier_loss: false
   start_density: 1e-2
   lr_init: 0.02
+  batch_size: 4096

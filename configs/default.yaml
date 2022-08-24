@@ -7,7 +7,6 @@ defaults:
   - field: tensorf
 basedir: ./log
 filter_rays: false
-batch_size: 4096
 expname: test
 datadir: /data
 

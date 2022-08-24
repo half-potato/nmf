@@ -80,12 +80,12 @@ def render_test(args):
 
 def reconstruction(args):
     params = args.model.params
-    assert(args.batch_size % params.num_rays_per_envmap == 0)
+    assert(params.batch_size % params.num_rays_per_envmap == 0)
 
     # init dataset
     dataset = dataset_dict[args.dataset.dataset_name]
     train_dataset = dataset(os.path.join(args.datadir, args.dataset.scenedir), split='train', downsample=args.dataset.downsample_train, is_stack=False)
-    test_dataset = dataset(os.path.join(args.datadir, args.dataset.scenedir), split='test', downsample=args.dataset.downsample_train, is_stack=True)
+    test_dataset = dataset(os.path.join(args.datadir, args.dataset.scenedir), split='train', downsample=args.dataset.downsample_train, is_stack=True)
     white_bg = train_dataset.white_bg
     train_dataset.near_far = args.dataset.near_far
     near_far = train_dataset.near_far
@@ -166,7 +166,7 @@ def reconstruction(args):
         allrays, allrgbs, mask = tensorf.filtering_rays(allrays, allrgbs, train_dataset.focal, bbox_only=True)
     else:
         mask = None
-    trainingSampler = SimpleSampler(allrays.shape[0], args.batch_size)
+    trainingSampler = SimpleSampler(allrays.shape[0], params.batch_size)
 
 
     ortho_reg_weight = params.ortho_weight
@@ -244,7 +244,7 @@ def reconstruction(args):
         for iteration in pbar:
 
             if iteration < 500:
-                ray_idx, rgb_idx = trainingSampler.nextids(batch=args.batch_size//2)
+                ray_idx, rgb_idx = trainingSampler.nextids(batch=params.batch_size//2)
             else:
                 ray_idx, rgb_idx = trainingSampler.nextids()
 
@@ -268,7 +268,7 @@ def reconstruction(args):
             # if True:
                 data = renderer(rays_train, tensorf,
                         keys = ['rgb_map', 'floater_loss', 'normal_loss', 'backwards_rays_loss', 'diffuse_reg', 'bounce_count', 'color_count', 'roughness', 'whole_valid'],
-                        focal=focal, output_alpha=alpha_train, chunk=args.batch_size, white_bg = white_bg, is_train=True, ndc_ray=ndc_ray)
+                        focal=focal, output_alpha=alpha_train, chunk=params.batch_size, white_bg = white_bg, is_train=True, ndc_ray=ndc_ray)
 
                 # loss = torch.mean((rgb_map[:, 1, 1] - rgb_train[:, 1, 1]) ** 2)
                 normal_loss = data['normal_loss'].mean()
@@ -382,7 +382,7 @@ def reconstruction(args):
             # if not ndc_ray and iteration == update_AlphaMask_list[-1] and args.filter_rays:
             #     # filter rays outside the bbox
             #     allrays, allrgbs, mask = tensorf.filtering_rays(allrays, allrgbs, focal)
-            #     trainingSampler = SimpleSampler(allrays.shape[0], args.batch_size)
+            #     trainingSampler = SimpleSampler(allrays.shape[0], params.batch_size)
 
 
     # prof.export_chrome_trace('trace.json')

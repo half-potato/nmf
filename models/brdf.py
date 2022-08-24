@@ -7,6 +7,7 @@ from .render_modules import positional_encoding, str2fn
 from icecream import ic
 import matplotlib.pyplot as plt
 from . import safemath
+from modules import row_mask_sum
 
 import plotly.express as px
 import plotly.graph_objects as go
@@ -310,13 +311,16 @@ class MLPBRDF(torch.nn.Module):
         D = features.shape[-1]
         device = incoming_light.device
         n, m, _ = L.shape
-        features = features.reshape(n, 1, D).expand(n, m, D).reshape(-1, D)
-        eroughness = roughness.reshape(-1, 1).expand(n, m).reshape(-1, 1)
+        mask = ray_mask.reshape(-1)
+        ray_mask = ray_mask.squeeze(-1)
+
+        features = features.reshape(n, 1, D).expand(n, m, D).reshape(-1, D)[mask]
+        eroughness = roughness.reshape(-1, 1).expand(n, m).reshape(-1, 1)[mask]
         half = normalize(L + V.reshape(-1, 1, 3))
 
-        LdotN = (L * N).sum(dim=-1, keepdim=True).clip(min=1e-8)
-        VdotN = (V.reshape(-1, 1, 3) * N).sum(dim=-1, keepdim=True).clip(min=1e-8).expand(n, m, 1)
-        NdotH = ((half * N).sum(dim=-1, keepdim=True)+1e-3).clip(min=1e-20, max=1)
+        LdotN = (L * N).sum(dim=-1, keepdim=True).clip(min=1e-8)[ray_mask]
+        VdotN = (V.reshape(-1, 1, 3) * N).sum(dim=-1, keepdim=True).clip(min=1e-8).expand(n, m, 1)[ray_mask]
+        NdotH = ((half * N).sum(dim=-1, keepdim=True)+1e-3).clip(min=1e-20, max=1)[ray_mask]
 
         # indata = [LdotN.reshape(-1, 1), VdotN.reshape(-1, 1), NdotH.reshape(-1, 1)]
         indata = [LdotN, torch.sqrt((1-LdotN**2).clip(min=1e-8, max=1)),
@@ -337,7 +341,6 @@ class MLPBRDF(torch.nn.Module):
         N = N.expand(n, m, 3).reshape(-1, 3)
         L = L.reshape(-1, 3)
         B = V.shape[0]
-
         if self.feape > 0:
             indata += [positional_encoding(features, self.feape)]
         if self.v_encoder is not None:
@@ -348,25 +351,14 @@ class MLPBRDF(torch.nn.Module):
             indata += [self.l_encoder(L, eroughness).reshape(B, -1), L]
 
         mlp_in = torch.cat(indata, dim=-1)
-        raw_mlp_out = self.mlp(mlp_in[ray_mask.reshape(-1)])
-        mlp_out = torch.zeros((ray_mask.shape[0], ray_mask.shape[1], raw_mlp_out.shape[-1]), device=device)
-        mlp_out[ray_mask.squeeze(-1)] = self.activation(raw_mlp_out)
-        # ic(mlp_out.mean(dim=0), mlp_out.std(dim=0))
-        # mlp_out = mlp_out.reshape(n, m, -1)
-        ref_weight = mlp_out[:, :, :3]
-        # offset = mlp_out[:, :, 3:6]
+        raw_mlp_out = self.mlp(mlp_in)
+        mlp_out = self.activation(raw_mlp_out)
+        ref_weight = mlp_out[..., :3]
 
         if self.mul_ggx:
-            D = ggx_dist(NdotH, roughness.reshape(-1, 1, 1))
+            D = ggx_dist(NdotH, roughness.reshape(-1, 1))
             LdotN = LdotN*D
 
-        # ref_weight = ref_weight / (ref_weight.sum(dim=1, keepdim=True).mean(dim=2, keepdim=True)+1e-8)
-        # ref_weight = ref_weight * ray_mask / ray_mask.sum(dim=1, keepdim=True)
-        ref_weight = ref_weight
-        # offset = offset
-        # spec_color = (ray_mask * incoming_light * ref_weight).sum(dim=1) / ray_mask.sum(dim=1)
-        spec_color = (incoming_light * ref_weight * LdotN * ray_mask).sum(dim=1) / (LdotN*ray_mask).sum(dim=1)
-        # ic(spec_color.mean(dim=1).mean(dim=0))
-        # ic(incoming_light.mean(dim=1).mean(dim=0))
-        # spec_color = (incoming_light * LdotN).sum(dim=1) / LdotN.sum(dim=1)
+        spec_color = row_mask_sum(incoming_light[ray_mask] * ref_weight * LdotN, ray_mask) / row_mask_sum(LdotN, ray_mask)
+
         return spec_color

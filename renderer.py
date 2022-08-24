@@ -42,7 +42,7 @@ def chunk_renderer(rays, tensorf, focal, keys=['rgb_map'], chunk=4096, **kwargs)
     return data
 
 class BundleRender:
-    def __init__(self, base_renderer, H, W, focal, bundle_size=1, chunk=2*512, scale_normal=False):
+    def __init__(self, base_renderer, H, W, focal, bundle_size=1, chunk=512, scale_normal=False):
         self.base_renderer = base_renderer
         self.bundle_size = bundle_size
         self.H = H 

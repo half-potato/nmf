@@ -429,7 +429,7 @@ class TensorNeRF(torch.nn.Module):
             # interpolate between the predicted and world normals
             if self.normal_module is not None:
                 p_world_normal[papp_mask] = self.normal_module(app_xyz, app_features)
-                l = self.l# if is_train else 1
+                l = self.l
                 v_world_normal = ((1-l)*p_world_normal + l*world_normal)
                 v_world_normal = v_world_normal / (v_world_normal.norm(dim=-1, keepdim=True) + 1e-8)
                 # TODO REMOVE
@@ -463,12 +463,11 @@ class TensorNeRF(torch.nn.Module):
                 debug[app_mask] += ref_col / (ref_col + 1)
             else:
                 num_roughness_rays = self.roughness_rays // 2 if recur > 0 else self.roughness_rays
-                # num_roughness_rays = self.roughness_rays# if is_train else 100
                 # compute which rays to reflect
                 ratio_diffuse = matprop['ratio_diffuse']
                 ratio_reflected = 1 - ratio_diffuse
-                bounce_mask, full_bounce_mask, inv_full_bounce_mask = self.selector(
-                        app_mask, weight.detach(), VdotL, 1-roughness.detach())
+                bounce_mask, full_bounce_mask, inv_full_bounce_mask, ray_mask = self.selector(
+                        app_mask, weight.detach(), VdotL, 1-roughness.detach(), num_roughness_rays)
                 # if the bounce is not calculated, set the ratio to 0 to make sure we don't get black spots
                 # if not bounce_mask.all() and not is_train:
                 #     ratio_diffuse[~bounce_mask] += ratio_reflected[~bounce_mask]
@@ -492,14 +491,10 @@ class TensorNeRF(torch.nn.Module):
                     # ray_mask = ((noise_rays * brefdirs).sum(dim=-1, keepdim=True) < 1-5e-5)
                     # ray_mask[:, 0] = True
                     # ray_mask = torch.sigmoid(torch.arange(num_roughness_rays, device=device).reshape(1, -1, 1) - (roughness[bounce_mask] * num_roughness_rays).clip(min=1).reshape(-1, 1, 1))
-                    with torch.no_grad():
-                        # bounce_weight = weight.clone()
-                        # bounce_weight[app_mask] *= roughness
-                        # bounce_weight /= bounce_weight.sum(dim=1, keepdim=True)
-                        bounce_weight = weight
-                        pt_limit = bounce_weight * self.bounces_per_ray
-                        ray_mask = torch.arange(num_roughness_rays, device=device).reshape(1, -1, 1) < pt_limit[full_bounce_mask].reshape(-1, 1, 1)
-                        # ic(ray_mask.numel(), ray_mask.sum())
+                    # with torch.no_grad():
+                    #     bounce_weight = weight
+                    #     pt_limit = bounce_weight * self.bounces_per_ray
+                    #     ray_mask = torch.arange(num_roughness_rays, device=device).reshape(1, -1, 1) < pt_limit[full_bounce_mask].reshape(-1, 1, 1)
 
                     incoming_light = torch.zeros((bounce_rays.shape[0], bounce_rays.shape[1], 3), device=device)
                     if recur == 0 and self.world_bounces > 0:
