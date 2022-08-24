@@ -98,6 +98,7 @@ arch:
     # lr: 0.30
     # lr: 0.05
     lr: 0.01
+    mipbias_lr: 1e-3
 
   diffuse_module:
     _partial_: True

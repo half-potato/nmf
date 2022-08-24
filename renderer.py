@@ -130,7 +130,7 @@ class BundleRender:
         # fig.show()
         # assert(False)
 
-        return rgb_map, depth_map, debug_map, normal_map, env_map, col_map, surf_width, None
+        return rgb_map, depth_map, debug_map, normal_map, env_map, col_map, surf_width, acc_map
 
 
 def depth_to_normals(depth, focal):
@@ -201,7 +201,7 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
     tensorf.eval()
     for idx, im_idx, rays, gt_rgb in iterator():
 
-        rgb_map, depth_map, debug_map, normal_map, env_map, col_map, surf_width, weight_slice = brender(
+        rgb_map, depth_map, debug_map, normal_map, env_map, col_map, surf_width, acc_map = brender(
                 rays, tensorf, N_samples=N_samples, ndc_ray=ndc_ray, white_bg = white_bg, is_train=False)
 
         H, W, _ = normal_map.shape
@@ -226,6 +226,7 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
                 # mask = (gt_normal_map[..., 0] == 1) & (gt_normal_map[..., 1] == 1) & (gt_normal_map[..., 2] == 1)
                 # gt_normal_map[mask] = 0
                 norm_err = torch.arccos((normal_map * gt_normal_map).sum(dim=-1).clip(min=1e-8, max=1-1e-8)) * 180/np.pi
+                norm_err *= acc_map
                 norm_errs.append(norm_err.mean())
                 if savePath is not None:
                     imageio.imwrite(f'{savePath}/normal_err/{prtx}{idx:03d}.png', norm_err.clip(max=255).numpy().astype(np.uint8))

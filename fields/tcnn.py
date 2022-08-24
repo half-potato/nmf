@@ -9,6 +9,7 @@ class TCNNRF(TensorBase):
         super().__init__(aabb, **kwargs)
 
         # self.nSamples = 1024                                                                                                                                                                                        
+        # self.nSamples = 512                                                                                                                                                                                        
         self.nSamples = 512                                                                                                                                                                                        
         diag = (aabb**2).sum().sqrt()
         self.stepSize = diag / self.nSamples

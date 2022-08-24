@@ -12,5 +12,5 @@ encoder_conf:
     log2_hashmap_size: 19
     base_resolution: 16
 lr: 1e-2
-lr_net: 1e-3
+lr_net: 1e-4
 num_pretrain: 0

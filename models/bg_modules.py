@@ -82,13 +82,14 @@ class CubeUnwrap(torch.nn.Module):
 
 class HierarchicalCubeMap(torch.nn.Module):
     def __init__(self, bg_resolution=512, num_levels=2, featureC=128, activation='identity', power=4,
-                 stds = [1, 2, 4, 8], mipbias=+0.5, interp_pyramid=True, lr=0.15, learnable_bias=True):
+                 stds = [1, 2, 4, 8], mipbias=+0.5, interp_pyramid=True, lr=0.15, mipbias_lr=1e-3, learnable_bias=True):
         super().__init__()
         self.num_levels = num_levels
         self.interp_pyramid = interp_pyramid
         self.power = power
         self.align_corners = True
         self.smoothing = 1
+        self.mipbias_lr = mipbias_lr
         self.lr=lr
         start_mip = self.num_levels - 1
         self.max_mip = start_mip
@@ -118,8 +119,8 @@ class HierarchicalCubeMap(torch.nn.Module):
             {'params': self.bg_mats,
              'lr': self.lr,
              'name': 'bg'},
-            {'params': self.mipbias,
-             'lr': 1e-4,
+            {'params': [self.mipbias],
+             'lr': self.mipbias_lr,
              'name': 'mipbias'}
         ]
 

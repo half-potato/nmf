@@ -73,7 +73,7 @@ class AlphaGridSampler:
         self.units = rf.units
         self.contract_space = rf.contract_space
         # reso_mask = reso_cur
-        if not init:
+        if not init and self.enable_alpha_mask:
             new_aabb = self.updateAlphaMask(rf, rf.grid_size)
             apply_correction = not torch.all(self.grid_size == rf.grid_size)
             rf.shrink(new_aabb, apply_correction)

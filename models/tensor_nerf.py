@@ -98,6 +98,7 @@ class TensorNeRF(torch.nn.Module):
         self.brdf_sampler = brdf_sampler if brdf_sampler is None else brdf_sampler(num_samples=roughness_rays)
         self.sampler = sampler
         self.sampler2 = AlphaGridSampler(near_far=[2, 6])
+        ic(self.sampler)
         self.selector = selector
         self.bg_module = bg_module
         if tonemap is None:
@@ -131,8 +132,8 @@ class TensorNeRF(torch.nn.Module):
 
         self.max_normal_similarity = max_normal_similarity
         self.l = 0
-        self.sampler.update(self.rf, init=True)
-        self.sampler2.update(self.rf, init=True)
+        # self.sampler.update(self.rf, init=True)
+        # self.sampler2.update(self.rf, init=True)
 
     def get_device(self):
         return self.rf.units.device
@@ -171,11 +172,10 @@ class TensorNeRF(torch.nn.Module):
         torch.save(ckpt, path)
 
     @staticmethod
-    def load(ckpt, **kwargs):
-        config = ckpt['config']
+    def load(ckpt, config=None, **kwargs):
+        config = ckpt['config'] if config is None else config
         aabb = ckpt['state_dict']['rf.aabb']
-        grid_size = ckpt['state_dict']['rf.grid_size'].cpu()
-        rf = hydra.utils.instantiate(config)(aabb=aabb, grid_size=grid_size)
+        rf = hydra.utils.instantiate(config)(aabb=aabb)
         # if 'alphaMask.aabb' in ckpt.keys():
         #     #  length = np.prod(ckpt['alphaMask.shape'])
         #     #  alpha_volume = torch.from_numpy(np.unpackbits(ckpt['alphaMask.mask'])[
@@ -389,8 +389,8 @@ class TensorNeRF(torch.nn.Module):
         full_weight = torch.cat([weight, 1-weight.sum(dim=1, keepdim=True)], dim=1)
         # floater_loss = lossfun_distortion(midpoint, full_weight, dt).clip(min=self.max_floater_loss)
         # TODO REMOVE
-        # floater_loss = distortion_loss(midpoint, full_weight, dt) if is_train else torch.tensor(0.0, device=device) 
-        floater_loss = torch.tensor(0.0, device=device) 
+        floater_loss = distortion_loss(midpoint, full_weight, dt) if is_train else torch.tensor(0.0, device=device) 
+        # floater_loss = torch.tensor(0.0, device=device) 
 
         # app stands for appearance
         pweight = weight[ray_valid]
@@ -399,10 +399,6 @@ class TensorNeRF(torch.nn.Module):
 
         # debug = torch.zeros((B, n_samples, 3), dtype=torch.short, device=device)
         debug = torch.zeros((B, n_samples, 3), dtype=torch.float, device=device, requires_grad=False)
-        recur_depth = z_vals.clone()
-        depth_map = torch.sum(weight * recur_depth, 1)
-        acc_map = bg_weight #torch.sum(weight, 1)
-        depth_map = depth_map + (1. - acc_map) * rays_chunk[whole_valid, -1]
         bounce_count = 0
 
         rgb = torch.zeros((*full_shape[:2], 3), device=device, dtype=weight.dtype)
@@ -585,7 +581,7 @@ class TensorNeRF(torch.nn.Module):
         
         # viewdirs point inward. -viewdirs aligns with p_world_normal. So we want it below 0
         backwards_rays_loss = torch.matmul(viewdirs[ray_valid].reshape(-1, 1, 3), p_world_normal.reshape(-1, 3, 1)).reshape(pweight.shape).clamp(min=0)**2
-        backwards_rays_loss = (pweight * backwards_rays_loss).sum() / B
+        backwards_rays_loss = (pweight * backwards_rays_loss).sum() / pweight.sum().clip(min=1e-10)
 
         # calculate depth
 
@@ -593,8 +589,9 @@ class TensorNeRF(torch.nn.Module):
         # (N, bundle_size, bundle_size)
         acc_map = torch.sum(weight, 1)
         with torch.no_grad():
-            depth_map = torch.sum(weight * recur_depth, 1)
-            depth_map = depth_map + (1. - acc_map) * rays_chunk[whole_valid, -1]
+            depth_map = torch.sum(weight * z_vals, 1)
+            # depth_map = depth_map + (1. - acc_map) * rays_chunk[whole_valid, -1]
+            depth_map = depth_map + (1. - acc_map) * 0
 
             # view dependent normal map
             # N, 3, 3

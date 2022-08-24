@@ -20,7 +20,7 @@ class Raymarcher(torch.nn.Module):
 
         self.bound = bound
         self.cascade = int(1 + math.ceil(math.log2(bound)))
-        self.grid_size = 128
+        self.grid_size = grid_size
         # self.cascade = 1 + math.ceil(math.log2(bound))
         self.grid_size = grid_size
         self.min_near = min_near
@@ -76,17 +76,18 @@ class Raymarcher(torch.nn.Module):
         retained[i, j] = True
         whole_valid = retained.sum(dim=1) == ray_valid.sum(dim=1) if is_train else torch.ones((N), dtype=bool, device=device)
 
-        M = max(ray_valid.sum(dim=1).max(dim=0).values, 1)
-        ray_valid = ray_valid[whole_valid, :M] 
-        fxyzs = fxyzs[whole_valid, :M] 
-        z_vals = deltas[whole_valid, :M, 1]
-        dists = deltas[whole_valid, :M, 0]
+        M = max(ray_valid.sum(dim=1).max(dim=0).values, 2)
+        ray_valid = ray_valid[whole_valid, :] 
+        fxyzs = fxyzs[whole_valid, :] 
+        z_vals = deltas[whole_valid, :, 1]
+        dists = deltas[whole_valid, :, 0]
 
         fxyzs = torch.cat([
             fxyzs,
             (z_vals / focal)[..., None]
         ], dim=-1)
         xyzs = fxyzs[ray_valid]
+        M = fxyzs.shape[1]
         # ic(whole_valid.sum(), ray_valid.sum(dim=1).float().mean(), xyzs.shape)
 
         # print(self.density_bitfield.sum())

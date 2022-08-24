@@ -48,7 +48,8 @@ def render_test(args):
         return
 
     ckpt = torch.load(args.ckpt)
-    tensorf = TensorNeRF.load(ckpt).to(device)
+    tensorf = TensorNeRF.load(ckpt, args.model.arch, strict=False).to(device)
+    tensorf.sampler.update(tensorf.rf, init=True)
 
     # init dataset
     dataset = dataset_dict[args.dataset.dataset_name]
@@ -111,16 +112,18 @@ def reconstruction(args):
     if args.ckpt is not None:
         # TODO REMOVE
         ckpt = torch.load(args.ckpt)
-        # tensorf = TensorNeRF.load(ckpt)
-        del ckpt['state_dict']['bg_module.bg_mats.0']
-        del ckpt['state_dict']['bg_module.bg_mats.1']
-        del ckpt['state_dict']['bg_module.bg_mats.2']
-        tensorf2 = TensorNeRF.load(ckpt, strict=False)
-        tensorf.normal_module = tensorf2.normal_module
-        tensorf.rf = tensorf2.rf
-        tensorf.diffuse_module = tensorf2.diffuse_module
-        grid_size = N_to_reso(params.N_voxel_final, tensorf.rf.aabb)
-        tensorf.rf.update_stepSize(grid_size)
+        tensorf = TensorNeRF.load(ckpt, args.model.arch)
+
+        # del ckpt['state_dict']['bg_module.bg_mats.0']
+        # del ckpt['state_dict']['bg_module.bg_mats.1']
+        # del ckpt['state_dict']['bg_module.bg_mats.2']
+        # tensorf2 = TensorNeRF.load(ckpt, strict=False)
+        # tensorf.normal_module = tensorf2.normal_module
+        # tensorf.rf = tensorf2.rf
+        # tensorf.diffuse_module = tensorf2.diffuse_module
+        # grid_size = N_to_reso(params.N_voxel_final, tensorf.rf.aabb)
+        # tensorf.rf.update_stepSize(grid_size)
+
     # TODO REMOVE
     # bg_sd = torch.load('log/mats360_bg.th')
     # from models import bg_modules
@@ -241,7 +244,7 @@ def reconstruction(args):
         for iteration in pbar:
 
             if iteration < 500:
-                ray_idx, rgb_idx = trainingSampler.nextids(batch=args.batch_size//3)
+                ray_idx, rgb_idx = trainingSampler.nextids(batch=args.batch_size//2)
             else:
                 ray_idx, rgb_idx = trainingSampler.nextids()
 

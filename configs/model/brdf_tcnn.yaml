@@ -11,23 +11,25 @@ arch:
   world_bounces: 0
   max_normal_similarity: 0.99
   max_floater_loss: 1
-  bounces_per_ray: 500
+  bounces_per_ray: 1000
   selector:
     # _target_: models.modules.selectors.Surface
     _target_: modules.pt_selectors.TopNWeight
-    max_selected: 25000
+    max_selected: 50000
     weight_thres: 1e-3
     eps: 1e-1
 
   sampler:
-    # _target_: samplers.raymarch.Raymarcher
-    # max_samples: 30000
-    _target_: samplers.alphagrid.AlphaGridSampler
-    enable_alpha_mask: False
-    nEnvSamples: 0
-    near_far: [2, 4]
-    update_list: [4000, 8000]
-    multiplier: 1
+    _target_: samplers.raymarch.Raymarcher
+    max_samples: 30000
+    grid_size: 256
+    max_steps: 512
+    # _target_: samplers.alphagrid.AlphaGridSampler
+    # enable_alpha_mask: False
+    # nEnvSamples: 0
+    # near_far: [2, 4]
+    # update_list: []
+    # multiplier: 1
 
   rf:
     _partial_: True
@@ -78,9 +80,12 @@ arch:
     # l_encoder:
     #   _target_: models.ish.ListISH
     #   degs: [0,1,2,4]
+    # num_layers: 4
+    # feape: 0
+    # featureC: 128
     num_layers: 4
     feape: 0
-    featureC: 128
+    featureC: 64
     activation: 'softplus'
     mul_ggx: False
     use_roughness: true
@@ -96,25 +101,31 @@ arch:
     power: 2
     stds: []
     # lr: 0.30
-    lr: 0.05
+    lr: 0.025
+    mipbias_lr: 1e-4
     # lr: 0.025
 
   diffuse_module:
     _partial_: True
     _target_: models.render_modules.MLPDiffuse
     pospe: 0
-    feape: 2
-    featureC: 128
+    # feape: 2
+    # featureC: 128
+    feape: 0
+    featureC: 64
     num_layers: 3
-    lr: 1e-3
+    lr: 1e-4
 
   normal_module:
     _partial_: True
     _target_: models.render_modules.MLPNormal
     lr: 1e-3
-    pospe: 16
-    feape: 2
-    featureC: 128
+    # pospe: 16
+    # feape: 2
+    # featureC: 128
+    pospe: 0
+    feape: 0
+    featureC: 64
     num_layers: 3
 
 params:
