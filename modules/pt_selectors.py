@@ -30,7 +30,7 @@ class Selector:
         full_bounce_mask[ainds[bounce_mask], ajinds[bounce_mask]] = 1
         inv_full_bounce_mask[ainds[~bounce_mask], ajinds[~bounce_mask]] = 1
 
-        return bounce_mask, full_bounce_mask, inv_full_bounce_mask, ray_mask.unsqueeze(-1)
+        return bounce_mask, full_bounce_mask, inv_full_bounce_mask, ray_mask
 
 class TopNCombined(Selector):
     def _forward(self, app_mask, weight, VdotL, prob):

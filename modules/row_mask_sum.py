@@ -52,20 +52,15 @@ def _row_mask_sum(mat, mask):
     mask_wp = wp.from_torch(mask.int(), dtype=wp.int32)
     mask_inds_wp = wp.zeros((B, M), dtype=wp.int32, device=device)
     sum_out_wp = wp.zeros((B, D), dtype=dtype, device=device)
-    start = time.time()
     wp.launch(kernel=cache_mask_inds_kernel,
               dim=(B),
               inputs=[mask_row_sum_wp, mask_wp, mask_inds_wp, M],
               device=device)
-    print(f"cache: {time.time()-start}")
-    start = time.time()
 
     wp.launch(kernel=row_mask_sum_kernel,
               dim=(B),
               inputs=[mat_wp, mask_wp, mask_inds_wp, sum_out_wp, M, D],
               device=device)
-    print(f"rowmask: {time.time()-start}")
-    start = time.time()
 
     sum_out = wp.to_torch(sum_out_wp)
     mask_inds = wp.to_torch(mask_inds_wp)
@@ -99,12 +94,10 @@ def _row_mask_sum_backward(N, D, mask, mask_inds, dsum_out):
     dsum_out_wp = wp.from_torch(dsum_out)
     dmat_wp = wp.zeros((N, D), dtype=dtype, device = device)
 
-    start = time.time()
     wp.launch(kernel=row_mask_sum_backward_kernel,
               dim=(B),
               inputs=[mask_wp, mask_inds_wp, dsum_out_wp, dmat_wp, M, D],
               device=device)
-    print(f"deriv: {time.time()-start}")
 
     dmat = wp.to_torch(dmat_wp)
     return dmat
@@ -121,7 +114,6 @@ class _RowMaskSum(torch.autograd.Function):
         ctx.save_for_backward(mask, mask_inds)
         ctx.N = mat.shape[0]
         ctx.D = mat.shape[1]
-        print(f"total: {time.time()-start}")
         return sum_out
 
     @staticmethod

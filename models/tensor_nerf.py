@@ -17,7 +17,7 @@ import math
 from .logger import Logger
 import utils
 from samplers.alphagrid import AlphaGridSampler
-from modules import distortion_loss
+from modules import distortion_loss, row_mask_sum
 
 LOGGER = Logger(enable=False)
 FIXED_SPHERE = False
@@ -87,7 +87,7 @@ class TensorNeRF(torch.nn.Module):
                  max_normal_similarity=1, infinity_border=False, min_refraction=1.1, enable_refraction=True,
                  alphaMask_thres=0.001, rayMarch_weight_thres=0.0001,
                  max_bounce_rays=4000, roughness_rays=3, bounce_min_weight=0.001, appdim_noise_std=0.0,
-                 world_bounces=0, selector=None, bounces_per_ray=1000,
+                 world_bounces=0, selector=None,
                  update_sampler_list=[5000], max_floater_loss=6, **kwargs):
         super(TensorNeRF, self).__init__()
         self.rf = rf(aabb=aabb)
@@ -107,7 +107,6 @@ class TensorNeRF(torch.nn.Module):
             self.tonemap = tonemap
 
         self.world_bounces = world_bounces
-        self.bounces_per_ray = bounces_per_ray
         self.alphaMask = alphaMask
         self.infinity_border = infinity_border
         self.max_floater_loss = max_floater_loss
@@ -472,6 +471,7 @@ class TensorNeRF(torch.nn.Module):
                 # if not bounce_mask.all() and not is_train:
                 #     ratio_diffuse[~bounce_mask] += ratio_reflected[~bounce_mask]
                 #     ratio_reflected[~bounce_mask] = 0
+                ic(ray_mask.shape, weight.shape)
 
                 if bounce_mask.sum() > 0:
                     # decide how many bounces to calculate
@@ -486,18 +486,9 @@ class TensorNeRF(torch.nn.Module):
                     ], dim=-1)
                     D = bounce_rays.shape[-1]
 
-                    # ray_mask = (torch.arange(num_roughness_rays, device=device).reshape(1, -1, 1) < (roughness[bounce_mask] * num_roughness_rays).clip(min=1).reshape(-1, 1, 1))
-                    # ray_mask[:, 1:] &= ((noise_rays * brefdirs).sum(dim=-1, keepdim=True) < 0.99999)[:, 1:]
-                    # ray_mask = ((noise_rays * brefdirs).sum(dim=-1, keepdim=True) < 1-5e-5)
-                    # ray_mask[:, 0] = True
-                    # ray_mask = torch.sigmoid(torch.arange(num_roughness_rays, device=device).reshape(1, -1, 1) - (roughness[bounce_mask] * num_roughness_rays).clip(min=1).reshape(-1, 1, 1))
-                    # with torch.no_grad():
-                    #     bounce_weight = weight
-                    #     pt_limit = bounce_weight * self.bounces_per_ray
-                    #     ray_mask = torch.arange(num_roughness_rays, device=device).reshape(1, -1, 1) < pt_limit[full_bounce_mask].reshape(-1, 1, 1)
-
-                    incoming_light = torch.zeros((bounce_rays.shape[0], bounce_rays.shape[1], 3), device=device)
                     if recur == 0 and self.world_bounces > 0:
+                        incoming_light = torch.zeros((bounce_rays.shape[0], bounce_rays.shape[1], 3), device=device)
+                        # TODO update with ray mask
                         with torch.no_grad():
                             reflect_data = self(bounce_rays[:, :self.world_bounces, :].reshape(-1, D), focal, recur=recur+1, white_bg=False,
                                                 override_near=0.15, is_train=is_train, ndc_ray=ndc_ray, N_samples=N_samples, tonemap=False)
@@ -511,14 +502,14 @@ class TensorNeRF(torch.nn.Module):
                                 mipval[:, self.world_bounces:].reshape(-1)
                             ).reshape(-1, num_roughness_rays-self.world_bounces, 3)
                     else:
-                        incoming_light[ray_mask.squeeze(-1)] = self.render_just_bg(bounce_rays[ray_mask.squeeze(-1)].reshape(-1, D), mipval[ray_mask.squeeze(-1)].reshape(-1))
+                        incoming_light = self.render_just_bg(bounce_rays[ray_mask].reshape(-1, D), mipval[ray_mask].reshape(-1))
 
-                    self.brdf_sampler.update(bounce_rays[..., :3].reshape(-1, 3), mipval.reshape(-1), incoming_light.reshape(-1, 3))
+                    # self.brdf_sampler.update(bounce_rays[..., :3].reshape(-1, 3), mipval.reshape(-1), incoming_light.reshape(-1, 3))
                     # miplevel = self.bg_module.sa2mip(mipval)
                     # debug[full_bounce_mask][..., 0] += miplevel.mean(dim=1) / (self.bg_module.max_mip-1)
                     
                     tinted_ref_rgb = self.brdf(incoming_light, V[bounce_mask], bounce_rays[..., 3:6], outward.reshape(-1, 1, 3), app_features[bounce_mask], roughness[bounce_mask], matprop, bounce_mask, ray_mask)
-                    s = incoming_light.sum(dim=1) / (ray_mask.sum(dim=1)+1e-8)
+                    s = row_mask_sum(incoming_light, ray_mask) / (ray_mask.sum(dim=1)+1e-8)[..., None]
                     # s = incoming_light.max(dim=1).values
 
                     # if not is_train:
@@ -600,10 +591,11 @@ class TensorNeRF(torch.nn.Module):
             #     (torch.norm(p_world_normal_map, dim=-1, keepdim=True)+1e-8)
             # d_world_normal_map = torch.sum(weight[..., None] * world_normal, 1)
             # d_world_normal_map = d_world_normal_map / (torch.linalg.norm(d_world_normal_map, dim=-1, keepdim=True)+1e-8)
-            full_v_world_normal = torch.zeros(full_shape, device=device)
-            full_v_world_normal[ray_valid] = v_world_normal
-            v_world_normal_map = torch.sum(weight[..., None] * full_v_world_normal, 1)
-            v_world_normal_map = v_world_normal_map / (torch.linalg.norm(v_world_normal_map, dim=-1, keepdim=True)+1e-8)
+            # full_v_world_normal = torch.zeros(full_shape, device=device)
+            # full_v_world_normal[ray_valid] = v_world_normal
+            # v_world_normal_map = torch.sum(weight[..., None] * full_v_world_normal, 1)
+            v_world_normal_map = row_mask_sum(pweight[..., None] * v_world_normal, ray_valid)
+            # v_world_normal_map = v_world_normal_map / (torch.linalg.norm(v_world_normal_map, dim=-1, keepdim=True)+1e-8)
             # d_normal_map = torch.matmul(row_basis, d_world_normal_map.unsqueeze(-1)).squeeze(-1)
             # p_normal_map = torch.matmul(
             #     row_basis, p_world_normal_map.unsqueeze(-1)).squeeze(-1)

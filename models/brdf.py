@@ -132,6 +132,7 @@ class GGXSampler:
         NdotH = ((H * normal.reshape(-1, 1, 3)).sum(dim=-1)+1e-3).clip(min=1e-8, max=1)
         HdotV = (H * V).sum(dim=-1).abs()
         NdotV = (normal.reshape(-1, 1, 3) * V).sum(dim=-1).abs().clip(min=1e-8, max=1)
+        ic(H.shape, NdotH.shape, roughness.shape)
         D = ggx_dist(NdotH, roughness.reshape(-1, 1).clip(min=1e-3))
         # ic(NdotH.shape, NdotH, D, D.mean())
         # px.scatter(x=NdotH[0].detach().cpu().flatten(), y=D[0].detach().cpu().flatten()).show()
@@ -359,6 +360,6 @@ class MLPBRDF(torch.nn.Module):
             D = ggx_dist(NdotH, roughness.reshape(-1, 1))
             LdotN = LdotN*D
 
-        spec_color = row_mask_sum(incoming_light[ray_mask] * ref_weight * LdotN, ray_mask) / row_mask_sum(LdotN, ray_mask)
+        spec_color = row_mask_sum(incoming_light * ref_weight * LdotN, ray_mask) / row_mask_sum(LdotN, ray_mask)
 
         return spec_color
