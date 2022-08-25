@@ -5,7 +5,7 @@ arch:
   alphaMask_thres: 0.0001
   rayMarch_weight_thres: 0.0001
   max_recurs: 2
-  roughness_rays: 300
+  roughness_rays: 500
   infinity_border: False
   appdim_noise_std: 0.0
   world_bounces: 0
@@ -14,19 +14,18 @@ arch:
   selector:
     # _target_: models.modules.selectors.Surface
     _target_: modules.pt_selectors.TopNWeight
-    max_selected: 1500000
+    # max_selected: 100000
+    max_selected: 50000
+    # max_selected: 10000
     bounces_per_ray: 1000
-      
     weight_thres: 1e-3
     eps: 1e-1
 
   sampler:
     _target_: samplers.raymarch.Raymarcher
-    # max_samples: 800000
-    # max_samples: 30000
-    max_samples: 180000
+    max_samples: 160000
     grid_size: 256
-    max_steps: 512
+    max_steps: 1024
     # _target_: samplers.alphagrid.AlphaGridSampler
     # enable_alpha_mask: False
     # nEnvSamples: 0
@@ -34,31 +33,8 @@ arch:
     # update_list: []
     # multiplier: 1
 
-  rf:
-    _partial_: True
-    _target_: fields.tensoRF.TensorVMSplit
-    density_n_comp: 16
-    appearance_n_comp: 24
-    app_dim: 24
-    step_ratio: 0.5
-    density_res_multi: 1
-    contract_space: False
-    smoothing: 1.5
+  rf: 'placeholder'
 
-    N_voxel_init: 2097156 # 128**3
-    N_voxel_final: 27000000 # 300**3
-    # N_voxel_init: 27000000 # 128**3
-    # N_voxel_final: 134217728 # 300**3
-    upsamp_list: [3000,4000,5500,7000]
-
-  # brdf_sampler:
-  #   _target_: modules.brightness_sampler.BrightnessSampler
-  #   _partial_: True
-  #   n: 20
-  #   decay: 0.99
-  #   sampler:
-  #     _target_: models.brdf.GGXSampler
-  #     _partial_: True
   brdf_sampler:
     _target_: models.brdf.GGXSampler
     _partial_: True
@@ -104,7 +80,7 @@ arch:
     power: 2
     stds: []
     # lr: 0.30
-    lr: 0.025
+    lr: 0.05
     mipbias_lr: 1e-4
     # lr: 0.025
 

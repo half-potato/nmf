@@ -3,7 +3,6 @@ from icecream import ic
 
 class Selector:
     def __init__(self, bounces_per_ray, max_selected=99999999, val_thres=0, weight_thres=0, **kwargs):
-        ic(max_selected)
         self.max_selected = max_selected
         self.val_thres = val_thres
         self.weight_thres = weight_thres
@@ -20,7 +19,7 @@ class Selector:
         pt_limit = weight[app_mask] * self.bounces_per_ray
         # (B, N)
         ray_mask = torch.arange(num_roughness_rays, device=device).reshape(1, -1) < pt_limit.reshape(-1, 1)-1
-        bounce_mask &= ray_mask.sum(dim=-1) > 0
+        # bounce_mask &= ray_mask.sum(dim=-1) > 0
         ray_mask = ray_mask[bounce_mask]
 
         # derived masks

@@ -346,6 +346,7 @@ def reconstruction(args):
                     f'train_psnr = {float(np.mean(PSNRs)):.2f}'
                     + f' test_psnr = {float(np.mean(PSNRs_test)):.2f}'
                     + f' roughness = {data["roughness"].mean().item():.5f}'
+                    + f' nerr = {float(normal_loss):.1e}'
                     + f' back = {backwards_rays_loss:.5e}'
                     + f' floater = {floater_loss:.1e}'
                     + f' mipbias = {float(tensorf.bg_module.mipbias):.1e}'

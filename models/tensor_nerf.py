@@ -20,7 +20,7 @@ from samplers.alphagrid import AlphaGridSampler
 from modules import distortion_loss, row_mask_sum
 
 LOGGER = Logger(enable=False)
-FIXED_SPHERE = True
+FIXED_SPHERE = False
 
 
 def raw2alpha(sigma, dist):
@@ -520,6 +520,7 @@ class TensorNeRF(torch.nn.Module):
 
                     # s = incoming_light[:, 0]
                     debug[full_bounce_mask] += s# / (s+1)
+                    # debug[full_bounce_mask] += 1
                     # debug[full_bounce_mask] += bounce_rays[:, 0, 3:6]/2 + 0.5
                     reflect_rgb[bounce_mask] = tint[bounce_mask] * tinted_ref_rgb
                     # reflect_rgb[bounce_mask] = incoming_light.mean(dim=1)
