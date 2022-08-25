@@ -79,7 +79,7 @@ class GGXSampler:
     def update(self, *args, **kwargs):
         pass
 
-    def sample(self, num_samples, refdirs, viewdir, normal, roughness):
+    def sample(self, num_samples, refdirs, viewdir, normal, roughness, ray_mask):
         # viewdir: (B, 3)
         # normal: (B, 3)
         # roughness: B
@@ -108,19 +108,34 @@ class GGXSampler:
         z = V_stretch[..., 2].reshape(-1, 1)
         a = (1 / (1+z.detach()).clip(min=1e-5)).clip(max=1e4)
         angs = self.draw(B, num_samples).to(device)
+
+        # here is where things get really large
         u1 = angs[..., 0]
         u2 = angs[..., 1]
 
-        r = torch.sqrt(u1)
-        phi = torch.where(u2 < a, u2/a*math.pi, (u2-a)/(1-a)*math.pi + math.pi)
-        P1 = (r*safemath.safe_cos(phi)).unsqueeze(-1)
-        P2 = (r*safemath.safe_sin(phi)*torch.where(u2 < a, torch.tensor(1.0, device=device), z)).unsqueeze(-1)
-        # ic((1-a).min(), a.min(), a.max(), phi.min(), phi.max(), (1-a).max())
-        N_stretch = P1*T1 + P2*T2 + (1 - P1*P1 - P2*P2).clip(min=0).sqrt() * V_stretch
-        H_l = normalize(torch.stack([roughness.unsqueeze(-1)*N_stretch[..., 0], roughness.unsqueeze(-1)*N_stretch[..., 1], N_stretch[..., 2].clip(min=0)], dim=-1))
-        H = torch.einsum('bni,bij->bnj', H_l, row_world_basis)
+        # stretch and mask stuff to reduce memory
+        a_mask = a.expand(u1.shape)[ray_mask]
+        r_mask = roughness.reshape(-1, 1).expand(u1.shape)[ray_mask]
+        z_mask = z.expand(u1.shape)[ray_mask]
+        u1_mask = u1[ray_mask]
+        u2_mask = u2[ray_mask]
+        T1_mask = T1.expand(-1, num_samples, 3)[ray_mask]
+        T2_mask = T2.expand(-1, num_samples, 3)[ray_mask]
+        V_stretch_mask = V_stretch.expand(-1, num_samples, 3)[ray_mask]
+        row_world_basis_mask = row_world_basis.permute(0, 2, 1).reshape(B, 1, 3, 3).expand(B, num_samples, 3, 3)[ray_mask]
 
-        V = viewdir.unsqueeze(1)
+        r = torch.sqrt(u1_mask)
+        phi = torch.where(u2_mask < a_mask, u2_mask/a_mask*math.pi, (u2_mask-a_mask)/(1-a_mask)*math.pi + math.pi)
+        P1 = (r*safemath.safe_cos(phi)).unsqueeze(-1)
+        P2 = (r*safemath.safe_sin(phi)*torch.where(u2_mask < a_mask, torch.tensor(1.0, device=device), z_mask)).unsqueeze(-1)
+        # ic((1-a).min(), a.min(), a.max(), phi.min(), phi.max(), (1-a).max())
+        N_stretch = P1*T1_mask + P2*T2_mask + (1 - P1*P1 - P2*P2).clip(min=0).sqrt() * V_stretch_mask
+        H_l = normalize(torch.stack([r_mask*N_stretch[..., 0], r_mask*N_stretch[..., 1], N_stretch[..., 2].clip(min=0)], dim=-1))
+        H = torch.matmul(row_world_basis_mask, H_l.unsqueeze(-1)).squeeze(-1)
+        # H = torch.einsum('bni,bij->bnj', H_l, row_world_basis)
+
+        V = viewdir.unsqueeze(1).expand(-1, num_samples, 3)[ray_mask]
+        N = normal.reshape(-1, 1, 3).expand(-1, num_samples, 3)[ray_mask]
         L = (2.0 * (V * H).sum(dim=-1, keepdim=True) * H - V)
 
         # calculate mipval, which will be used to calculate the mip level
@@ -129,16 +144,15 @@ class GGXSampler:
 
         # H = normalize(L + viewdir.reshape(-1, 1, 3))
 
-        NdotH = ((H * normal.reshape(-1, 1, 3)).sum(dim=-1)+1e-3).clip(min=1e-8, max=1)
+        NdotH = ((H * N).sum(dim=-1)+1e-3).clip(min=1e-8, max=1)
         HdotV = (H * V).sum(dim=-1).abs()
-        NdotV = (normal.reshape(-1, 1, 3) * V).sum(dim=-1).abs().clip(min=1e-8, max=1)
-        ic(H.shape, NdotH.shape, roughness.shape)
-        D = ggx_dist(NdotH, roughness.reshape(-1, 1).clip(min=1e-3))
+        NdotV = (N * V).sum(dim=-1).abs().clip(min=1e-8, max=1)
+        D = ggx_dist(NdotH, r_mask.clip(min=1e-3))
         # ic(NdotH.shape, NdotH, D, D.mean())
         # px.scatter(x=NdotH[0].detach().cpu().flatten(), y=D[0].detach().cpu().flatten()).show()
         # assert(False)
         # ic(NdotH.mean())
-        lpdf = torch.log(D.clip(min=1e-5)) + torch.log(HdotV.clip(min=1e-5)) - torch.log(NdotV) - torch.log(roughness.reshape(-1, 1).clip(min=1e-5))
+        lpdf = torch.log(D.clip(min=1e-5)) + torch.log(HdotV.clip(min=1e-5)) - torch.log(NdotV) - torch.log(r_mask.clip(min=1e-5))
         # pdf = D * HdotV / NdotV / roughness.reshape(-1, 1)
         # pdf = NdotH / 4 / HdotV
         # pdf = D# / NdotH
@@ -311,17 +325,18 @@ class MLPBRDF(torch.nn.Module):
         # mask: mask for matprop
         D = features.shape[-1]
         device = incoming_light.device
-        n, m, _ = L.shape
-        mask = ray_mask.reshape(-1)
+        n, m = ray_mask.shape
         ray_mask = ray_mask.squeeze(-1)
 
-        features = features.reshape(n, 1, D).expand(n, m, D).reshape(-1, D)[mask]
-        eroughness = roughness.reshape(-1, 1).expand(n, m).reshape(-1, 1)[mask]
-        half = normalize(L + V.reshape(-1, 1, 3))
+        features = features.reshape(n, 1, D).expand(n, m, D)[ray_mask]
+        eroughness = roughness.reshape(-1, 1).expand(n, m)[ray_mask].reshape(-1, 1)
+        V_mask = V.reshape(-1, 1, 3).expand(n, m, 3)[ray_mask]
+        N_mask = N.reshape(-1, 1, 3).expand(n, m, 3)[ray_mask]
+        half = normalize(L + V_mask)
 
-        LdotN = (L * N).sum(dim=-1, keepdim=True).clip(min=1e-8)[ray_mask]
-        VdotN = (V.reshape(-1, 1, 3) * N).sum(dim=-1, keepdim=True).clip(min=1e-8).expand(n, m, 1)[ray_mask]
-        NdotH = ((half * N).sum(dim=-1, keepdim=True)+1e-3).clip(min=1e-20, max=1)[ray_mask]
+        LdotN = (L * N_mask).sum(dim=-1, keepdim=True).clip(min=1e-8)
+        VdotN = (V_mask * N_mask).sum(dim=-1, keepdim=True).clip(min=1e-8)
+        NdotH = ((half * N_mask).sum(dim=-1, keepdim=True)+1e-3).clip(min=1e-20, max=1)
 
         # indata = [LdotN.reshape(-1, 1), VdotN.reshape(-1, 1), NdotH.reshape(-1, 1)]
         indata = [LdotN, torch.sqrt((1-LdotN**2).clip(min=1e-8, max=1)),
@@ -338,16 +353,14 @@ class MLPBRDF(torch.nn.Module):
         if self.use_roughness:
             indata.append(eroughness)
 
-        V = V.reshape(n, 1, 3).expand(L.shape).reshape(-1, 3)
-        N = N.expand(n, m, 3).reshape(-1, 3)
         L = L.reshape(-1, 3)
         B = V.shape[0]
         if self.feape > 0:
             indata += [positional_encoding(features, self.feape)]
         if self.v_encoder is not None:
-            indata += [self.v_encoder(V, eroughness).reshape(B, -1), V]
+            indata += [self.v_encoder(V_mask, eroughness).reshape(B, -1), V_mask]
         if self.n_encoder is not None:
-            indata += [self.n_encoder(N, eroughness).reshape(B, -1), N]
+            indata += [self.n_encoder(N_mask, eroughness).reshape(B, -1), N_mask]
         if self.l_encoder is not None:
             indata += [self.l_encoder(L, eroughness).reshape(B, -1), L]
 

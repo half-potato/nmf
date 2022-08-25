@@ -20,7 +20,7 @@ from samplers.alphagrid import AlphaGridSampler
 from modules import distortion_loss, row_mask_sum
 
 LOGGER = Logger(enable=False)
-FIXED_SPHERE = False
+FIXED_SPHERE = True
 
 
 def raw2alpha(sigma, dist):
@@ -471,16 +471,17 @@ class TensorNeRF(torch.nn.Module):
                 # if not bounce_mask.all() and not is_train:
                 #     ratio_diffuse[~bounce_mask] += ratio_reflected[~bounce_mask]
                 #     ratio_reflected[~bounce_mask] = 0
-                ic(ray_mask.shape, weight.shape)
+                # if not is_train:
+                # ic(ray_mask.shape, ray_mask.sum(), bounce_mask.sum(), bounce_mask.shape)
 
                 if bounce_mask.sum() > 0:
                     # decide how many bounces to calculate
                     brefdirs = refdirs[bounce_mask].reshape(-1, 1, 3)
                     # add noise to simulate roughness
                     outward = L[bounce_mask]
-                    noise_rays, mipval = self.brdf_sampler.sample(num_roughness_rays, brefdirs, V[bounce_mask], outward, roughness[bounce_mask]**2)
+                    noise_rays, mipval = self.brdf_sampler.sample(num_roughness_rays, brefdirs, V[bounce_mask], outward, roughness[bounce_mask]**2, ray_mask)
                     bounce_rays = torch.cat([
-                        xyz_sampled[full_bounce_mask[ray_valid]][..., :3].reshape(-1, 1, 3).expand(noise_rays.shape),
+                        xyz_sampled[full_bounce_mask[ray_valid]][..., :3].reshape(-1, 1, 3).expand(-1, num_roughness_rays, 3)[ray_mask],
                         noise_rays,
                         # rays_up[full_bounce_mask].reshape(-1, 1, 3).expand(noise_rays.shape)
                     ], dim=-1)
@@ -502,7 +503,7 @@ class TensorNeRF(torch.nn.Module):
                                 mipval[:, self.world_bounces:].reshape(-1)
                             ).reshape(-1, num_roughness_rays-self.world_bounces, 3)
                     else:
-                        incoming_light = self.render_just_bg(bounce_rays[ray_mask].reshape(-1, D), mipval[ray_mask].reshape(-1))
+                        incoming_light = self.render_just_bg(bounce_rays.reshape(-1, D), mipval.reshape(-1))
 
                     # self.brdf_sampler.update(bounce_rays[..., :3].reshape(-1, 3), mipval.reshape(-1), incoming_light.reshape(-1, 3))
                     # miplevel = self.bg_module.sa2mip(mipval)

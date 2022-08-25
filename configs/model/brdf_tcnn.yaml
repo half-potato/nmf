@@ -14,7 +14,7 @@ arch:
   selector:
     # _target_: models.modules.selectors.Surface
     _target_: modules.pt_selectors.TopNWeight
-    max_selected: 50000
+    max_selected: 1500000
     bounces_per_ray: 1000
       
     weight_thres: 1e-3
@@ -23,7 +23,8 @@ arch:
   sampler:
     _target_: samplers.raymarch.Raymarcher
     # max_samples: 800000
-    max_samples: 30000
+    # max_samples: 30000
+    max_samples: 180000
     grid_size: 256
     max_steps: 512
     # _target_: samplers.alphagrid.AlphaGridSampler

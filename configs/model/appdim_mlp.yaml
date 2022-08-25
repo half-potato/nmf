@@ -15,7 +15,7 @@ arch:
   selector:
     # _target_: models.modules.selectors.Surface
     _target_: modules.pt_selectors.TopNWeight
-    max_selected: 50000
+    max_selected: 1500000
     bounces_per_ray: 1000
     weight_thres: 1e-3
     eps: 1e-1
