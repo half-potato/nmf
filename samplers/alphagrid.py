@@ -110,7 +110,7 @@ class AlphaGridSampler:
         rate_a = (self.aabb[1].to(rays_o) - rays_o) / vec
         rate_b = (self.aabb[0].to(rays_o) - rays_o) / vec
         t_min = torch.minimum(rate_a, rate_b).amax(-1).clamp(min=near, max=far)
-        t_min = near * torch.ones_like(t_min)
+        # t_min = near * torch.ones_like(t_min)
 
         rng = torch.arange(N_samples, device=rays_o.device)[None].float()
         # extend rng to sample towards infinity
@@ -131,8 +131,8 @@ class AlphaGridSampler:
             brng = brng + r
             rng = brng.reshape(-1, N_samples+N_env_samples)
         step = stepsize * rng
-        steps = torch.rand((rays_d.shape[-2], N_samples), device=device) * stepsize * 2
-        step = torch.cumsum(steps, dim=1)
+        # steps = torch.rand((rays_d.shape[-2], N_samples), device=device) * stepsize * 2
+        # step = torch.cumsum(steps, dim=1)
         interpx = (t_min[..., None] + step)
 
         rays_pts = rays_o[..., None, :] + rays_d[..., None, :] * interpx[..., None]

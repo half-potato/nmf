@@ -108,7 +108,7 @@ def reconstruction(args):
 
     aabb = train_dataset.scene_bbox.to(device)
 
-    tensorf = hydra.utils.instantiate(args.model.arch)(aabb=aabb)
+    tensorf = hydra.utils.instantiate(args.model.arch)(aabb=aabb, near_far=train_dataset.near_far)
     if args.ckpt is not None:
         # TODO REMOVE
         ckpt = torch.load(args.ckpt)
@@ -209,7 +209,7 @@ def reconstruction(args):
         # tensorf.bg_module.save('test.png')
 
     if args.ckpt is None:
-        space_optim = torch.optim.Adam(tensorf.parameters(), lr=0.01, betas=(0.9,0.99))
+        space_optim = torch.optim.Adam(tensorf.parameters(), lr=0.005, betas=(0.9,0.99))
         pbar = tqdm(range(1000))
         for _ in pbar:
             xyz = torch.rand(20000, 3, device=device)*2-1
@@ -346,6 +346,7 @@ def reconstruction(args):
                     f'train_psnr = {float(np.mean(PSNRs)):.2f}'
                     + f' test_psnr = {float(np.mean(PSNRs_test)):.2f}'
                     + f' roughness = {data["roughness"].mean().item():.5f}'
+                    + f' nerr = {float(normal_loss):.1e}'
                     + f' back = {backwards_rays_loss:.5e}'
                     + f' floater = {floater_loss:.1e}'
                     + f' mipbias = {float(tensorf.bg_module.mipbias):.1e}'

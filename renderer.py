@@ -13,7 +13,7 @@ from models.tensor_nerf import LOGGER
 import traceback
 from pathlib import Path
 
-def chunk_renderer(rays, tensorf, focal, keys=['rgb_map'], chunk=4096, **kwargs):
+def chunk_renderer(rays, tensorf, focal, keys=['rgb_map'], chunk=4096, render2completion=False, **kwargs):
 
     data = defaultdict(list)
     N_rays_all = rays.shape[0]
@@ -21,10 +21,17 @@ def chunk_renderer(rays, tensorf, focal, keys=['rgb_map'], chunk=4096, **kwargs)
         rays_chunk = rays[chunk_idx * chunk:(chunk_idx + 1) * chunk]#.to(device)
         if rays_chunk.numel() == 0:
             continue
-    
-        cdata = tensorf(rays_chunk, focal, **kwargs)
-        for key in keys:
-            data[key].append(cdata[key])
+        need_rendering = torch.ones((rays_chunk.shape[0]), dtype=bool, device=rays_chunk.device)
+        while need_rendering.sum() > 0:
+            rays_p = rays_chunk[need_rendering]
+            cdata = tensorf(rays_p, focal, **kwargs)
+            for key in keys:
+                data[key].append(cdata[key])
+            whole_valid = cdata['whole_valid']
+            # ic(whole_valid, need_rendering)
+            if not render2completion:
+                break
+            need_rendering[need_rendering.clone()] = ~whole_valid
 
     # stack it boyyy
     for key in keys:
@@ -60,7 +67,7 @@ class BundleRender:
 
         LOGGER.reset()
         data = self.base_renderer(rays, tensorf, keys=['depth_map', 'rgb_map', 'normal_map', 'acc_map', 'termination_xyz', 'debug_map', 'surf_width'],
-                                  focal=self.focal, chunk=self.chunk, **kwargs)
+                                  focal=self.focal, chunk=self.chunk, render2completion=True, **kwargs)
 
         LOGGER.save('rays.pkl')
         LOGGER.reset()
@@ -82,10 +89,8 @@ class BundleRender:
         col_map = (col_map.detach().cpu().numpy() * 255).astype('uint8')
 
         def reshape(val_map):
-            val_map = val_map.reshape((height, width, self.bundle_size, self.bundle_size, -1))
-            val_map = val_map.permute((0, 2, 1, 3, 4))
-            val_map = val_map[:, self.bundle_size//2, :, self.bundle_size//2]
-            val_map = val_map.reshape((fH, fW, -1))[:self.H, :self.W, :]
+            val_map = val_map.reshape((height, width, -1))
+            # val_map = val_map.reshape((fH, fW, -1))[:self.H, :self.W, :]
             return val_map
 
 

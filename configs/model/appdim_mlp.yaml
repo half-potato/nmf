@@ -21,29 +21,14 @@ arch:
 
   sampler:
     _target_: samplers.alphagrid.AlphaGridSampler
-    enable_alpha_mask: True
+    _partial_: True
+    enable_alpha_mask: False
     nEnvSamples: 0
-    near_far: [2, 4]
     update_list: [4000, 8000]
     multiplier: 1
     # _target_: samplers.raymarch.Raymarcher
 
-  rf:
-    _partial_: True
-    _target_: fields.tensoRF.TensorVMSplit
-    density_n_comp: 16
-    appearance_n_comp: 24
-    app_dim: 24
-    step_ratio: 0.5
-    density_res_multi: 1
-    contract_space: False
-    smoothing: 1.5
-
-    N_voxel_init: 2097156 # 128**3
-    N_voxel_final: 27000000 # 300**3
-    # N_voxel_init: 27000000 # 128**3
-    # N_voxel_final: 134217728 # 300**3
-    upsamp_list: [3000,4000,5500,7000]
+  rf: 'placeholder'
 
   # brdf_sampler:
   #   _target_: modules.brightness_sampler.BrightnessSampler
@@ -80,7 +65,7 @@ arch:
     #   degs: [0,1,2,4]
     num_layers: 5
     feape: 0
-    featureC: 128
+    featureC: 64
     activation: 'softplus'
     mul_ggx: False
     use_roughness: true
@@ -97,15 +82,15 @@ arch:
     stds: []
     # lr: 0.30
     # lr: 0.05
-    lr: 0.01
+    lr: 0.05
     mipbias_lr: 1e-3
 
   diffuse_module:
     _partial_: True
     _target_: models.render_modules.MLPDiffuse
     pospe: 0
-    feape: 2
-    featureC: 128
+    feape: 0
+    featureC: 64
     num_layers: 3
     lr: 1e-4
 
@@ -113,9 +98,9 @@ arch:
     _partial_: True
     _target_: models.render_modules.MLPNormal
     lr: 1e-3
-    pospe: 16
-    feape: 2
-    featureC: 128
+    pospe: 0
+    feape: 0
+    featureC: 64
     num_layers: 3
 
 params:
@@ -141,10 +126,10 @@ params:
 
   TV_weight_density: 0.0
   TV_weight_app: 0.0
-  normal_lambda: 3e-4
+  normal_lambda: 3e-2
   diffuse_lambda: 0
   backwards_rays_lambda: 0.1
-  floater_lambda: 1e-5
+  floater_lambda: 1e-3
   charbonier_eps: 1e-3
   ortho_weight: 0
 
@@ -154,5 +139,5 @@ params:
   num_env_train_iters: 0
   n_iters: 30000
   charbonier_loss: false
-  start_density: 1e-2
+  start_density: 1e-3
   lr_init: 0.02

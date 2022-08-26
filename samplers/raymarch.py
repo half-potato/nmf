@@ -9,7 +9,7 @@ from icecream import ic
 class Raymarcher(torch.nn.Module):
     def __init__(self,
                  bound=2.0,
-                 min_near=0.2,
+                 near_far=[0.2, 6],
                  density_thresh=0.002,
                  max_steps=1024,
                  max_samples=int(1.1e6),
@@ -23,7 +23,7 @@ class Raymarcher(torch.nn.Module):
         self.grid_size = grid_size
         # self.cascade = 1 + math.ceil(math.log2(bound))
         self.grid_size = grid_size
-        self.min_near = min_near
+        self.min_near = near_far[0]
         self.density_thresh = density_thresh
         self.dt_gamma = dt_gamma
         self.max_steps = max_steps
@@ -71,10 +71,16 @@ class Raymarcher(torch.nn.Module):
         fxyzs, deltas, ray_valid = raymarching.march_rays_train(rays_o, rays_d, self.bound, self.density_bitfield, self.cascade,
                 self.grid_size, self.max_samples, nears, fars, counter, self.mean_count, self.perturb, -1, force_all_rays, self.dt_gamma, self.max_steps)
         ray_valid = ray_valid > 0
-        retained = torch.zeros_like(ray_valid)
-        i, j = torch.stack(torch.where(ray_valid), dim=0)[:, :self.max_samples]
-        retained[i, j] = True
-        whole_valid = retained.sum(dim=1) == ray_valid.sum(dim=1) if is_train else torch.ones((N), dtype=bool, device=device)
+        whole_valid = torch.cumsum(ray_valid.sum(dim=1), dim=0) < self.max_samples
+        whole_valid = torch.ones_like(whole_valid)
+        # retained = torch.zeros_like(ray_valid)
+        # i, j = torch.stack(torch.where(ray_valid), dim=0)[:, :self.max_samples]
+        # # ic(i, j)
+        # retained[i, j] = True
+        # whole_valid = retained.sum(dim=1) == ray_valid.sum(dim=1)
+        # ic(whole_valid.sum(), whole_valid2.sum())
+        # ic(ray_valid.sum(dim=1), whole_valid)
+        # ic(ray_valid.sum(dim=1)[whole_valid].float().mean(), ray_valid.sum(dim=1)[whole_valid2].float().mean())
 
         M = max(ray_valid.sum(dim=1).max(dim=0).values, 2)
         ray_valid = ray_valid[whole_valid, :] 
