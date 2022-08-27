@@ -22,17 +22,17 @@ arch:
     eps: 1e-1
 
   sampler:
-    _target_: samplers.raymarch.Raymarcher
+    # _target_: samplers.raymarch.Raymarcher
+    # _partial_: True
+    # max_samples: 100000
+    # grid_size: 256
+    # max_steps: 1024
+    _target_: samplers.alphagrid.AlphaGridSampler
     _partial_: True
-    max_samples: 100000
-    grid_size: 256
-    max_steps: 1024
-    # _target_: samplers.alphagrid.AlphaGridSampler
-    # enable_alpha_mask: False
-    # nEnvSamples: 0
-    # near_far: [2, 4]
-    # update_list: []
-    # multiplier: 1
+    enable_alpha_mask: True
+    nEnvSamples: 0
+    update_list: [4000, 5000, 8000]
+    multiplier: 1
 
   rf:
     _partial_: True
@@ -104,7 +104,7 @@ arch:
     power: 2
     stds: []
     # lr: 0.30
-    lr: 0.025
+    lr: 0.05
     mipbias_lr: 1e-4
     # lr: 0.025
 
@@ -154,10 +154,10 @@ params:
 
   TV_weight_density: 0.0
   TV_weight_app: 0.0
-  normal_lambda: 3e-4
+  normal_lambda: 3e-2
   diffuse_lambda: 0
   backwards_rays_lambda: 0.1
-  floater_lambda: 1e-2
+  floater_lambda: 1e-3
   charbonier_eps: 1e-3
   ortho_weight: 0
 

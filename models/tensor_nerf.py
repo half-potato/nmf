@@ -238,7 +238,7 @@ class TensorNeRF(torch.nn.Module):
         require_reassignment |= self.rf.check_schedule(iter)
         require_reassignment |= self.sampler.check_schedule(iter, self.rf)
         if require_reassignment:
-            self.sampler.update(self.rf)
+            self.sampler.update(self.rf, init=True)
         return require_reassignment
 
     def render_env_sparse(self, ray_origins, env_dirs, roughness: float):
@@ -561,7 +561,7 @@ class TensorNeRF(torch.nn.Module):
             # in addition, the light is interpolated between emissive and reflective
             # reflectivity = matprop['reflectivity']
             # rgb[app_mask] = tint * ((1-reflectivity)*matprop['ambient'] + reflectivity * reflect_rgb)
-            rgb[app_mask] = reflect_rgb + matprop['diffuse']
+            rgb[app_mask] = reflect_rgb# + matprop['diffuse']
             # rgb[app_mask] = tint * reflectivity * reflect_rgb + (1-reflectivity)*matprop['diffuse']
             # rgb[app_mask] = tint * (ambient + reflectivity * reflect_rgb)
 

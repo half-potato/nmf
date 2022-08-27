@@ -110,7 +110,7 @@ class TensorVoxelBase(TensorBase):
             reso_cur = utils.N_to_reso(n_voxels, self.aabb)
             # nSamples = min(args.nSamples, cal_n_samples(reso_cur,args.step_ratio/tensorf.rf.density_res_multi))
             self.upsample_volume_grid(reso_cur)
-            return True
+            return False
         return False
 
     def get_optparam_groups(self, lr_init_spatialxyz = 0.02, lr_init_network = 0.001):

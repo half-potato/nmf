@@ -68,8 +68,10 @@ class Raymarcher(torch.nn.Module):
         counter.zero_() # set to 0
         self.local_step += 1
 
-        fxyzs, deltas, ray_valid = raymarching.march_rays_train(rays_o, rays_d, self.bound, self.density_bitfield, self.cascade,
-                self.grid_size, self.max_samples, nears, fars, counter, self.mean_count, self.perturb, -1, force_all_rays, self.dt_gamma, self.max_steps)
+        fxyzs, deltas, ray_valid = raymarching.march_rays_train(rays_o, rays_d, self.bound, self.density_bitfield,
+                self.cascade, # C
+                self.grid_size, # H
+                self.max_samples, nears, fars, counter, self.mean_count, self.perturb, -1, force_all_rays, self.dt_gamma, self.max_steps)
         ray_valid = ray_valid > 0
         whole_valid = torch.cumsum(ray_valid.sum(dim=1), dim=0) < self.max_samples
         whole_valid = torch.ones_like(whole_valid)

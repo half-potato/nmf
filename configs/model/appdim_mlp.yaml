@@ -6,14 +6,13 @@ arch:
   rayMarch_weight_thres: 0.0001
   max_recurs: 2
   roughness_rays: 200
+  bounces_per_ray: 1000
   infinity_border: False
   appdim_noise_std: 0.0
   world_bounces: 0
   max_normal_similarity: 0.99
   max_floater_loss: 1
-  bounces_per_ray: 1000
   selector:
-    # _target_: models.modules.selectors.Surface
     _target_: modules.pt_selectors.TopNWeight
     max_selected: 50000
     weight_thres: 1e-3
@@ -22,22 +21,19 @@ arch:
   sampler:
     _target_: samplers.alphagrid.AlphaGridSampler
     _partial_: True
-    enable_alpha_mask: False
+    enable_alpha_mask: True
     nEnvSamples: 0
     update_list: [4000, 8000]
     multiplier: 1
+    threshold: 0.00005
     # _target_: samplers.raymarch.Raymarcher
+    # _partial_: True
+    # max_samples: 100000
+    # grid_size: 256
+    # max_steps: 1024
 
   rf: 'placeholder'
 
-  # brdf_sampler:
-  #   _target_: modules.brightness_sampler.BrightnessSampler
-  #   _partial_: True
-  #   n: 20
-  #   decay: 0.99
-  #   sampler:
-  #     _target_: models.brdf.GGXSampler
-  #     _partial_: True
   brdf_sampler:
     _target_: models.brdf.GGXSampler
     _partial_: True
@@ -47,13 +43,8 @@ arch:
     # _target_: models.tonemap.LinearTonemap
     _target_: models.tonemap.SRGBTonemap
 
-  # brdf:
-  #   _target_: models.brdf.PBR
-  #   _partial_: True
-
   brdf:
     _target_: models.brdf.MLPBRDF
-    # _target_: models.brdf.LightTinter
     _partial_: True
     # pbr: True
 
@@ -63,7 +54,10 @@ arch:
     # l_encoder:
     #   _target_: models.ish.ListISH
     #   degs: [0,1,2,4]
-    num_layers: 5
+    # num_layers: 4
+    # feape: 0
+    # featureC: 128
+    num_layers: 4
     feape: 0
     featureC: 64
     activation: 'softplus'
@@ -82,8 +76,8 @@ arch:
     stds: []
     # lr: 0.30
     # lr: 0.05
-    lr: 0.05
-    mipbias_lr: 1e-3
+    lr: 0.025
+    mipbias_lr: 1e-4
 
   diffuse_module:
     _partial_: True
