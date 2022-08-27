@@ -54,7 +54,7 @@ class AlphaGridMask(torch.nn.Module):
         return torch.cat([ contracted, xyz_sampled[..., 3:] ], dim=-1)
 
 class AlphaGridSampler:
-    def __init__(self, enable_alpha_mask=False, threshold=1e-4, multiplier=1, near_far=[2, 6], nEnvSamples=0, update_list=[]):
+    def __init__(self, enable_alpha_mask=False, threshold=1e-4, multiplier=1, near_far=[2, 6], nEnvSamples=0, update_list=[], sample_mode='single_jitter', test_sample_mode=None):
         self.enable_alpha_mask = enable_alpha_mask
         self.alphaMask = None
         self.threshold = threshold
@@ -63,8 +63,8 @@ class AlphaGridSampler:
         self.near_far = near_far
         self.update_list = update_list
         self.grid_size = 0
-        self.cumrand = True
-        self.single_jitter = False
+        self.sample_mode = sample_mode
+        self.test_sample_mode = sample_mode if test_sample_mode is None else test_sample_mode
 
     def check_schedule(self, iteration, rf):
         if iteration in self.update_list:
@@ -126,28 +126,32 @@ class AlphaGridSampler:
                                device=rays_o.device)[None].float()
             rng = torch.cat([rng, ext_rng], dim=1)
 
-        if is_train:
-            if self.cumrand:
-                steps = torch.rand((rays_d.shape[-2], N_samples), device=device) * stepsize + stepsize/2
-                step = torch.cumsum(steps, dim=1)
-            else:
+        sample_mode = self.sample_mode if is_train else self.test_sample_mode
+        match sample_mode:
+            case 'multi_jitter':
                 rng = rng.repeat(rays_d.shape[-2], 1)
-                # N, N_samples
-                # add noise along each ray
                 brng = rng.reshape(-1, N_samples+N_env_samples)
-                # brng = brng + torch.rand_like(brng[:, [0], [0]])
-                # r = torch.rand_like(brng[:, 0:1, 0:1])
-                # r = torch.rand_like(brng[:, 0:1])
-                if self.single_jitter:
-                    r = torch.rand_like(brng[:, 0:1])
-                else:
-                    r = torch.rand_like(brng)
+                r = torch.rand_like(brng)
                 brng = brng + r
                 rng = brng.reshape(-1, N_samples+N_env_samples)
                 step = stepsize * rng
-        else:
-            step = stepsize * rng
-        # steps = torch.rand((rays_d.shape[-2], N_samples), device=device) * stepsize * 2
+
+            case 'single_jitter':
+                rng = rng.repeat(rays_d.shape[-2], 1)
+                brng = rng.reshape(-1, N_samples+N_env_samples)
+                r = torch.rand_like(brng[:, 0:1])
+                r = torch.rand_like(brng)
+                brng = brng + r
+                rng = brng.reshape(-1, N_samples+N_env_samples)
+                step = stepsize * rng
+
+            case 'cumrand':
+                steps = torch.rand((rays_d.shape[-2], N_samples), device=device) * stepsize * 2
+                step = torch.cumsum(steps, dim=1)
+
+            case 'midpoint':
+                step = stepsize * rng
+
         interpx = (t_min[..., None] + step)
 
         rays_pts = rays_o[..., None, :] + rays_d[..., None, :] * interpx[..., None]

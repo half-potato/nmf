@@ -26,6 +26,8 @@ arch:
     update_list: [4000, 8000]
     multiplier: 1
     threshold: 0.00005
+    sample_mode: multi_jitter
+    # test_sample_mode: cumrand
     # _target_: samplers.raymarch.Raymarcher
     # _partial_: True
     # max_samples: 100000
