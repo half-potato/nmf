@@ -72,10 +72,6 @@ class AlphaGridSampler:
         return False
 
     def update(self, rf, init=False):
-        self.nSamples = rf.nSamples*self.multiplier
-        self.stepSize = rf.stepSize/self.multiplier
-        ic(self.nSamples, self.stepSize)
-
         self.aabb = rf.aabb
         self.units = rf.units
         self.contract_space = rf.contract_space
@@ -85,6 +81,9 @@ class AlphaGridSampler:
             apply_correction = not torch.all(self.grid_size == rf.grid_size)
             # rf.shrink(new_aabb, apply_correction)
             self.grid_size = rf.grid_size
+        self.nSamples = rf.nSamples*self.multiplier
+        self.stepSize = rf.stepSize/self.multiplier
+        ic(self.nSamples, self.stepSize)
 
     def sample_ray_ndc(self, rays_o, rays_d, focal, is_train=True, N_samples=-1):
         N_samples = N_samples if N_samples > 0 else self.nSamples
@@ -202,7 +201,8 @@ class AlphaGridSampler:
         alpha = alpha.clamp(0, 1).transpose(0, 2).contiguous()[None, None]
         total_voxels = grid_size[0] * grid_size[1] * grid_size[2]
 
-        ks = 2*int(5 * 128 / grid_size / 2)+1
+        ks = 2*int(5 * max(grid_size) / 128 / 2)+1
+        ic(ks)
         alpha = F.max_pool3d(alpha, kernel_size=ks,
                              padding=ks // 2, stride=1).view(list(grid_size)[::-1])
         # alpha[alpha >= self.alphaMask_thres] = 1
