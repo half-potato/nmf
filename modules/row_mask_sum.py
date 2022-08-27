@@ -50,8 +50,11 @@ def _row_mask_sum(mat, mask):
     mask_row_sum_wp = wp.from_torch(mask.sum(dim=1).int(), dtype=wp.int32)
     mat_wp = wp.from_torch(mat)
     mask_wp = wp.from_torch(mask.int(), dtype=wp.int32)
-    mask_inds_wp = wp.zeros((B, M), dtype=wp.int32, device=device)
-    sum_out_wp = wp.zeros((B, D), dtype=dtype, device=device)
+    mask_inds_wp = wp.from_torch(torch.zeros((B, M), device=mat.device, dtype=torch.int32), dtype=wp.int32)
+    sum_out_wp = wp.from_torch(torch.zeros((B, D), device=mat.device, dtype=mat.dtype))
+
+    # mask_inds_wp = wp.zeros((B, M), dtype=wp.int32, device=device)
+    # sum_out_wp = wp.zeros((B, D), dtype=dtype, device=device)
     wp.launch(kernel=cache_mask_inds_kernel,
               dim=(B),
               inputs=[mask_row_sum_wp, mask_wp, mask_inds_wp, M],
@@ -92,7 +95,8 @@ def _row_mask_sum_backward(N, D, mask, mask_inds, dsum_out):
     mask_wp = wp.from_torch(mask.int(), dtype=wp.int32)
     mask_inds_wp = wp.from_torch(mask_inds.int(), dtype=wp.int32)
     dsum_out_wp = wp.from_torch(dsum_out)
-    dmat_wp = wp.zeros((N, D), dtype=dtype, device = device)
+    dmat_wp = wp.from_torch(torch.zeros((N, D), device=dsum_out.device, dtype=dsum_out.dtype))
+    # dmat_wp = wp.zeros((N, D), dtype=dtype, device = device)
 
     wp.launch(kernel=row_mask_sum_backward_kernel,
               dim=(B),
@@ -123,6 +127,17 @@ class _RowMaskSum(torch.autograd.Function):
         return dmat, None
 
 row_mask_sum = _RowMaskSum.apply
+
+# warp isn't faster
+def row_mask_sum(mat, mask):
+    B, M = mask.shape
+    N, D = mat.shape
+    device = mat.device
+    dtype = mat.dtype
+    full_mat = torch.zeros((B, M, D), dtype=dtype, device=device)
+    full_mat[mask] = mat
+    return full_mat.sum(dim=1)
+
 
 if __name__ == "__main__":
     B = 100

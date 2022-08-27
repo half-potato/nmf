@@ -2,6 +2,7 @@ import warp as wp
 from .distortion_loss_pseudo import distortion_loss_pseudo
 from icecream import ic
 import torch
+import time
 
 wp.init()
 @wp.kernel
@@ -45,28 +46,31 @@ def distortion_bidir_kernel(
     dm[b, i] = dm1
 
     wp.atomic_add(loss, 0, inter+inner)
-    wp.atomic_add(loss, 0, inter)
 
 
 def distortion_bidir(midpoint, full_weight, dt):
     B, M = midpoint.shape
-    device = midpoint.device
     device = 'cuda'
-    dtype = midpoint.dtype
     dtype = float
+
 
     midpoint_wp = wp.from_torch(midpoint)
     full_weight_wp = wp.from_torch(full_weight)
     dt_wp = wp.from_torch(dt)
     loss = wp.array([0.0], dtype=dtype, device=device)
-    dm = wp.zeros((B, M), dtype=dtype, device=device)
-    dw = wp.zeros((B, M), dtype=dtype, device=device)
-    ddt = wp.zeros((B, M), dtype=dtype, device=device)
+    # dm = wp.zeros((B, M), dtype=dtype, device=device)
+    # dw = wp.zeros((B, M), dtype=dtype, device=device)
+    # ddt = wp.zeros((B, M), dtype=dtype, device=device)
+    device = midpoint.device
+    dtype = midpoint.dtype
+    dm = wp.from_torch(torch.zeros((B, M), dtype=dtype, device=device))
+    dw = wp.from_torch(torch.zeros((B, M), dtype=dtype, device=device))
+    ddt = wp.from_torch(torch.zeros((B, M), dtype=dtype, device=device))
 
     wp.launch(kernel=distortion_bidir_kernel,
               dim=(B, M),
               inputs=[midpoint_wp, full_weight_wp, dt_wp, dm, dw, ddt, loss, M],
-              device=device)
+              device='cuda')
     n = B
     loss = wp.to_torch(loss)/n
     dm = wp.to_torch(dm)/n

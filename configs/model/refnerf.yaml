@@ -16,8 +16,10 @@ arch:
 
   sampler:
     _target_: samplers.alphagrid.AlphaGridSampler
+    _partial_: True
     enable_alpha_mask: False
     nEnvSamples: 0
+    multiplier: 1
     # _target_: samplers.raymarch.Raymarcher
 
   tonemap:

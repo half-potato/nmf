@@ -82,7 +82,7 @@ def lossfun_distortion2(t, w, dt):
     return floater_loss_1 + floater_loss_2
 
 class TensorNeRF(torch.nn.Module):
-    def __init__(self, rf, aabb, diffuse_module, sampler, brdf_sampler=None, brdf=None, tonemap=None, normal_module=None, ref_module=None, bg_module=None,
+    def __init__(self, rf, aabb, near_far, diffuse_module, sampler, brdf_sampler=None, brdf=None, tonemap=None, normal_module=None, ref_module=None, bg_module=None,
                  alphaMask=None, specularity_threshold=0.005, max_recurs=0,
                  max_normal_similarity=1, infinity_border=False, min_refraction=1.1, enable_refraction=True,
                  alphaMask_thres=0.001, rayMarch_weight_thres=0.0001,
@@ -96,8 +96,8 @@ class TensorNeRF(torch.nn.Module):
         self.diffuse_module = diffuse_module(in_channels=self.rf.app_dim)
         self.brdf = brdf(in_channels=self.rf.app_dim) if brdf is not None else None
         self.brdf_sampler = brdf_sampler if brdf_sampler is None else brdf_sampler(num_samples=roughness_rays)
-        self.sampler = sampler
-        self.sampler2 = AlphaGridSampler(near_far=[2, 6])
+        self.sampler = sampler(near_far=near_far)
+        self.sampler2 = AlphaGridSampler(near_far=near_far)
         ic(self.sampler)
         self.selector = selector
         self.bg_module = bg_module
@@ -237,7 +237,7 @@ class TensorNeRF(torch.nn.Module):
         require_reassignment |= self.rf.check_schedule(iter)
         require_reassignment |= self.sampler.check_schedule(iter, self.rf)
         if require_reassignment:
-            self.sampler.update(self.rf)
+            self.sampler.update(self.rf, init=True)
         return require_reassignment
 
     def render_env_sparse(self, ray_origins, env_dirs, roughness: float):
@@ -472,7 +472,6 @@ class TensorNeRF(torch.nn.Module):
                 #     ratio_diffuse[~bounce_mask] += ratio_reflected[~bounce_mask]
                 #     ratio_reflected[~bounce_mask] = 0
                 # if not is_train:
-                # ic(ray_mask.shape, ray_mask.sum(), bounce_mask.sum(), bounce_mask.shape)
 
                 if bounce_mask.sum() > 0:
                     # decide how many bounces to calculate
@@ -549,7 +548,6 @@ class TensorNeRF(torch.nn.Module):
             # in addition, the light is interpolated between emissive and reflective
             # reflectivity = matprop['reflectivity']
             # rgb[app_mask] = tint * ((1-reflectivity)*matprop['ambient'] + reflectivity * reflect_rgb)
-            # rgb[app_mask] = reflect_rgb + matprop['diffuse']
             rgb[app_mask] = reflect_rgb# + matprop['diffuse']
             # rgb[app_mask] = tint * reflectivity * reflect_rgb + (1-reflectivity)*matprop['diffuse']
             # rgb[app_mask] = tint * (ambient + reflectivity * reflect_rgb)
@@ -593,10 +591,9 @@ class TensorNeRF(torch.nn.Module):
             #     (torch.norm(p_world_normal_map, dim=-1, keepdim=True)+1e-8)
             # d_world_normal_map = torch.sum(weight[..., None] * world_normal, 1)
             # d_world_normal_map = d_world_normal_map / (torch.linalg.norm(d_world_normal_map, dim=-1, keepdim=True)+1e-8)
-            # full_v_world_normal = torch.zeros(full_shape, device=device)
-            # full_v_world_normal[ray_valid] = v_world_normal
-            # v_world_normal_map = torch.sum(weight[..., None] * full_v_world_normal, 1)
-            v_world_normal_map = row_mask_sum(pweight[..., None] * v_world_normal, ray_valid)
+            full_v_world_normal = torch.zeros(full_shape, device=device)
+            full_v_world_normal[ray_valid] = v_world_normal
+            v_world_normal_map = torch.sum(weight[..., None] * full_v_world_normal, 1)
             # v_world_normal_map = v_world_normal_map / (torch.linalg.norm(v_world_normal_map, dim=-1, keepdim=True)+1e-8)
             # d_normal_map = torch.matmul(row_basis, d_world_normal_map.unsqueeze(-1)).squeeze(-1)
             # p_normal_map = torch.matmul(
