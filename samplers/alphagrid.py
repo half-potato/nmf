@@ -73,7 +73,7 @@ class AlphaGridSampler:
         if not init and self.enable_alpha_mask:
             new_aabb = self.updateAlphaMask(rf, rf.grid_size)
             apply_correction = not torch.all(self.grid_size == rf.grid_size)
-            # rf.shrink(new_aabb, apply_correction)
+            rf.shrink(new_aabb, apply_correction)
             self.grid_size = rf.grid_size
         self.nSamples = rf.nSamples*self.multiplier
         self.stepSize = rf.stepSize/self.multiplier
@@ -193,18 +193,18 @@ class AlphaGridSampler:
 
         dense_xyz = dense_xyz.transpose(0, 2).contiguous()
         alpha = alpha.clamp(0, 1).transpose(0, 2).contiguous()[None, None]
-        total_voxels = grid_size[0] * grid_size[1] * grid_size[2]
 
         ks = 2*int(5 * max(grid_size) / 128 / 2)+1
-        ic(ks)
+        ic(ks, self.stepSize)
         alpha = F.max_pool3d(alpha, kernel_size=ks,
                              padding=ks // 2, stride=1).view(list(grid_size)[::-1])
         # alpha[alpha >= self.alphaMask_thres] = 1
         # alpha[alpha < self.alphaMask_thres] = 0
 
-        self.alphaMask = AlphaGridMask(self.aabb, alpha > self.threshold).to(rf.get_device())
+        occupied = alpha > self.threshold
+        self.alphaMask = AlphaGridMask(self.aabb, occupied).to(rf.get_device())
 
-        valid_xyz = dense_xyz[alpha > self.threshold]
+        valid_xyz = dense_xyz[occupied]
         ic(alpha.max(), alpha.mean())
         if valid_xyz.shape[0] < 1:
             print("No volume")
@@ -215,8 +215,7 @@ class AlphaGridSampler:
 
         new_aabb = torch.stack((xyz_min, xyz_max))
 
-        total = torch.sum(alpha)
-        print(f"bbox: {xyz_min, xyz_max} alpha rest {total/total_voxels*100}f occupied: {(alpha>self.threshold).sum()/alpha.numel()}")
+        print(f"bbox: {xyz_min, xyz_max} alpha average {alpha.mean()} occupied: {(occupied).sum()/occupied.numel()*100}%")
         return new_aabb
 
 
