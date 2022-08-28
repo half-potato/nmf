@@ -21,7 +21,8 @@ arch:
   sampler:
     _target_: samplers.continuous_alphagrid.ContinuousAlphagrid
     _partial_: True
-    multiplier: 1
+    multiplier: 2
+    sample_mode: multi_jitter
     threshold: 0.0001
     grid_size: 256
     bound: 1.0

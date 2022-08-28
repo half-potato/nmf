@@ -4,6 +4,51 @@ from icecream import ic
 import torch
 import time
 
+# wrap a torch tensor to a wp array, data is not copied
+def from_torch(t, dtype=None, requires_grad=None):
+    # ensure tensors are contiguous
+    assert(t.is_contiguous())
+    if (t.dtype != torch.float32 and t.dtype != torch.int32):
+        raise RuntimeError("Error aliasing Torch tensor to Warp array. Torch tensor must be float32 or int32 type")
+    if dtype is None:
+        dtype = wp.types.float32 if t.dtype == torch.float32 else wp.types.int32
+
+    requires_grad = requires_grad if requires_grad is not None else t.requires_grad
+    # if target is a vector or matrix type
+    # then check if trailing dimensions match
+    # the target type and update the shape
+    if hasattr(dtype, "_shape_"):
+        
+        try:
+            num_dims = len(dtype._shape_)
+            type_dims = dtype._shape_
+            source_dims = t.shape[-num_dims:]
+
+            for i in range(len(type_dims)):
+                if source_dims[i] != type_dims[i]:
+                    raise RuntimeError()
+
+            shape = t.shape[:-num_dims]
+
+        except:
+            raise RuntimeError(f"Could not convert source Torch tensor with shape {t.shape}, to Warp array with dtype={dtype}, ensure that trailing dimensions match ({source_dims} != {type_dims}")
+    
+    else:
+        shape = t.shape
+
+    a = wp.types.array(
+        ptr=t.data_ptr(),
+        dtype=dtype,
+        shape=shape,
+        copy=False,
+        owner=False,
+        requires_grad=requires_grad,
+        device=t.device.type)
+
+    # save a reference to the source tensor, otherwise it will be deallocated
+    a.tensor = t
+    return a
+
 wp.init()
 @wp.kernel
 def distortion_bidir_kernel(
@@ -54,18 +99,18 @@ def distortion_bidir(midpoint, full_weight, dt):
     dtype = float
 
 
-    midpoint_wp = wp.from_torch(midpoint)
-    full_weight_wp = wp.from_torch(full_weight)
-    dt_wp = wp.from_torch(dt)
+    midpoint_wp = from_torch(midpoint, requires_grad=False)
+    full_weight_wp = from_torch(full_weight, requires_grad=False)
+    dt_wp = from_torch(dt, requires_grad=False)
     loss = wp.array([0.0], dtype=dtype, device=device)
     # dm = wp.zeros((B, M), dtype=dtype, device=device)
     # dw = wp.zeros((B, M), dtype=dtype, device=device)
     # ddt = wp.zeros((B, M), dtype=dtype, device=device)
     device = midpoint.device
     dtype = midpoint.dtype
-    dm = wp.from_torch(torch.zeros((B, M), dtype=dtype, device=device))
-    dw = wp.from_torch(torch.zeros((B, M), dtype=dtype, device=device))
-    ddt = wp.from_torch(torch.zeros((B, M), dtype=dtype, device=device))
+    dm = from_torch(torch.zeros((B, M), dtype=dtype, device=device), requires_grad=False)
+    dw = from_torch(torch.zeros((B, M), dtype=dtype, device=device), requires_grad=False)
+    ddt = from_torch(torch.zeros((B, M), dtype=dtype, device=device), requires_grad=False)
 
     wp.launch(kernel=distortion_bidir_kernel,
               dim=(B, M),
