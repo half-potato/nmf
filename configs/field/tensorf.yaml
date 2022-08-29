@@ -9,7 +9,8 @@ density_res_multi: 1
 contract_space: False
 smoothing: 1.5
 # activation: 'softplus_shift'
-activation: 'softplus'
+# activation: 'softplus'
+activation: 'exp'
 # activation: 'relu_shift'
 density_shift: -10
 

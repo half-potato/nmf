@@ -48,7 +48,8 @@ class AlphaGridMask(torch.nn.Module):
             return normed
 
 class AlphaGridSampler:
-    def __init__(self, enable_alpha_mask=False, threshold=1e-4, multiplier=1, near_far=[2, 6], nEnvSamples=0, update_list=[]):
+    def __init__(self, aabb, enable_alpha_mask=False, threshold=1e-4, multiplier=1, near_far=[2, 6], nEnvSamples=0, update_list=[]):
+        self.aabb = aabb
         self.enable_alpha_mask = enable_alpha_mask
         self.alphaMask = None
         self.threshold = threshold
@@ -65,6 +66,7 @@ class AlphaGridSampler:
             self.update(rf)
         return False
 
+    @torch.no_grad()
     def update(self, rf, init=False):
         self.aabb = rf.aabb
         self.units = rf.units

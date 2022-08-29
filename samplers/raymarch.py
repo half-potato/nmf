@@ -75,16 +75,7 @@ class Raymarcher(torch.nn.Module):
         ray_valid = ray_valid > 0
         whole_valid = torch.cumsum(ray_valid.sum(dim=1), dim=0) < self.max_samples
         whole_valid = torch.ones_like(whole_valid)
-        # retained = torch.zeros_like(ray_valid)
-        # i, j = torch.stack(torch.where(ray_valid), dim=0)[:, :self.max_samples]
-        # # ic(i, j)
-        # retained[i, j] = True
-        # whole_valid = retained.sum(dim=1) == ray_valid.sum(dim=1)
-        # ic(whole_valid.sum(), whole_valid2.sum())
-        # ic(ray_valid.sum(dim=1), whole_valid)
-        # ic(ray_valid.sum(dim=1)[whole_valid].float().mean(), ray_valid.sum(dim=1)[whole_valid2].float().mean())
 
-        M = max(ray_valid.sum(dim=1).max(dim=0).values, 2)
         ray_valid = ray_valid[whole_valid, :] 
         fxyzs = fxyzs[whole_valid, :] 
         z_vals = deltas[whole_valid, :, 1]

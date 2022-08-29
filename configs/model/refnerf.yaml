@@ -14,13 +14,24 @@ arch:
   
   rf: 'placeholder'
 
+  # sampler:
+  #   _target_: samplers.alphagrid.AlphaGridSampler
+  #   _partial_: True
+  #   enable_alpha_mask: False
+  #   nEnvSamples: 0
+  #   multiplier: 1
+  #   # _target_: samplers.raymarch.Raymarcher
+
   sampler:
-    _target_: samplers.alphagrid.AlphaGridSampler
+    _target_: samplers.continuous_alphagrid.ContinuousAlphagrid
     _partial_: True
-    enable_alpha_mask: False
-    nEnvSamples: 0
     multiplier: 1
-    # _target_: samplers.raymarch.Raymarcher
+    dynamic_batchsize: False
+    sample_mode: multi_jitter
+    test_sample_mode: midpoint
+    threshold: 0.0001
+    grid_size: 128
+    bound: 1.5
 
   tonemap:
     # _target_: models.tonemap.HDRTonemap
@@ -29,13 +40,14 @@ arch:
 
   bg_module:
     _target_: models.bg_modules.HierarchicalCubeMap
-    bg_resolution: 1600
-    num_levels: 7
+    bg_resolution: 1024
+    mipbias: -1
+    num_levels: 1
     activation: 'softplus'
     power: 2
     stds: []
-    # lr: 0.30
     lr: 0.05
+    mipbias_lr: 1e-4
 
   diffuse_module:
     _partial_: True
@@ -48,31 +60,31 @@ arch:
     featureC: 128
     num_layers: 3
 
-  ref_module:
-    _partial_: True
-    _target_: models.render_modules.MLPRender_FP
-    feape: 0
-    lr: 1e-4
-    # view_encoder:
-    #   _target_: models.ish.FullISH
-    #   max_degree: 4
-    ref_encoder:
-      _target_: models.ish.ListISH
-      degs: [0,1,2,4,8,16]
-    # ref_encoder:
-    #   _target_: models.render_modules.PE
-    #   max_degree: 4
-    # ref_encoder:
-    #   _target_: models.ish.ISH
-    #   max_degree: 6
-    # ref_encoder:
-    #   _target_: models.ish.RandISH
-    #   rand_n: 64
-    #   std: 5
-    # activation: 'softplus'
-    activation: 'sigmoid'
-    featureC: 256
-    num_layers: 8
+  # ref_module:
+  #   _partial_: True
+  #   _target_: models.render_modules.MLPRender_FP
+  #   feape: 0
+  #   lr: 1e-4
+  #   # view_encoder:
+  #   #   _target_: models.ish.FullISH
+  #   #   max_degree: 4
+  #   ref_encoder:
+  #     _target_: models.ish.ListISH
+  #     degs: [0,1,2,4,8,16]
+  #   # ref_encoder:
+  #   #   _target_: models.render_modules.PE
+  #   #   max_degree: 4
+  #   # ref_encoder:
+  #   #   _target_: models.ish.ISH
+  #   #   max_degree: 6
+  #   # ref_encoder:
+  #   #   _target_: models.ish.RandISH
+  #   #   rand_n: 64
+  #   #   std: 5
+  #   # activation: 'softplus'
+  #   activation: 'sigmoid'
+  #   featureC: 256
+  #   num_layers: 8
 
   # normal_module:
   #   _partial_: True

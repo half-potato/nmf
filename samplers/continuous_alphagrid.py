@@ -10,6 +10,7 @@ import time
 class ContinuousAlphagrid(torch.nn.Module):
     def __init__(self,
                  bound=2.0,
+                 aabb=None,
                  near_far=[0.2, 6],
                  threshold=0.002,
                  multiplier=1, 
@@ -17,10 +18,12 @@ class ContinuousAlphagrid(torch.nn.Module):
                  test_sample_mode=None,
                  update_freq=16,
                  max_samples=int(1.1e6),
+                 dynamic_batchsize=False,
                  grid_size=128):
         super().__init__()
 
-        self.bound = bound
+        self.bound = bound if aabb is None else aabb.abs().max()
+        self.dynamic_batchsize = dynamic_batchsize
         self.update_freq = update_freq
         self.cascade = int(1 + math.ceil(math.log2(bound)))
         self.grid_size = grid_size
@@ -36,11 +39,6 @@ class ContinuousAlphagrid(torch.nn.Module):
         self.sample_mode = sample_mode
         self.test_sample_mode = sample_mode if test_sample_mode is None else test_sample_mode
         # self.stepsize = 0.005
-        # aabb_train = torch.FloatTensor(aabb)
-        aabb_train = torch.FloatTensor([-bound, -bound, -bound, bound, bound, bound])
-        aabb_infer = aabb_train.clone()
-        self.register_buffer('aabb_train', aabb_train)
-        self.register_buffer('aabb_infer', aabb_infer)
 
         # extra state for cuda raymarching
         # density grid
@@ -51,10 +49,6 @@ class ContinuousAlphagrid(torch.nn.Module):
         self.mean_density = 0
         self.iter_density = 0
         # step counter
-        step_counter = torch.zeros(16, 2, dtype=torch.int32) # 16 is hardcoded for averaging...
-        self.register_buffer('step_counter', step_counter)
-        self.mean_count = 0
-        self.local_step = 0
 
     def sample_ray_ndc(self, rays_o, rays_d, focal, is_train=True, N_samples=-1):
         N_samples = N_samples if N_samples > 0 else self.nSamples
@@ -139,6 +133,7 @@ class ContinuousAlphagrid(torch.nn.Module):
 
         return rays_pts, interpx, ~mask_outbbox, env_mask
 
+    @torch.no_grad()
     def sample(self, rays_chunk, focal, ndc_ray=False, override_near=None, is_train=False, N_samples=-1):
         viewdirs = rays_chunk[:, 3:6]
         if ndc_ray:
@@ -174,7 +169,18 @@ class ContinuousAlphagrid(torch.nn.Module):
         ray_valid = ~ray_invalid
 
         dists = torch.cat((z_vals[:, 1:] - z_vals[:, :-1], torch.zeros_like(z_vals[:, :1])), dim=-1)
-        return xyz_sampled[ray_valid], ray_valid, M, z_vals, dists, torch.ones((N), dtype=bool, device=device)
+
+        if self.dynamic_batchsize and is_train:
+            whole_valid = torch.cumsum(ray_valid.sum(dim=1), dim=0) < self.max_samples
+            ray_valid = ray_valid[whole_valid, :] 
+            xyz_sampled = xyz_sampled[whole_valid, :] 
+            z_vals = z_vals[whole_valid, :]
+            dists = dists[whole_valid, :]
+        else:
+            whole_valid = torch.ones((N), dtype=bool, device=device)
+        M = dists.shape[1]
+
+        return xyz_sampled[ray_valid], ray_valid, M, z_vals, dists, whole_valid
 
     def normalize_coord(self, xyz_sampled, contract_space):
         coords = (xyz_sampled[..., :3]-self.aabb[0]) * self.invgrid_size - 1
@@ -188,13 +194,18 @@ class ContinuousAlphagrid(torch.nn.Module):
         else:
             return normed
 
+    def xyz2cas(self, xyz):
+        mx = xyz[..., :3].abs().max(dim=-1).values
+        man, exp = torch.frexp(mx)
+        return exp.clip(0, self.cascade-1).long()
+
     def xyz2coords(self, xyz):
-        cas = 0
+        cas = self.xyz2cas(xyz)
         cas_xyzs = xyz
-        bound = min(2 ** cas, self.bound)
+        bound = (2 ** cas).clip(max=self.bound)
         half_grid_size = bound / self.grid_size
 
-        o_xyzs = (cas_xyzs / (bound - half_grid_size)).clip(min=-1, max=1)
+        o_xyzs = (cas_xyzs / (bound - half_grid_size)[..., None]).clip(min=-1, max=1)
         coords = (o_xyzs+1) / 2 * (self.grid_size - 1)
         return coords.long(), cas
 
@@ -289,9 +300,7 @@ class ContinuousAlphagrid(torch.nn.Module):
         self.units = rf.units
         self.contract_space = rf.contract_space
         # reso_mask = reso_cur
-        if not init:
-            self.update_density(rf, decay, S=S)
-            # self.grid_size = rf.grid_size
+        self.update_density(rf, decay, S=S)
         self.nSamples = rf.nSamples*self.multiplier
         self.stepSize = rf.stepSize/self.multiplier
         # ic(self.nSamples, self.stepSize)
@@ -371,10 +380,6 @@ class ContinuousAlphagrid(torch.nn.Module):
         self.density_bitfield = raymarching.packbits(self.density_grid, self.active_density_thresh, self.density_bitfield)
 
         ### update step counter
-        total_step = min(16, self.local_step)
-        if total_step > 0:
-            self.mean_count = int(self.step_counter[:total_step, 0].sum().item() / total_step)
-        self.local_step = 0
 
-        # print(f'[density grid] {time.time()-start} min={self.density_grid.min().item():.4f}, max={self.density_grid.max().item():.4f}, mean={self.mean_density:.4f}, thresh={self.active_density_thresh} occ_rate={(self.density_grid > self.threshold).sum() / (128**3 * self.cascade):.3f} | [step counter] mean={self.mean_count}')
+        # print(f'[density grid] {time.time()-start} min={self.density_grid.min().item():.4f}, max={self.density_grid.max().item():.4f}, mean={self.mean_density:.4f}, thresh={self.active_density_thresh} occ_rate={(self.density_grid > self.threshold).sum() / (128**3 * self.cascade):.3f}')
 

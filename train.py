@@ -106,7 +106,10 @@ def reconstruction(args):
     OmegaConf.save(config=args, f=f'{logfolder}/config.yaml')
     summary_writer = SummaryWriter(logfolder)
 
-    aabb = train_dataset.scene_bbox.to(device)
+    ic(args.dataset.aabb_scale)
+    aabb_scale = 1 if not hasattr(args.dataset, "aabb_scale") else args.dataset.aabb_scale
+    ic(aabb_scale)
+    aabb = train_dataset.scene_bbox.to(device) * aabb_scale
 
     tensorf = hydra.utils.instantiate(args.model.arch)(aabb=aabb, near_far=train_dataset.near_far)
     if args.ckpt is not None:
@@ -240,6 +243,7 @@ def reconstruction(args):
     scheduler = lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=params.n_iters, T_mult=1, eta_min=1e-3)
     # scheduler = lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=1000, T_mult=1, eta_min=1e-3)
     if True:
+    # with torch.profiler.profile(record_shapes=True, schedule=torch.profiler.schedule(wait=1, warmup=1, active=20), with_stack=True) as p:
     # with torch.autograd.detect_anomaly():
         for iteration in pbar:
 
@@ -384,6 +388,9 @@ def reconstruction(args):
             #     # filter rays outside the bbox
             #     allrays, allrgbs, mask = tensorf.filtering_rays(allrays, allrgbs, focal)
             #     trainingSampler = SimpleSampler(allrays.shape[0], params.batch_size)
+
+    #         p.step()
+    # p.export_chrome_trace('p.trace')
 
 
     # prof.export_chrome_trace('trace.json')
