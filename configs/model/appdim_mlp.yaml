@@ -21,13 +21,11 @@ arch:
   sampler:
     _target_: samplers.continuous_alphagrid.ContinuousAlphagrid
     _partial_: True
-    # sample_mode: cumrand
-    sample_mode: multi_jitter
     multiplier: 1
     dynamic_batchsize: False
     sample_mode: multi_jitter
     test_sample_mode: midpoint
-    threshold: 0.0001
+    threshold: 0.0002
     grid_size: 128
     bound: 1.5
 

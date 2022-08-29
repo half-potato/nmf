@@ -439,7 +439,7 @@ class TensorNeRF(torch.nn.Module):
 
                         with torch.no_grad():
                             incoming_light = self(bounce_rays.reshape(-1, D), focal, recur=recur+1, white_bg=False,
-                                                override_near=0.15, is_train=is_train, ndc_ray=ndc_ray, N_samples=N_samples, tonemap=False)
+                                                override_near=0.15, is_train=is_train, ndc_ray=ndc_ray, N_samples=N_samples, tonemap=False)['rgb_map']
                     else:
                         incoming_light = self.render_just_bg(bounce_rays.reshape(-1, D), mipval.reshape(-1))
 
@@ -517,7 +517,7 @@ class TensorNeRF(torch.nn.Module):
                 # ], dim=1)
                 # d_normal_map = torch.matmul(row_basis, d_world_normal_map.unsqueeze(-1)).squeeze(-1)
 
-                v_world_normal_map = row_mask_sum(v_world_normal*pweight, ray_valid)
+                v_world_normal_map = row_mask_sum(v_world_normal*pweight[..., None], ray_valid)
                 v_world_normal_map = acc_map[..., None] * v_world_normal_map + (1 - acc_map[..., None])
 
                 if weight.shape[1] > 0:

@@ -22,10 +22,19 @@ class ContinuousAlphagrid(torch.nn.Module):
                  grid_size=128):
         super().__init__()
 
+        # explanation
+        # this stores and updates a cascade of masks for use in rejecting samples before they reach
+        # the NeRF, which allows more samples to be used
+        # the reason a cascade is used is because the masks are in unnormalized world space, so to
+        # allocate more resolution closer to the center, different masks are accessed based on the
+        # distance of the candidate from the center. The resolution decreases by a factor of 2 for
+        # each cascade.
+
         self.bound = bound if aabb is None else aabb.abs().max()
         self.dynamic_batchsize = dynamic_batchsize
         self.update_freq = update_freq
         self.cascade = int(1 + math.ceil(math.log2(bound)))
+        ic(self.cascade, self.bound)
         self.grid_size = grid_size
         self.multiplier = int(multiplier)
         # self.cascade = 1 + math.ceil(math.log2(bound))
@@ -182,17 +191,18 @@ class ContinuousAlphagrid(torch.nn.Module):
 
         return xyz_sampled[ray_valid], ray_valid, M, z_vals, dists, whole_valid
 
-    def normalize_coord(self, xyz_sampled, contract_space):
-        coords = (xyz_sampled[..., :3]-self.aabb[0]) * self.invgrid_size - 1
-        size = xyz_sampled[..., 3:4]
-        normed = torch.cat((coords, size), dim=-1)
-        if contract_space:
-            dist = torch.linalg.norm(normed[..., :3], dim=-1, keepdim=True, ord=torch.inf) + 1e-8
-            direction = normed[..., :3] / dist
-            contracted = torch.where(dist > 1, (2-1/dist), dist)/2 * direction
-            return torch.cat([ contracted, xyz_sampled[..., 3:] ], dim=-1)
-        else:
-            return normed
+    def normalize_coord(self, xyz_sampled):
+        return xyz_sampled
+        # coords = (xyz_sampled[..., :3]-self.aabb[0]) * self.invgrid_size - 1
+        # size = xyz_sampled[..., 3:4]
+        # normed = torch.cat((coords, size), dim=-1)
+        # if self.contract_space:
+        #     dist = torch.linalg.norm(normed[..., :3], dim=-1, keepdim=True, ord=torch.inf) + 1e-8
+        #     direction = normed[..., :3] / dist
+        #     contracted = torch.where(dist > 1, (2-1/dist), dist)/2 * direction
+        #     return torch.cat([ contracted, xyz_sampled[..., 3:] ], dim=-1)
+        # else:
+        #     return normed
 
     def xyz2cas(self, xyz):
         mx = xyz[..., :3].abs().max(dim=-1).values
@@ -304,6 +314,8 @@ class ContinuousAlphagrid(torch.nn.Module):
         self.nSamples = rf.nSamples*self.multiplier
         self.stepSize = rf.stepSize/self.multiplier
         # ic(self.nSamples, self.stepSize)
+        if init:
+            self.iter_density = 0
 
     @torch.no_grad()
     def update_density(self, rf, decay=0.95, S=128):
@@ -382,4 +394,3 @@ class ContinuousAlphagrid(torch.nn.Module):
         ### update step counter
 
         # print(f'[density grid] {time.time()-start} min={self.density_grid.min().item():.4f}, max={self.density_grid.max().item():.4f}, mean={self.mean_density:.4f}, thresh={self.active_density_thresh} occ_rate={(self.density_grid > self.threshold).sum() / (128**3 * self.cascade):.3f}')
-
