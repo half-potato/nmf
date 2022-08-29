@@ -81,7 +81,7 @@ class CubeUnwrap(torch.nn.Module):
 
 
 class HierarchicalCubeMap(torch.nn.Module):
-    def __init__(self, bg_resolution=512, num_levels=2, featureC=128, activation='identity', power=4,
+    def __init__(self, bg_resolution=512, num_levels=1, featureC=128, activation='identity', power=4,
                  stds = [1, 2, 4, 8], mipbias=+0.5, interp_pyramid=True, lr=0.15, mipbias_lr=1e-3, learnable_bias=True):
         super().__init__()
         self.num_levels = num_levels
@@ -169,38 +169,6 @@ class HierarchicalCubeMap(torch.nn.Module):
                 bg_mat *= self.calc_weight(mip)
                 bg_mats[i].append(bg_mat)
         return bg_mats
-
-    @torch.no_grad()
-    def reinit_mip_levels(self):
-        # first, gather up levels
-        # bg_mat = self.activation_fn(bg_mat)
-        bg_mats = self.get_cubemap_faces()
-        bg_mats = [sum(mats) for mats in bg_mats]
-        level_mats = [[] for _ in range(self.num_levels)]
-        for i, bg_mat in enumerate(bg_mats):
-            last_val = None
-            for j in range(self.num_levels):
-                mip = self.calc_mip(j)
-                res = (self.bg_resolution // self.power**mip , self.bg_resolution // self.power**mip)
-                fbg_mat = F.interpolate(bg_mat, size=res, mode='bilinear', align_corners=self.align_corners)
-                if last_val is not None:
-                    last_val = F.interpolate(last_val, size=res, mode='bilinear', align_corners=self.align_corners)
-                    fbg_mat -= last_val
-                    fbg_mat /= self.calc_weight(mip)
-                    # plt.imshow(fbg_mat.squeeze(0).permute(1, 2, 0).cpu())
-                    # plt.show()
-                    plt.imshow(self.activation_fn(last_val.squeeze(0).permute(1, 2, 0).cpu()))
-                    plt.show()
-                    last_val += fbg_mat
-                else:
-                    fbg_mat /= self.calc_weight(mip)
-                    last_val = fbg_mat
-                level_mats[j].append(fbg_mat)
-        new_bg_mats = []
-        for i in range(self.num_levels):
-            stacked = torch.stack(level_mats[i], dim=1).permute(0, 1, 3, 4, 2)
-            new_bg_mats.append(nn.Parameter(stacked))
-        self.bg_mats = nn.ParameterList(new_bg_mats)
 
     def iter_levels(self):
         for i, bg_mat in enumerate(self.bg_mats):

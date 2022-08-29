@@ -102,25 +102,40 @@ def distortion_bidir(midpoint, full_weight, dt):
     midpoint_wp = from_torch(midpoint, requires_grad=False)
     full_weight_wp = from_torch(full_weight, requires_grad=False)
     dt_wp = from_torch(dt, requires_grad=False)
-    loss = wp.array([0.0], dtype=dtype, device=device)
+    # loss = wp.array([0.0], dtype=dtype, device=device)
     # dm = wp.zeros((B, M), dtype=dtype, device=device)
     # dw = wp.zeros((B, M), dtype=dtype, device=device)
     # ddt = wp.zeros((B, M), dtype=dtype, device=device)
     device = midpoint.device
     dtype = midpoint.dtype
-    dm = from_torch(torch.zeros((B, M), dtype=dtype, device=device), requires_grad=False)
-    dw = from_torch(torch.zeros((B, M), dtype=dtype, device=device), requires_grad=False)
-    ddt = from_torch(torch.zeros((B, M), dtype=dtype, device=device), requires_grad=False)
+    loss = torch.zeros((1), dtype=dtype, device=device)
+    dm = torch.zeros((B, M), dtype=dtype, device=device)
+    dw = torch.zeros((B, M), dtype=dtype, device=device)
+    ddt = torch.zeros((B, M), dtype=dtype, device=device)
+    loss_wp = from_torch(loss, requires_grad=False)
+    dm_wp = from_torch(dm, requires_grad=False)
+    dw_wp = from_torch(dw, requires_grad=False)
+    ddt_wp = from_torch(ddt, requires_grad=False)
 
     wp.launch(kernel=distortion_bidir_kernel,
               dim=(B, M),
-              inputs=[midpoint_wp, full_weight_wp, dt_wp, dm, dw, ddt, loss, M],
+              inputs=[midpoint_wp, full_weight_wp, dt_wp, dm_wp, dw_wp, ddt_wp, loss_wp, M],
               device='cuda')
     n = B
-    loss = wp.to_torch(loss)/n
-    dm = wp.to_torch(dm)/n
-    dw = wp.to_torch(dw)/n
-    ddt = wp.to_torch(ddt)/n
+    # loss = wp.to_torch(loss)/n
+    # dm = wp.to_torch(dm)/n
+    # dw = wp.to_torch(dw)/n
+    # ddt = wp.to_torch(ddt)/n
+    loss = loss/n
+    dm = dm/n
+    dw = dw/n
+    ddt = ddt/n
+    # ic(loss_wp.owner)
+    # ic(dm_wp.owner)
+    # ic(dw_wp.owner)
+    # ic(ddt_wp.owner)
+    # ic(midpoint_wp.owner)
+    # ic(full_weight_wp.owner)
 
     return loss, dm, dw, ddt
 

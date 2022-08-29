@@ -21,15 +21,17 @@ arch:
   sampler:
     _target_: samplers.continuous_alphagrid.ContinuousAlphagrid
     _partial_: True
-    multiplier: 2
+    multiplier: 1
+    dynamic_batchsize: False
     sample_mode: multi_jitter
+    test_sample_mode: midpoint
     threshold: 0.0001
-    grid_size: 256
-    bound: 1.0
+    grid_size: 128
+    bound: 1.5
 
     # _target_: samplers.alphagrid.AlphaGridSampler
     # _partial_: True
-    # enable_alpha_mask: True
+    # enable_alpha_mask: False
     # nEnvSamples: 0
     # update_list: [4000, 8000]
     # multiplier: 1
@@ -83,9 +85,7 @@ arch:
     activation: 'softplus'
     power: 2
     stds: []
-    # lr: 0.30
-    # lr: 0.05
-    lr: 0.025
+    lr: 0.05
     mipbias_lr: 1e-4
 
   diffuse_module:
@@ -129,10 +129,11 @@ params:
 
   TV_weight_density: 0.0
   TV_weight_app: 0.0
-  normal_lambda: 3e-2
+  normal_lambda: 3e-4
   diffuse_lambda: 0
   backwards_rays_lambda: 0.1
   floater_lambda: 1e-3
+  # floater_lambda: 0.00001
   charbonier_eps: 1e-3
   ortho_weight: 0
 
@@ -142,6 +143,6 @@ params:
   num_env_train_iters: 0
   n_iters: 30000
   charbonier_loss: false
-  start_density: 1e-3
+  start_density: 1e-2
   lr_init: 0.02
   batch_size: 4096

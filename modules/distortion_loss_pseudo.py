@@ -1,6 +1,50 @@
 import torch
 from icecream import ic
 
+def lossfun_distortion(midpoint, full_weight, dt):
+    """Compute iint w[i] w[j] |t[i] - t[j]| di dj."""
+    # The loss incurred between all pairs of intervals.
+    # extend the mipoint artifically to the background
+    dut = torch.abs(midpoint[..., :, None] - midpoint[..., None, :])
+    # mp = midpoint[..., None]
+    # dut = torch.cdist(mp, mp, p=1)
+    # loss_inter = torch.sum(w * torch.sum(w[..., None, :] * dut, dim=-1), dim=-1)
+    B = dt.shape[0]
+    loss_inter = torch.einsum('bj,bk,bjk', full_weight.reshape(B, -1), full_weight.reshape(B, -1), dut)
+    # ic(dt.shape, full_weight.shape)
+
+    # The loss incurred within each individual interval with itself.
+    loss_intra = torch.sum(full_weight**2 * dt) / 3
+    # ic(1, loss_inter, loss_intra)
+
+    return loss_inter + loss_intra
+
+def lossfun_distortion2(t, w, dt):
+    device = w.device
+    B, n_samples = w.shape
+    full_weight = torch.cat([w, 1-w.sum(dim=1, keepdim=True)], dim=1)
+    #
+    # midpoint = t
+    # fweight = torch.abs(midpoint[..., :, None] - midpoint[..., None, :])
+    # # # ut = (z_vals[:, 1:] + z_vals[:, :-1])/2
+    # #
+    # loss_inter = torch.einsum('bj,bk,jk', full_weight.reshape(B, -1), full_weight.reshape(B, -1), fweight)
+    # loss_intra = (w**2 * dt).sum(dim=1).sum()/3
+    #
+    # # this one consumes too much memory
+
+    S = torch.linspace(0, 1, n_samples+1, device=device).reshape(-1, 1)
+    # S = t[0, :].reshape(-1, 1)
+    fweight = (S - S.T).abs()
+    # ut = (z_vals[:, 1:] + z_vals[:, :-1])/2
+
+    floater_loss_1 = torch.einsum('bj,bk,jk', full_weight.reshape(B, -1), full_weight.reshape(B, -1), fweight)
+    floater_loss_2 = (full_weight**2).sum()/3/n_samples
+    # ic(fweight)
+
+    # ic(floater_loss_1, floater_loss_2)
+    return floater_loss_1 + floater_loss_2
+
 @torch.no_grad()
 def distortion_bidir_pseudo(midpoint, full_weight, dt):
     # midpoint: (B, M)

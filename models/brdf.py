@@ -59,20 +59,22 @@ class NormalSampler:
         # project into 
         return noise_rays
 
-class GGXSampler:
+class GGXSampler(torch.nn.Module):
     def __init__(self, num_samples) -> None:
+        super().__init__()
         self.sampler = torch.quasirandom.SobolEngine(dimension=2, scramble=True)
         self.num_samples = num_samples
-        self.angs = self.sampler.draw(num_samples)
+        angs = self.sampler.draw(num_samples)
+        self.register_buffer('angs', angs)
         # plt.scatter(self.angs[:, 0], self.angs[:, 1])
         # plt.show()
 
     def draw(self, B, num_samples):
-        self.angs = self.sampler.draw(self.num_samples)
+        # self.angs = self.sampler.draw(self.num_samples)
         angs = self.angs.reshape(1, self.num_samples, 2)[:, :num_samples, :].expand(B, num_samples, 2)
-        self.sampler = torch.quasirandom.SobolEngine(dimension=2, scramble=True)
+        # self.sampler = torch.quasirandom.SobolEngine(dimension=2, scramble=True)
         # add random offset
-        offset = torch.rand(B, 1, 2)*0.25
+        offset = torch.rand(B, 1, 2, device=angs.device)*0.25
         angs = (angs + offset) % 1.0
         return angs
 
