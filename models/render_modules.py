@@ -113,8 +113,7 @@ class VisibilityMLP(torch.nn.Module):
                     # torch.nn.BatchNorm1d(featureC),
                 ] for _ in range(num_layers-2)], []),
             torch.nn.ReLU(inplace=True),
-            torch.nn.Linear(featureC, 2),
-            torch.nn.Sigmoid()
+            torch.nn.Linear(featureC, 2)
         )
         torch.nn.init.constant_(self.mlp[-1].bias, -2)
         self.mlp.apply(self.init_weights)
@@ -139,8 +138,10 @@ class VisibilityMLP(torch.nn.Module):
 
         mlp_in = torch.cat(indata, dim=-1)
         out = self.mlp(mlp_in)
+        sigvis = torch.sigmoid(out[..., 0])
+        eterm = torch.exp(out[..., 1])
 
-        return out
+        return eterm, sigvis
 
 class MLPRender_FP(torch.nn.Module):
     in_channels: int

@@ -53,6 +53,22 @@ class Raymarcher(torch.nn.Module):
 
 
     def sample(self, rays_chunk, focal, ndc_ray=False, override_near=None, is_train=False, N_samples=-1):
+        """
+            Parameters:
+                rays_chunk: (B, 6) float. (ox, oy, oz, dx, dy, dz) ray origin and direction
+                focal: focal length of camera projecting ray. Unused
+                ndc_ray: whether to sample ray in normalized device coordinates
+                override_near: an override on what the closest point sampled can be
+                is_train: varies sampler based sampler_mode
+                N_samples: override how many points are sampled
+            Returns:
+                xyz_sampled: (M, 4) float. premasked valid sample points
+                ray_valid: (b, N) bool. mask of which samples are valid
+                max_samps = N
+                z_vals: (b, N) float. distance along ray to sample
+                dists: (b, N) float. distance between samples
+                whole_valid: mask into origin rays_chunk of which b rays where able to be fully sampled.
+        """
         device = rays_chunk.device
         rays_o = rays_chunk[:, :3].contiguous().view(-1, 3)
         rays_d = rays_chunk[:, 3:6].contiguous().view(-1, 3)

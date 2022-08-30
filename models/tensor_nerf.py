@@ -37,12 +37,14 @@ def raw2alpha(sigma, dist):
     return alpha, weights, T[:, -1:]
 
 class TensorNeRF(torch.nn.Module):
-    def __init__(self, rf, aabb, near_far, diffuse_module, sampler, brdf_sampler=None, brdf=None, tonemap=None, normal_module=None, ref_module=None, bg_module=None,
+    def __init__(self, rf, aabb, near_far,
+                 diffuse_module, sampler, brdf_sampler=None, brdf=None, tonemap=None, normal_module=None, ref_module=None, bg_module=None,
+                 visibility_module=None,
                  alphaMask=None, specularity_threshold=0.005, max_recurs=0,
                  max_normal_similarity=1, infinity_border=False, min_refraction=1.1, enable_refraction=True,
                  alphaMask_thres=0.001, rayMarch_weight_thres=0.0001,
                  max_bounce_rays=4000, roughness_rays=3, bounce_min_weight=0.001, appdim_noise_std=0.0,
-                 world_bounces=0, selector=None,
+                 world_bounces=0, selector=None, cold_start_bg_iters = 0,
                  update_sampler_list=[5000], max_floater_loss=6, **kwargs):
         super(TensorNeRF, self).__init__()
         self.rf = rf(aabb=aabb)
@@ -51,6 +53,7 @@ class TensorNeRF(torch.nn.Module):
         self.diffuse_module = diffuse_module(in_channels=self.rf.app_dim)
         self.brdf = brdf(in_channels=self.rf.app_dim) if brdf is not None else None
         self.brdf_sampler = brdf_sampler if brdf_sampler is None else brdf_sampler(num_samples=roughness_rays)
+        self.visibility_module = visibility_module(in_channels=self.rf.app_dim) if visibility_module is not None else None
         self.sampler = sampler(near_far=near_far, aabb=aabb)
         ic(self.sampler)
         self.selector = selector
@@ -76,6 +79,9 @@ class TensorNeRF(torch.nn.Module):
         self.max_recurs = max_recurs
         self.specularity_threshold = specularity_threshold
         self.max_bounce_rays = max_bounce_rays
+
+        self.cold_start_bg_iters = cold_start_bg_iters
+        self.detach_bg = True
 
 
         f_blur = torch.tensor([1, 2, 1]) / 4
@@ -177,6 +183,35 @@ class TensorNeRF(torch.nn.Module):
     #     print(f'Ray filtering done! takes {time.time()-tt} s. ray mask ratio: {torch.sum(mask_filtered) / N}')
     #     return all_rays[mask_filtered], all_rgbs[mask_filtered], mask_filtered
 
+    def compute_visibility_loss(self, N):
+        # generate random rays within aabb
+        device = self.get_device()
+        samples = torch.rand(N, 3, device=device)
+        origins = self.rf.aabb[0] * (1-samples) + self.rf.aabb[1] * samples
+        viewdirs = torch.rand(N, 3, device=device)
+        viewdirs /= (torch.linalg.norm(viewdirs, dim=-1, keepdim=True)+1e-8)
+        rays = torch.cat([origins, viewdirs], dim=-1)
+
+        # pass rays to sampler to compute expected termination
+        xyz_sampled, ray_valid, max_samps, z_vals, dists, whole_valid = self.sampler.sample(
+            rays, 0.1, False, override_near=0, is_train=False, N_samples=-1)
+        # xyz_sampled: (M, 4) float. premasked valid sample points
+        # ray_valid: (b, N) bool. mask of which samples are valid
+        # max_samps = N
+        # z_vals: (b, N) float. distance along ray to sample
+        # dists: (b, N) float. distance between samples
+        # whole_valid: mask into origin rays_chunk of which B rays where able to be fully sampled.
+        termination = (ray_valid * z_vals).min(dim=1).values
+        visibility = ray_valid.sum(dim=1) > 0
+
+        # get value from MLP and compare to get loss
+        norm_ray_origins = self.rf.normalize_coord(origins)
+        app_features = self.rf.compute_appfeature(norm_ray_origins)
+        eterm, sigvis = self.visibility_module(norm_ray_origins, viewdirs, app_features)
+        loss = ((termination - eterm)**2 + (sigvis-visibility.float())**2).sum()
+        return loss
+
+
     def sample_occupied(self):
         samps = torch.rand((10000, 4), device=self.get_device())*2 - 1
         validsigma = self.rf.compute_densityfeature(samps).squeeze()
@@ -192,6 +227,8 @@ class TensorNeRF(torch.nn.Module):
         require_reassignment |= self.sampler.check_schedule(iter, self.rf)
         if require_reassignment:
             self.sampler.update(self.rf, init=True)
+        if iter > self.cold_start_bg_iters:
+            self.detach_bg = False
         return require_reassignment
 
     def render_env_sparse(self, ray_origins, env_dirs, roughness: float):
@@ -276,6 +313,8 @@ class TensorNeRF(torch.nn.Module):
             return torch.empty((0, 3), device=rays_chunk.device)
         viewdirs = rays_chunk[:, 3:6]
         bg = self.bg_module(viewdirs[:, :], roughness)
+        if self.detach_bg:
+            bg = bg.detach()
         return bg.reshape(-1, 3)
 
     def forward(self, rays_chunk, focal,
@@ -287,7 +326,14 @@ class TensorNeRF(torch.nn.Module):
         # sample points
         device = rays_chunk.device
 
-        xyz_sampled, ray_valid, max_samps, z_vals, dists, whole_valid = self.sampler.sample(rays_chunk, focal, ndc_ray, override_near=override_near, is_train=is_train, N_samples=N_samples)
+        xyz_sampled, ray_valid, max_samps, z_vals, dists, whole_valid = self.sampler.sample(
+            rays_chunk, focal, ndc_ray, override_near=override_near, is_train=is_train, N_samples=N_samples)
+        # xyz_sampled: (M, 4) float. premasked valid sample points
+        # ray_valid: (b, N) bool. mask of which samples are valid
+        # max_samps = N
+        # z_vals: (b, N) float. distance along ray to sample
+        # dists: (b, N) float. distance between samples
+        # whole_valid: mask into origin rays_chunk of which B rays where able to be fully sampled.
         B = ray_valid.shape[0]
 
         xyz_normed = self.rf.normalize_coord(xyz_sampled)
@@ -574,6 +620,8 @@ class TensorNeRF(torch.nn.Module):
         if self.bg_module is not None and not white_bg:
             bg_roughness = torch.zeros(B, 1, device=device)
             bg = self.bg_module(viewdirs[:, 0, :], bg_roughness)
+            if self.detach_bg and recur > 0:
+                bg = bg.detach()
             rgb_map = rgb_map + \
                 (1 - acc_map[..., None]) * self.tonemap(bg.reshape(-1, 3), noclip=True)
         else:

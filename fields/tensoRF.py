@@ -42,9 +42,10 @@ class TensorVMSplit(TensorVoxelBase):
             mat_id_0, mat_id_1 = self.matMode[i]
             pos_vals = xy.reshape(1, 1, grid_size[mat_id_0], grid_size[mat_id_1])
             # freqs = torch.arange(n_component[i]//2).reshape(1, -1, 1, 1)
-            freqs = 2**torch.arange(n_component[i]//2).reshape(1, -1, 1, 1)
+            freqs = 2**torch.arange(n_component[i]//2-1).reshape(1, -1, 1, 1)
+            freqs = torch.cat([torch.zeros_like(freqs[:, 0:1]), freqs], dim=1)
             line_pos_vals = torch.linspace(-1, 1, grid_size[vec_id]).reshape(1, 1, -1, 1)
-            scales = scale * 1/(freqs)
+            scales = scale * 1/(freqs+1)
             # scales[:, scales.shape[1]//2:] = 0
             plane_coef_v = torch.nn.Parameter(
                 torch.cat([

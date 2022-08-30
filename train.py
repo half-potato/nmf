@@ -292,6 +292,9 @@ def reconstruction(args):
                     params.diffuse_lambda * diffuse_reg
                 # ic(total_loss, params.normal_lambda*normal_loss, params.floater_lambda*floater_loss, params.backwards_rays_lambda*backwards_rays_loss, params.diffuse_lambda*diffuse_reg)
 
+                if tensorf.visibility_module is not None:
+                    total_loss += params.visibility_lambda * tensorf.compute_visibility_loss(params.N_visibility_rays)
+
                 if ortho_reg_weight > 0:
                     loss_reg = tensorf.rf.vector_comp_diffs()
                     total_loss += ortho_reg_weight*loss_reg
