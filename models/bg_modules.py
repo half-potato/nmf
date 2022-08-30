@@ -86,6 +86,7 @@ class HierarchicalCubeMap(torch.nn.Module):
         super().__init__()
         self.num_levels = num_levels
         self.interp_pyramid = interp_pyramid
+        self.activation = activation
         self.power = power
         self.align_corners = True
         self.smoothing = 1
@@ -109,8 +110,8 @@ class HierarchicalCubeMap(torch.nn.Module):
             self.max_mip += math.log(2*max(self.stds)) / math.log(self.power)
 
         self.bg_mats = nn.ParameterList([
-            nn.Parameter(0.5 * torch.randn((1, 6, bg_resolution // self.power**i , bg_resolution // self.power**i, 3)) / (self.num_levels - i))
-            # nn.Parameter(0.5 * torch.ones((1, 6, bg_resolution // self.power**i , bg_resolution // self.power**i, 3)) / (self.num_levels - i))
+            # nn.Parameter(0.5 * torch.randn((1, 6, bg_resolution // self.power**i , bg_resolution // self.power**i, 3)) / (self.num_levels - i))
+            nn.Parameter(-0.5 * torch.ones((1, 6, bg_resolution // self.power**i , bg_resolution // self.power**i, 3)) / (self.num_levels - i))
             for i in range(num_levels-1, -1, -1)])
         # self.activation_fn = torch.nn.Softplus(beta=3)
 
@@ -125,8 +126,10 @@ class HierarchicalCubeMap(torch.nn.Module):
         ]
 
     def activation_fn(self, x):
-        # return F.softplus(x-10, beta=0.2)
-        return F.softplus(x, beta=6)
+        if self.activation == 'softplus':
+            return F.softplus(x, beta=6)
+        else:
+            return torch.exp(x-3)
 
     def calc_weight(self, mip):
         # return 1/2**(self.num_levels-mip)

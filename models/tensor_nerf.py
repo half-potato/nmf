@@ -385,7 +385,7 @@ class TensorNeRF(torch.nn.Module):
             reflect_rgb = torch.zeros_like(diffuse)
             roughness = matprop['roughness'].squeeze(-1)
             # roughness = torch.where((xyz_sampled[..., 0].abs() < 0.15) | (xyz_sampled[..., 1].abs() < 0.15), 0.30, 0.15)[papp_mask]
-            # roughness = 1e-2*torch.ones_like(roughness)
+            # roughness = 4.5e-2*torch.ones_like(roughness)
             if recur >= self.max_recurs and self.ref_module is None:
                 pass
             # TODO REMOVE
@@ -461,7 +461,6 @@ class TensorNeRF(torch.nn.Module):
                     # debug[full_bounce_mask] += 1
                     # debug[full_bounce_mask] += bounce_rays[:, 0, 3:6]/2 + 0.5
                     reflect_rgb[bounce_mask] = tint[bounce_mask] * tinted_ref_rgb
-                    # reflect_rgb[bounce_mask] = incoming_light.mean(dim=1)
                     # reflect_rgb[bounce_mask] = tinted_ref_rgb
                     # reflect_rgb[bounce_mask] = s
 
@@ -485,11 +484,7 @@ class TensorNeRF(torch.nn.Module):
                 bounce_count = bounce_mask.sum()
             # this is a modified rendering equation where the emissive light and light under the integral is all multiplied by the base color
             # in addition, the light is interpolated between emissive and reflective
-            # reflectivity = matprop['reflectivity']
-            # rgb[app_mask] = tint * ((1-reflectivity)*matprop['ambient'] + reflectivity * reflect_rgb)
             rgb[app_mask] = reflect_rgb + matprop['diffuse']
-            # rgb[app_mask] = tint * reflectivity * reflect_rgb + (1-reflectivity)*matprop['diffuse']
-            # rgb[app_mask] = tint * (ambient + reflectivity * reflect_rgb)
 
         else:
             v_world_normal = world_normal

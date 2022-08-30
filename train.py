@@ -105,9 +105,7 @@ def reconstruction(args):
     OmegaConf.save(config=args, f=f'{logfolder}/config.yaml')
     summary_writer = SummaryWriter(logfolder)
 
-    ic(args.dataset.aabb_scale)
     aabb_scale = 1 if not hasattr(args.dataset, "aabb_scale") else args.dataset.aabb_scale
-    ic(aabb_scale)
     aabb = train_dataset.scene_bbox.to(device) * aabb_scale
 
     tensorf = hydra.utils.instantiate(args.model.arch)(aabb=aabb, near_far=train_dataset.near_far)
