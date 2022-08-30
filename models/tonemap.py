@@ -16,11 +16,11 @@ class SRGBTonemap(Tonemap):
         # linear to SRGB
         # img from 0 to 1
         limit = 0.0031308
-        # img = torch.where(img > limit, 1.055 * (img ** (1.0 / 2.4)) - 0.055, 12.92 * img)
-        mask = img > limit
-        out = torch.zeros_like(img)
-        out[mask] = 1.055 * (img[mask] ** (1.0 / 2.4)) - 0.055
-        out[~mask] = 12.92 * img[~mask]
+        out = torch.where(img > limit, 1.055 * (img.clip(min=limit) ** (1.0 / 2.4)) - 0.055, 12.92 * img)
+        # mask = img > limit
+        # out = torch.zeros_like(img)
+        # out[mask] = 1.055 * (img[mask] ** (1.0 / 2.4)) - 0.055
+        # out[~mask] = 12.92 * img[~mask]
         if not noclip:
             out = out.clip(0, 1)
         return out

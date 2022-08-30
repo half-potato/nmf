@@ -1,8 +1,9 @@
-scenedir: nerf_synthetic/lego
+scenedir: nerf_synthetic/glintball
 dataset_name: blender
 downsample_train: 1
 downsample_test: 1
 ndc_ray: false
 near_far: [2.5, 7]
 aabb_scale: 1.20
+
 

@@ -25,7 +25,7 @@ arch:
     dynamic_batchsize: False
     sample_mode: multi_jitter
     test_sample_mode: midpoint
-    threshold: 0.0002
+    threshold: 0.0001
     grid_size: 128
     bound: 1.5
 
@@ -129,8 +129,8 @@ params:
 
   TV_weight_density: 0.0
   TV_weight_app: 0.0
-  normal_lambda: 3e-4
-  diffuse_lambda: 0
+  normal_lambda: 3e-3
+  diffuse_lambda: 1e-4
   backwards_rays_lambda: 0.1
   floater_lambda: 1e-3
   # floater_lambda: 0.00001

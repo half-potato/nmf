@@ -33,7 +33,9 @@ class ContinuousAlphagrid(torch.nn.Module):
         self.bound = bound if aabb is None else aabb.abs().max()
         self.dynamic_batchsize = dynamic_batchsize
         self.update_freq = update_freq
-        self.cascade = int(1 + math.ceil(math.log2(bound)))
+        self.cascade = int(1 + math.ceil(math.log2(bound))) - 1
+        # TODO REMOVE: The higher cascades aren't working
+        self.cascade = 1
         ic(self.cascade, self.bound)
         self.grid_size = grid_size
         self.multiplier = int(multiplier)

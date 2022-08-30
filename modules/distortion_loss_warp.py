@@ -1,5 +1,5 @@
 import warp as wp
-from .distortion_loss_pseudo import distortion_loss_pseudo
+from .distortion_loss_pseudo import distortion_loss_pseudo, lossfun_distortion
 from icecream import ic
 import torch
 import time
@@ -68,7 +68,6 @@ def distortion_bidir_kernel(
     inner = fw1 * fw1 * pdt / 3.0
     # backward
     ddt[b, i] = fw1*fw1
-    dw[b, i] =  2.0*fw1*pdt / 3.0
 
     inter = float(0.0)
     dw1 = float(0.0)
@@ -83,12 +82,12 @@ def distortion_bidir_kernel(
         inter += dut * wm
         s = torch.sign(aut)
 
-        wp.atomic_add(dw, b, j, dut*fw1)
-        wp.atomic_add(dm, b, j, -wm * s)
+        # wp.atomic_add(dw, b, j, dut*fw1)
+        # wp.atomic_add(dm, b, j, -wm * s)
         dw1 += dut*fw2
         dm1 += wm * s
-    dw[b, i] = dw1
-    dm[b, i] = dm1
+    dw[b, i] = dw1*2.0 + 2.0*fw1*pdt / 3.0
+    dm[b, i] = dm1*2.0
 
     wp.atomic_add(loss, 0, inter+inner)
 
@@ -122,20 +121,10 @@ def distortion_bidir(midpoint, full_weight, dt):
               inputs=[midpoint_wp, full_weight_wp, dt_wp, dm_wp, dw_wp, ddt_wp, loss_wp, M],
               device='cuda')
     n = B
-    # loss = wp.to_torch(loss)/n
-    # dm = wp.to_torch(dm)/n
-    # dw = wp.to_torch(dw)/n
-    # ddt = wp.to_torch(ddt)/n
     loss = loss/n
     dm = dm/n
     dw = dw/n
     ddt = ddt/n
-    # ic(loss_wp.owner)
-    # ic(dm_wp.owner)
-    # ic(dw_wp.owner)
-    # ic(ddt_wp.owner)
-    # ic(midpoint_wp.owner)
-    # ic(full_weight_wp.owner)
 
     return loss, dm, dw, ddt
 
@@ -148,7 +137,7 @@ class _DistortionLoss(torch.autograd.Function):
 
         # ic(dm, dw, dt)
         ctx.save_for_backward(dm, dw, dt)
-        return accum
+        return accum[0]
 
     @staticmethod
     def backward(ctx, daccum):
@@ -168,7 +157,16 @@ if __name__ == "__main__":
     midpoint.requires_grad = True 
     full_weight.requires_grad = True 
     dt.requires_grad = True 
-    print(distortion_loss_pseudo(midpoint, full_weight, dt))
-    print(distortion_loss(midpoint, full_weight, dt))
+    gt_loss = lossfun_distortion(midpoint, full_weight, dt)
+    w_loss = distortion_loss(midpoint, full_weight, dt)
+    ic(gt_loss, w_loss)
+
+    deriv = torch.ones_like(w_loss)
+    dmat1 = torch.autograd.grad(gt_loss, midpoint, deriv, allow_unused=True, retain_graph=True)
+    dmat2 = torch.autograd.grad(w_loss, midpoint, deriv, allow_unused=True, retain_graph=True)
+    ic(dmat1, dmat2)
+    dmat1 = torch.autograd.grad(gt_loss, full_weight, deriv, allow_unused=True)
+    dmat2 = torch.autograd.grad(w_loss, full_weight, deriv, allow_unused=True)
+    ic(dmat1, dmat2)
     # torch.autograd.gradcheck(distortion_loss_pseudo, (midpoint, full_weight, dt))
-    # torch.autograd.gradcheck(distortion_loss, (midpoint, full_weight, dt))
+    torch.autograd.gradcheck(distortion_loss, (midpoint, full_weight, dt))

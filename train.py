@@ -80,7 +80,6 @@ def render_test(args):
 
 def reconstruction(args):
     params = args.model.params
-    assert(params.batch_size % params.num_rays_per_envmap == 0)
 
     # init dataset
     dataset = dataset_dict[args.dataset.dataset_name]
@@ -109,7 +108,7 @@ def reconstruction(args):
     ic(args.dataset.aabb_scale)
     aabb_scale = 1 if not hasattr(args.dataset, "aabb_scale") else args.dataset.aabb_scale
     ic(aabb_scale)
-    aabb = train_dataset.scene_bbox.to(device)# * aabb_scale
+    aabb = train_dataset.scene_bbox.to(device) * aabb_scale
 
     tensorf = hydra.utils.instantiate(args.model.arch)(aabb=aabb, near_far=train_dataset.near_far)
     if args.ckpt is not None:
@@ -262,10 +261,6 @@ def reconstruction(args):
                 alpha_train = rgba_train[..., 3]
             else:
                 alpha_train = None
-
-            if iteration <= params.num_bw_iters:
-                # convert rgb to bw
-                rgb_train = rgb_train[..., :1].expand(rgb_train.shape)
 
             #rgb_map, alphas_map, depth_map, weights, uncertainty
             with torch.cuda.amp.autocast(enabled=args.fp16):
