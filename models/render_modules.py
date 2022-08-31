@@ -122,6 +122,20 @@ class VisibilityMLP(torch.nn.Module):
         if isinstance(m, torch.nn.Linear):
             torch.nn.init.xavier_uniform_(m.weight, gain=np.sqrt(2))
 
+    def mask(self, norm_ray_origins, viewdirs, world_bounces, features):
+        eterm, sigvis = self.visibility_module(norm_ray_origins, viewdirs, features)
+        p = max(min(1 - world_bounces / sigvis.numel(), 1.0), 0.0)
+        t = torch.quantile(sigvis.flatten(), p).clip(min=0.9)
+        vis_mask = sigvis > t
+        return vis_mask
+
+    def update(self, norm_ray_origins, viewdirs, app_features, termination, bgvisibility):
+        # bgvisibility is 1 if it reaches the BG and 0 if not
+        eterm, sigvis = self.visibility_module(norm_ray_origins, viewdirs, app_features)
+        # loss = ((termination - eterm)**2 + (sigvis-visibility.float())**2).sum()
+        loss = ((sigvis-(~visibility).float())**2).mean()
+        return loss
+
     def forward(self, pts, viewdirs, features, **kwargs):
         B = pts.shape[0]
         pts = pts[..., :3]
@@ -133,7 +147,7 @@ class VisibilityMLP(torch.nn.Module):
         if self.feape > 0:
             indata += [positional_encoding(features, self.feape)]
         if self.view_encoder is not None:
-            ise_enc = self.view_encoder(viewdirs, torch.tensor(20, device=pts.device)).reshape(B, -1)
+            ise_enc = self.view_encoder(viewdirs, torch.tensor(20, device=pts.device).expand(B)).reshape(B, -1)
             indata += [ise_enc]
 
         mlp_in = torch.cat(indata, dim=-1)

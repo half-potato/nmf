@@ -125,11 +125,11 @@ def reconstruction(args):
         # tensorf.rf.update_stepSize(grid_size)
 
     # TODO REMOVE
-    # bg_sd = torch.load('log/mats360_bg.th')
-    # from models import bg_modules
-    # bg_module = bg_modules.HierarchicalCubeMap(bg_resolution=2048, num_levels=1, featureC=128, activation='softplus', power=2, lr=1e-2)
-    # bg_module.load_state_dict(bg_sd, strict=False)
-    # tensorf.bg_module = bg_module
+    bg_sd = torch.load('log/mats360_bg.th')
+    from models import bg_modules
+    bg_module = bg_modules.HierarchicalCubeMap(bg_resolution=2048, num_levels=1, featureC=128, activation='softplus', power=2, lr=1e-2)
+    bg_module.load_state_dict(bg_sd, strict=False)
+    tensorf.bg_module = bg_module
 
     tensorf = tensorf.to(device)
 
@@ -208,22 +208,23 @@ def reconstruction(args):
                 pbar.set_description(f'psnr={-10.0 * np.log(photo_loss) / np.log(10.0):.04f}')
         # tensorf.bg_module.save('test.png')
 
-    if args.ckpt is None:
-        space_optim = torch.optim.Adam(tensorf.parameters(), lr=0.005, betas=(0.9,0.99))
-        pbar = tqdm(range(1000))
-        for _ in pbar:
-            xyz = torch.rand(20000, 3, device=device)*2-1
-            sigma_feat = tensorf.rf.compute_densityfeature(xyz)
-
-            alpha = 1-torch.exp(-sigma_feat * 0.015 * tensorf.rf.distance_scale)
-            # sigma = 1-torch.exp(-sigma_feat)
-            # loss = (sigma-torch.rand_like(sigma)*args.start_density).abs().mean()
-            loss = (alpha-params.start_density).abs().mean()
-            # loss = (-sigma[mask].clip(max=1).sum() + sigma[~mask].clip(min=1e-8).sum())
-            space_optim.zero_grad()
-            loss.backward()
-            pbar.set_description(f"Mean alpha: {alpha.detach().mean().item():.06f}.")
-            space_optim.step()
+    # TODO REMOVE
+    # if args.ckpt is None:
+    #     space_optim = torch.optim.Adam(tensorf.parameters(), lr=0.005, betas=(0.9,0.99))
+    #     pbar = tqdm(range(1000))
+    #     for _ in pbar:
+    #         xyz = torch.rand(20000, 3, device=device)*2-1
+    #         sigma_feat = tensorf.rf.compute_densityfeature(xyz)
+    #
+    #         alpha = 1-torch.exp(-sigma_feat * 0.015 * tensorf.rf.distance_scale)
+    #         # sigma = 1-torch.exp(-sigma_feat)
+    #         # loss = (sigma-torch.rand_like(sigma)*args.start_density).abs().mean()
+    #         loss = (alpha-params.start_density).abs().mean()
+    #         # loss = (-sigma[mask].clip(max=1).sum() + sigma[~mask].clip(min=1e-8).sum())
+    #         space_optim.zero_grad()
+    #         loss.backward()
+    #         pbar.set_description(f"Mean alpha: {alpha.detach().mean().item():.06f}.")
+    #         space_optim.step()
     # tensorf.sampler.mark_untrained_grid(train_dataset.poses, train_dataset.intrinsics)
     tensorf.sampler.update(tensorf.rf, init=True)
 
@@ -293,7 +294,10 @@ def reconstruction(args):
                 # ic(total_loss, params.normal_lambda*normal_loss, params.floater_lambda*floater_loss, params.backwards_rays_lambda*backwards_rays_loss, params.diffuse_lambda*diffuse_reg)
 
                 if tensorf.visibility_module is not None:
-                    total_loss += params.visibility_lambda * tensorf.compute_visibility_loss(params.N_visibility_rays)
+                    visibility_loss = tensorf.compute_visibility_loss(params.N_visibility_rays)
+                    total_loss += params.visibility_lambda * visibility_loss
+                else:
+                    visibility_loss = 0
 
                 if ortho_reg_weight > 0:
                     loss_reg = tensorf.rf.vector_comp_diffs()
@@ -350,6 +354,7 @@ def reconstruction(args):
                     + f' back = {backwards_rays_loss:.5e}'
                     + f' floater = {floater_loss:.1e}'
                     + f' mipbias = {float(tensorf.bg_module.mipbias):.1e}'
+                    + f' vis = {float(visibility_loss):.1e}'
                     # + f' mse = {photo_loss:.6f}'
                 )
                 PSNRs = []

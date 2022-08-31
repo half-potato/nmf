@@ -8,7 +8,7 @@ arch:
   roughness_rays: 200
   infinity_border: False
   appdim_noise_std: 0.0
-  world_bounces: 0
+  world_bounces: 5000
   max_normal_similarity: 0.99
   max_floater_loss: 1
   cold_start_bg_iters: 500
@@ -81,13 +81,13 @@ arch:
   bg_module:
     _target_: models.bg_modules.HierarchicalCubeMap
     bg_resolution: 1024
-    mipbias: 0.5
+    mipbias: 0
     num_levels: 1
     activation: 'softplus'
     power: 2
     stds: []
     lr: 0.05
-    mipbias_lr: 1e-3
+    mipbias_lr: 1e-4
 
   diffuse_module:
     _partial_: True
@@ -111,10 +111,25 @@ arch:
   # visibility_module:
   #   _partial_: True
   #   _target_: models.render_modules.VisibilityMLP
-  #   lr: 1e-2
+  #   lr: 1e-3
+  #   view_encoder:
+  #     _target_: models.ish.ListISH
+  #     degs: [0,1,2,4]
   #   feape: 0
   #   featureC: 64
   #   num_layers: 3
+
+  visibility_module:
+    _partial_: True
+    _target_: modules.naive_vis_cache.NaiveVisCache
+    grid_size: 128
+    # lr: 1e-3
+    # view_encoder:
+    #   _target_: models.ish.ListISH
+    #   degs: [0,1,2,4]
+    # feape: 0
+    # featureC: 64
+    # num_layers: 3
 
 params:
   L1_weight_inital: 8e-5
@@ -127,7 +142,7 @@ params:
   backwards_rays_lambda: 0.1
   floater_lambda: 1e-3
   visibility_lambda: 20
-  N_visibility_rays: 256
+  N_visibility_rays: 8192
   # floater_lambda: 0.00001
   charbonier_eps: 1e-3
   ortho_weight: 0

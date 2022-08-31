@@ -17,10 +17,11 @@ import math
 from .logger import Logger
 import utils
 from modules import distortion_loss, row_mask_sum
+from mutils import normalize
 
 LOGGER = Logger(enable=False)
 FIXED_SPHERE = False
-
+FIXED_RETRO = True
 
 def raw2alpha(sigma, dist):
     # sigma, dist  [N_rays, N_samples]
@@ -183,35 +184,6 @@ class TensorNeRF(torch.nn.Module):
     #     print(f'Ray filtering done! takes {time.time()-tt} s. ray mask ratio: {torch.sum(mask_filtered) / N}')
     #     return all_rays[mask_filtered], all_rgbs[mask_filtered], mask_filtered
 
-    def compute_visibility_loss(self, N):
-        # generate random rays within aabb
-        device = self.get_device()
-        samples = torch.rand(N, 3, device=device)
-        origins = self.rf.aabb[0] * (1-samples) + self.rf.aabb[1] * samples
-        viewdirs = torch.rand(N, 3, device=device)
-        viewdirs /= (torch.linalg.norm(viewdirs, dim=-1, keepdim=True)+1e-8)
-        rays = torch.cat([origins, viewdirs], dim=-1)
-
-        # pass rays to sampler to compute expected termination
-        xyz_sampled, ray_valid, max_samps, z_vals, dists, whole_valid = self.sampler.sample(
-            rays, 0.1, False, override_near=0, is_train=False, N_samples=-1)
-        # xyz_sampled: (M, 4) float. premasked valid sample points
-        # ray_valid: (b, N) bool. mask of which samples are valid
-        # max_samps = N
-        # z_vals: (b, N) float. distance along ray to sample
-        # dists: (b, N) float. distance between samples
-        # whole_valid: mask into origin rays_chunk of which B rays where able to be fully sampled.
-        termination = (ray_valid * z_vals).min(dim=1).values
-        visibility = ray_valid.sum(dim=1) > 0
-
-        # get value from MLP and compare to get loss
-        norm_ray_origins = self.rf.normalize_coord(origins)
-        app_features = self.rf.compute_appfeature(norm_ray_origins)
-        eterm, sigvis = self.visibility_module(norm_ray_origins, viewdirs, app_features)
-        loss = ((termination - eterm)**2 + (sigvis-visibility.float())**2).sum()
-        return loss
-
-
     def sample_occupied(self):
         samps = torch.rand((10000, 4), device=self.get_device())*2 - 1
         validsigma = self.rf.compute_densityfeature(samps).squeeze()
@@ -304,9 +276,65 @@ class TensorNeRF(torch.nn.Module):
             # compute normal
             grad_outputs = torch.ones_like(validsigma)
             g = grad(validsigma, xyz_g, grad_outputs=grad_outputs, create_graph=True, allow_unused=True)
-            norms = -g[0][:, :3]
-            norms = norms / (torch.linalg.norm(norms, dim=-1, keepdim=True) + 1e-8)
+            norms = normalize(-g[0][:, :3])
             return norms
+
+    def init_vis_module(self, S=128):
+        device = self.get_device()
+        X = torch.linspace(0, 1, self.visibility_module.grid_size, device=device).split(S)
+        Y = torch.linspace(0, 1, self.visibility_module.grid_size, device=device).split(S)
+        Z = torch.linspace(0, 1, self.visibility_module.grid_size, device=device).split(S)
+
+        for xs in X:
+            for ys in Y:
+                for zs in Z:
+                    # construct points
+                    xx, yy, zz = torch.meshgrid(xs, ys, zs, indexing='ij')
+                    coords = torch.cat([xx.reshape(-1, 1), yy.reshape(-1, 1), zz.reshape(-1, 1)], dim=-1) # [N, 3], in [0, 128)
+                    origins = self.rf.aabb[0] * (1-samples) + self.rf.aabb[1] * samples
+
+    def compute_visibility_loss(self, N):
+        # generate random rays within aabb
+        device = self.get_device()
+        samples = torch.rand(N, 3, device=device)
+        # interpolate
+        origins = self.rf.aabb[0] * (1-samples) + self.rf.aabb[1] * samples
+        viewdirs = normalize(torch.rand(N, 3, device=device)*2-1)
+        rays = torch.cat([origins, viewdirs], dim=-1)
+
+        # pass rays to sampler to compute expected termination
+        xyz_sampled, ray_valid, max_samps, z_vals, dists, whole_valid = self.sampler.sample(
+            rays, 0.1, False, override_near=0.15, is_train=False, N_samples=-1)
+
+        # xyz_sampled: (M, 4) float. premasked valid sample points
+        # ray_valid: (b, N) bool. mask of which samples are valid
+        # max_samps = N
+        # z_vals: (b, N) float. distance along ray to sample
+        # dists: (b, N) float. distance between samples
+        # whole_valid: mask into origin rays_chunk of which B rays where able to be fully sampled.
+        B = ray_valid.shape[0]
+        xyz_normed = self.rf.normalize_coord(xyz_sampled)
+        full_shape = (B, max_samps, 3)
+        sigma = torch.zeros(full_shape[:-1], device=device)
+
+        if ray_valid.any():
+            if self.rf.separate_appgrid:
+                psigma = self.rf.compute_densityfeature(xyz_normed)
+            else:
+                psigma, all_app_features = self.rf.compute_feature(xyz_normed)
+            sigma[ray_valid] = psigma
+
+        # weight: [N_rays, N_samples]
+        alpha, weight, bg_weight = raw2alpha(sigma, dists * self.rf.distance_scale)
+
+        termination = (z_vals * weight).median()
+        bgvisibility = bg_weight[..., 0] > 0.1
+        # ic(bgvisibility.sum() / bgvisibility.numel())
+
+        # get value from MLP and compare to get loss
+        norm_ray_origins = self.rf.normalize_coord(origins)
+        app_features = self.rf.compute_appfeature(norm_ray_origins)
+        return self.visibility_module.update(norm_ray_origins, viewdirs, app_features, termination, bgvisibility)
 
     def render_just_bg(self, rays_chunk, roughness, white_bg=True):
         if rays_chunk.shape[0] == 0:
@@ -317,7 +345,7 @@ class TensorNeRF(torch.nn.Module):
             bg = bg.detach()
         return bg.reshape(-1, 3)
 
-    def forward(self, rays_chunk, focal,
+    def forward(self, rays_chunk, focal, start_mipval=None,
                 recur=0, override_near=None, output_alpha=None, white_bg=True,
                 is_train=False, ndc_ray=False, N_samples=-1, tonemap=True):
         # rays_chunk: (N, (origin, viewdir, ray_up))
@@ -356,15 +384,19 @@ class TensorNeRF(torch.nn.Module):
         p_world_normal = torch.zeros((M, 3), device=device)
 
         all_app_features = None
-        if FIXED_SPHERE:
-            sigma[ray_valid] = torch.where(torch.linalg.norm(xyz_sampled, dim=-1) < 1, 99999999.0, 0.0)
-        else:
-            if ray_valid.any():
-                if self.rf.separate_appgrid:
-                    psigma = self.rf.compute_densityfeature(xyz_normed)
-                else:
-                    psigma, all_app_features = self.rf.compute_feature(xyz_normed)
-                sigma[ray_valid] = psigma
+        # if FIXED_SPHERE:
+        #     sigma[ray_valid] = torch.where(torch.linalg.norm(xyz_sampled, dim=-1) < 1, 99999999.0, 0.0)
+        # elif FIXED_RETRO:
+        #     mask1 = torch.linalg.norm(xyz_sampled, dim=-1, ord=torch.inf) < 0.613
+        #     mask2 = (xyz_sampled[..., 0] < 0) & (xyz_sampled[..., 1] > 0)
+        #     sigma[ray_valid] = torch.where(mask1 & ~mask2, 99999999.0, 0.0)
+        # else:
+        if ray_valid.any():
+            if self.rf.separate_appgrid:
+                psigma = self.rf.compute_densityfeature(xyz_normed)
+            else:
+                psigma, all_app_features = self.rf.compute_feature(xyz_normed)
+            sigma[ray_valid] = psigma
 
 
         if self.rf.contract_space and self.infinity_border:
@@ -387,10 +419,11 @@ class TensorNeRF(torch.nn.Module):
         if app_mask.any():
             #  Compute normals for app mask
 
-            norms = self.calculate_normals(xyz_sampled[papp_mask])
-            world_normal[papp_mask] = norms
-            # pred norms is initialized to world norms to set loss to zero for align_world_loss when prediction is none
-            p_world_normal[papp_mask] = norms.detach()
+            # TODO REMOVE
+            # norms = self.calculate_normals(xyz_sampled[papp_mask])
+            # world_normal[papp_mask] = norms
+            # # pred norms is initialized to world norms to set loss to zero for align_world_loss when prediction is none
+            # p_world_normal[papp_mask] = norms.detach()
 
             app_xyz = xyz_normed[papp_mask]
 
@@ -411,11 +444,25 @@ class TensorNeRF(torch.nn.Module):
             if self.normal_module is not None:
                 p_world_normal[papp_mask] = self.normal_module(app_xyz, app_features)
                 l = self.l
-                v_world_normal = ((1-l)*p_world_normal + l*world_normal)
-                v_world_normal = v_world_normal / (v_world_normal.norm(dim=-1, keepdim=True) + 1e-8)
+                v_world_normal = normalize((1-l)*p_world_normal + l*world_normal)
                 # TODO REMOVE
                 if FIXED_SPHERE:
-                    v_world_normal = xyz_sampled[..., :3] / (xyz_sampled[..., :3].norm(dim=-1, keepdim=True) + 1e-8)
+                    v_world_normal = normalize(xyz_sampled[..., :3])
+                elif FIXED_RETRO:
+                    xyz = xyz_sampled[..., :3]
+                    eps = 2e-2
+                    sqnorm = normalize(xyz, ord=torch.inf)
+                    sqnorm = torch.sign(sqnorm) * (sqnorm.abs() > 1-eps).float()
+                    left = torch.tensor([-1.0, 0.0, 0.0], device=device).reshape(1, 3).expand_as(xyz)
+                    up = torch.tensor([0.0, 1.0, 0.0], device=device).reshape(1, 3).expand_as(xyz)
+                    # corner_norms = torch.where(xyz[..., 0:1] - xyz[..., 1:2] > 0, left, up)
+                    corner_norms = torch.where(xyz[..., 1:2] + xyz[..., 0:1] > 0, left, up)
+                    # v_world_normal = torch.where(mask, corner_norms, sqnorm)
+                    v_world_normal = sqnorm
+                    mask = (xyz[..., 0] < eps) & (xyz[..., 1] > -eps)
+                    v_world_normal[mask] = corner_norms[mask]
+                    # v_world_normal = normalize(corner_norms)
+
                 # v_world_normal = xyz_sampled[..., :3] / (xyz_sampled[..., :3].norm(dim=-1, keepdim=True) + 1e-8)
                 # world_normal = xyz_sampled[..., :3] / (xyz_sampled[..., :3].norm(dim=-1, keepdim=True) + 1e-8)
             else:
@@ -431,7 +478,9 @@ class TensorNeRF(torch.nn.Module):
             reflect_rgb = torch.zeros_like(diffuse)
             roughness = matprop['roughness'].squeeze(-1)
             # roughness = torch.where((xyz_sampled[..., 0].abs() < 0.15) | (xyz_sampled[..., 1].abs() < 0.15), 0.30, 0.15)[papp_mask]
-            # roughness = 4.5e-2*torch.ones_like(roughness)
+            if FIXED_RETRO:
+                # roughness = 4.5e-2*torch.ones_like(roughness)
+                roughness = 1e-2*torch.ones_like(roughness)
             if recur >= self.max_recurs and self.ref_module is None:
                 pass
             # TODO REMOVE
@@ -465,27 +514,29 @@ class TensorNeRF(torch.nn.Module):
                         noise_rays,
                         # rays_up[full_bounce_mask].reshape(-1, 1, 3).expand(noise_rays.shape)
                     ], dim=-1)
+                    n = bounce_rays.shape[0]
                     D = bounce_rays.shape[-1]
 
                     if recur == 0 and self.world_bounces > 0:
-                        # incoming_light = torch.zeros((bounce_rays.shape[0], bounce_rays.shape[1], 3), device=device)
-                        # # TODO update with ray mask
-                        # with torch.no_grad():
-                        #     reflect_data = self(bounce_rays[:, :self.world_bounces, :].reshape(-1, D), focal, recur=recur+1, white_bg=False,
-                        #                         override_near=0.15, is_train=is_train, ndc_ray=ndc_ray, N_samples=N_samples, tonemap=False)
-                        #
-                        #
-                        # incoming_light[:, :self.world_bounces, :] = reflect_data['rgb_map'].reshape(-1, self.world_bounces, 3)
-                        # mipval = mipval.reshape(-1, num_roughness_rays)
-                        # # apply ray mask
-                        # incoming_light[:, self.world_bounces:, :] = self.render_just_bg(
-                        #         bounce_rays[:, self.world_bounces:, :].reshape(-1, D),
-                        #         mipval[:, self.world_bounces:].reshape(-1)
-                        #     ).reshape(-1, num_roughness_rays-self.world_bounces, 3)
-
-                        with torch.no_grad():
-                            incoming_light = self(bounce_rays.reshape(-1, D), focal, recur=recur+1, white_bg=False,
-                                                override_near=0.15, is_train=is_train, ndc_ray=ndc_ray, N_samples=N_samples, tonemap=False)['rgb_map']
+                        norm_ray_origins = self.rf.normalize_coord(bounce_rays[..., :3])
+                        masked_features = app_features[bounce_mask].reshape(-1, 1, app_features.shape[-1]).expand(-1, num_roughness_rays, -1)
+                        masked_features = masked_features[ray_mask]
+                        vis_mask = self.visibility_module.mask(norm_ray_origins.reshape(-1, 3), bounce_rays[:, 3:6].reshape(-1, 3), self.world_bounces, masked_features)
+                        # eps = 2e-2
+                        # vis_mask = ((bounce_rays[..., 0] < eps) & (bounce_rays[..., 1] > -eps))
+                        incoming_light = torch.zeros((n, 3), device=device)
+                        # for high sigvis, this implies that the ray terminates and needs to be rendered fully
+                        debug[full_bounce_mask] += row_mask_sum(vis_mask.float().reshape(-1, 1), ray_mask).expand(-1, 3)
+                        if vis_mask.sum() > 0:
+                            # ic(bounce_rays.reshape(-1, D)[vis_mask].shape, mipval.reshape(-1)[vis_mask].shape)
+                            incoming_data = self(bounce_rays.reshape(-1, D)[vis_mask], focal, recur=recur+1, white_bg=False, start_mipval=mipval.reshape(-1)[vis_mask],
+                                                            override_near=0.05, is_train=is_train, ndc_ray=ndc_ray, N_samples=N_samples, tonemap=False)
+                            # if not is_train:
+                            #     ic(incoming_data['depth_map'].max())
+                            incoming_light[vis_mask] = incoming_data['rgb_map']
+                            incoming_light[~vis_mask] = self.render_just_bg(bounce_rays.reshape(-1, D)[~vis_mask], mipval.reshape(-1)[~vis_mask])
+                        else:
+                            incoming_light = self.render_just_bg(bounce_rays.reshape(-1, D), mipval.reshape(-1))
                     else:
                         incoming_light = self.render_just_bg(bounce_rays.reshape(-1, D), mipval.reshape(-1))
 
@@ -503,7 +554,7 @@ class TensorNeRF(torch.nn.Module):
                     #     plt.show()
 
                     # s = incoming_light[:, 0]
-                    debug[full_bounce_mask] += s# / (s+1)
+                    # debug[full_bounce_mask] += s# / (s+1)
                     # debug[full_bounce_mask] += 1
                     # debug[full_bounce_mask] += bounce_rays[:, 0, 3:6]/2 + 0.5
                     reflect_rgb[bounce_mask] = tint[bounce_mask] * tinted_ref_rgb
@@ -606,19 +657,24 @@ class TensorNeRF(torch.nn.Module):
             # align_world_loss = torch.linalg.norm(p_world_normal - world_normal, dim=-1)
             normal_loss = (pweight * align_world_loss).sum() / B
 
-            output['diffuse_reg'] = roughness.mean() + diffuse.mean()
+            output['diffuse_reg'] = roughness.mean() + diffuse.mean() + 0.1*self.bg_module.mipbias
             output['normal_loss'] = normal_loss
             output['backwards_rays_loss'] = backwards_rays_loss
             output['floater_loss'] = floater_loss
 
         rgb_map = torch.sum(weight[..., None] * rgb, -2)
+        # if recur > 0:
+        #     ic(weight.sum(), z_vals, xyz_sampled[..., :3], rgb_map.max())
 
         if tonemap:
             rgb_map = self.tonemap(rgb_map.clip(min=0), noclip=True)
         # ic(weight.mean(), rgb.mean(), rgb_map.mean(), v_world_normal.mean(), sigma.mean(), dists.mean(), alpha.mean())
 
         if self.bg_module is not None and not white_bg:
-            bg_roughness = torch.zeros(B, 1, device=device)
+            # ic(mipval)
+            bg_roughness = torch.zeros(B, 1, device=device) if start_mipval is None else start_mipval
+            # ic(viewdirs[:, 0, :], recur, rays_chunk)
+            # ic(start_mipval.shape, rays_chunk.shape)
             bg = self.bg_module(viewdirs[:, 0, :], bg_roughness)
             if self.detach_bg and recur > 0:
                 bg = bg.detach()

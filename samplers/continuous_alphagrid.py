@@ -6,6 +6,7 @@ from numba import jit
 import numpy as np
 from icecream import ic
 import time
+from mutils import morton3D
 
 class ContinuousAlphagrid(torch.nn.Module):
     def __init__(self,
@@ -183,13 +184,12 @@ class ContinuousAlphagrid(torch.nn.Module):
         # alpha_mask = self.alphaMask.sample_alpha(
         #     xyz_sampled[ray_valid], contract_space=self.contract_space)
         coords, cas = self.xyz2coords(xyz_sampled[ray_valid][..., :3])
-        indices = raymarching.morton3D(coords).long() # [N]
+        # indices = raymarching.morton3D(coords).long() # [N]
+        indices = morton3D(coords.long()) # [N]
         alpha = self.density_grid[cas, indices]
         alpha_mask = alpha > self.active_density_thresh
 
         alpha_mask = (self.density_bitfield[indices // 8] & (1 << (indices % 8))) > 0
-        # if (~alpha_mask).sum() > 10:
-        #     ic(alpha_mask.sum() / alpha_mask.numel(), alpha.mean())
 
         ray_invalid = ~ray_valid
         ray_invalid[ray_valid] |= (~alpha_mask)

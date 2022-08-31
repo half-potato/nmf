@@ -118,6 +118,10 @@ class TensorVMSplit(TensorVoxelBase):
         return coordinate_plane, coordinate_line
 
     def compute_densityfeature(self, xyz_sampled):
+        mask1 = torch.linalg.norm(xyz_sampled[..., :3], dim=-1, ord=torch.inf) < 0.613/1.5
+        mask2 = (xyz_sampled[..., 0] < 0) & (xyz_sampled[..., 1] > 0)
+        return torch.where(mask1 & ~mask2, 99999999.0, 0.0)
+
         coordinate_plane, coordinate_line = self.coordinates(xyz_sampled)
         sigma_feature = torch.zeros((xyz_sampled.shape[0],), device=xyz_sampled.device)
         sigma_feature = []
