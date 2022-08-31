@@ -265,7 +265,7 @@ class PBR(torch.nn.Module):
 
 class MLPBRDF(torch.nn.Module):
     def __init__(self, in_channels, v_encoder=None, n_encoder=None, l_encoder=None, feape=6, featureC=128, num_layers=2,
-                 mul_ggx=False, activation='sigmoid', use_roughness=False, lr=1e-4, detach_roughness=False):
+                 mul_ggx=False, activation='sigmoid', use_roughness=False, lr=1e-4, detach_roughness=False, shift=0):
         super().__init__()
 
         self.in_channels = in_channels
@@ -298,9 +298,9 @@ class MLPBRDF(torch.nn.Module):
                         # torch.nn.BatchNorm1d(featureC)
                     ] for _ in range(num_layers-2)], []),
                 torch.nn.ReLU(inplace=True),
-                torch.nn.Linear(featureC, 3),
+                torch.nn.Linear(featureC, 4),
             )
-            torch.nn.init.constant_(self.mlp[-1].bias, 0)
+            torch.nn.init.constant_(self.mlp[-1].bias, shift)
             self.mlp.apply(self.init_weights)
         else:
             self.mlp = torch.nn.Identity()
@@ -314,8 +314,11 @@ class MLPBRDF(torch.nn.Module):
         # y = torch.tanh(x/10)+1
         # ic(x, y)
         # return y
-        # return torch.sigmoid(x+1)
-        return F.softplus(x+0.0)
+        col = torch.sigmoid(x[..., :3])
+        brightness = torch.exp(x[..., 3:4]).clamp(max=1000)
+        return col * brightness
+        # return torch.sigmoid(x)
+        # return F.softplus(x+1.0)/2
 
     def forward(self, incoming_light, V, L, N,
             features, roughness, matprop, mask, ray_mask):

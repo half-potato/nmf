@@ -7,6 +7,17 @@ import numpy as np
 from icecream import ic
 import time
 
+def expand_bits(v):
+	v = (v * 0x00010001) & 0xFF0000FF
+	v = (v * 0x00000101) & 0x0F00F00F
+	v = (v * 0x00000011) & 0xC30C30C3
+	v = (v * 0x00000005) & 0x49249249
+	return v
+
+def morton3D(xyz):
+    exyz = expand_bits(xyz)
+    return exyz[..., 0] | (exyz[..., 1] << 1) | (exyz[..., 2] << 2)
+
 class ContinuousAlphagrid(torch.nn.Module):
     def __init__(self,
                  bound=2.0,
@@ -183,7 +194,9 @@ class ContinuousAlphagrid(torch.nn.Module):
         # alpha_mask = self.alphaMask.sample_alpha(
         #     xyz_sampled[ray_valid], contract_space=self.contract_space)
         coords, cas = self.xyz2coords(xyz_sampled[ray_valid][..., :3])
-        indices = raymarching.morton3D(coords).long() # [N]
+        # indices = raymarching.morton3D(coords).long() # [N]
+        indices = morton3D(coords).long() # [N]
+        indices = indices.clip(min=0, max=self.density_bitfield.shape[0]*8) # [N]
         alpha = self.density_grid[cas, indices]
         alpha_mask = alpha > self.active_density_thresh
 

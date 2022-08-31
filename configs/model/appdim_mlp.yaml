@@ -9,7 +9,7 @@ arch:
   infinity_border: False
   appdim_noise_std: 0.0
   world_bounces: 0
-  max_normal_similarity: 0.99
+  max_normal_similarity: 0.87
   max_floater_loss: 1
   cold_start_bg_iters: 500
   selector:
@@ -72,11 +72,13 @@ arch:
     num_layers: 4
     feape: 0
     featureC: 64
-    activation: 'softplus'
+    # activation: 'softplus'
+    # activation: 'sigmoid'
+    activation: 'sigmoid'
     mul_ggx: False
     use_roughness: true
     detach_roughness: false
-    lr: 1e-2
+    lr: 1e-3
 
   bg_module:
     _target_: models.bg_modules.HierarchicalCubeMap
@@ -87,14 +89,14 @@ arch:
     power: 2
     stds: []
     lr: 0.05
-    mipbias_lr: 1e-3
+    mipbias_lr: 5e-4
 
   diffuse_module:
     _partial_: True
     _target_: models.render_modules.MLPDiffuse
     pospe: 0
     feape: 0
-    featureC: 64
+    featureC: 128
     num_layers: 3
     lr: 1e-4
 
@@ -102,10 +104,10 @@ arch:
     _partial_: True
     _target_: models.render_modules.MLPNormal
     lr: 1e-3
-    pospe: 0
+    pospe: 12
     feape: 0
-    # featureC: 128
-    featureC: 64
+    featureC: 128
+    # featureC: 64
     num_layers: 3
 
   # visibility_module:
