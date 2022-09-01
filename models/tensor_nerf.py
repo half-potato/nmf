@@ -400,12 +400,12 @@ class TensorNeRF(torch.nn.Module):
                 app_features = all_app_features[papp_mask]
                 # _, app_features = self.rf.compute_feature(app_xyz)
 
+            noise_app_features = (app_features + torch.randn_like(app_features) * self.appdim_noise_std)
+
             # get base color of the point
             diffuse, tint, matprop = self.diffuse_module(
                 app_xyz, viewdirs[app_mask], app_features)
             # diffuse = diffuse.type(rgb.dtype)
-
-            noise_app_features = (app_features + torch.randn_like(app_features) * self.appdim_noise_std)
 
             # interpolate between the predicted and world normals
             if self.normal_module is not None:
@@ -499,7 +499,6 @@ class TensorNeRF(torch.nn.Module):
                     # debug[full_bounce_mask] += 1
                     # reflect_rgb[bounce_mask] = tint[bounce_mask] * tinted_ref_rgb
                     reflect_rgb[bounce_mask] = tinted_ref_rgb
-                    # reflect_rgb[bounce_mask] = tinted_ref_rgb
                     # reflect_rgb[bounce_mask] = s
 
                     # m = full_bounce_mask.sum(dim=1) > 0

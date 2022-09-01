@@ -128,11 +128,12 @@ class HierarchicalCubeMap(torch.nn.Module):
         ]
 
     def activation_fn(self, x):
-        return x.clip(min=1e-4)
         if self.activation == 'softplus':
             return F.softplus(x, beta=6)
+        elif self.activation == 'clip':
+            return x.clip(min=1e-3)
         else:
-            return torch.exp(x-3)
+            return torch.exp(x-2).clip(min=0.01, max=1000)
 
     def calc_weight(self, mip):
         # return 1/2**(self.num_levels-mip)

@@ -11,7 +11,7 @@ arch:
   world_bounces: 0
   max_normal_similarity: 0.87
   max_floater_loss: 1
-  cold_start_bg_iters: 500
+  cold_start_bg_iters: 0
   selector:
     _target_: modules.pt_selectors.TopNWeight
     max_selected: 1500000
@@ -85,7 +85,7 @@ arch:
     bg_resolution: 1024
     mipbias: -1
     num_levels: 1
-    activation: 'softplus'
+    activation: 'exp'
     power: 2
     stds: []
     lr: 0.01
@@ -96,8 +96,8 @@ arch:
     _partial_: True
     _target_: models.render_modules.MLPDiffuse
     pospe: 0
-    feape: 0
-    featureC: 64
+    feape: 2
+    featureC: 128
     num_layers: 3
     lr: 1e-4
 
@@ -125,7 +125,7 @@ params:
 
   TV_weight_density: 0.0
   TV_weight_app: 0.0
-  normal_lambda: 3e-3
+  normal_lambda: 2e-3
   diffuse_lambda: 0
   backwards_rays_lambda: 0.1
   floater_lambda: 1e-3

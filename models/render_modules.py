@@ -275,7 +275,8 @@ class MLPDiffuse(torch.nn.Module):
         refraction_index = F.softplus(mlp_out[..., 7:8]-1) + self.min_refraction_index
         reflectivity = 50*F.softplus(mlp_out[..., 8:9])
         # roughness = F.softplus(mlp_out[..., 10:11]-1)
-        roughness = torch.sigmoid(mlp_out[..., 10:11]+1).clip(min=1e-2)
+        # max 0.5 roughness
+        roughness = torch.sigmoid(mlp_out[..., 10:11]).clip(min=1e-2)/2
         f0 = torch.sigmoid(mlp_out[..., 11:14])
         # albedo = F.softplus(mlp_out[..., 14:17]-2)
         albedo = torch.sigmoid(mlp_out[..., 14:17])

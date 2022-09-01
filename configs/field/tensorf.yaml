@@ -15,6 +15,7 @@ activation: 'exp'
 density_shift: -10
 
 N_voxel_init: 2097156 # 128**3
+# N_voxel_init: 134217728 # 512**3
 # N_voxel_final: 27000000 # 300**3
 # N_voxel_init: 27000000 # 128**3
 N_voxel_final: 134217728 # 512**3

@@ -43,6 +43,9 @@ class TCNNRF(TensorBase):
         ]
         return grad_vars
 
+    def density_L1(self):
+        return torch.tensor(0.0, device=self.get_device())
+
     def check_schedule(self, iter):
         return False
 

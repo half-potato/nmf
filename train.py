@@ -343,12 +343,12 @@ def reconstruction(args):
             # logger.info the current values of the losses.
             if iteration % args.progress_refresh_rate == 0:
                 pbar.set_description(
-                    f'train_psnr = {float(np.mean(PSNRs)):.2f}'
+                    f'psnr = {float(np.mean(PSNRs)):.2f}'
                     + f' test_psnr = {float(np.mean(PSNRs_test)):.2f}'
-                    + f' roughness = {data["roughness"].mean().item():.5f}'
+                    + f' rough = {data["roughness"].mean().item():.5f}'
                     + f' nerr = {float(normal_loss):.1e}'
                     + f' back = {backwards_rays_loss:.5e}'
-                    + f' floater = {floater_loss:.1e}'
+                    + f' float = {floater_loss:.1e}'
                     + f' mipbias = {float(tensorf.bg_module.mipbias):.1e}'
                     # + f' mse = {photo_loss:.6f}'
                 )
