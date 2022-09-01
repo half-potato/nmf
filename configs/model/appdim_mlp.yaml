@@ -96,8 +96,8 @@ arch:
     _partial_: True
     _target_: models.render_modules.MLPDiffuse
     pospe: 0
-    feape: 2
-    featureC: 128
+    feape: 0
+    featureC: 64
     num_layers: 3
     lr: 1e-4
 
