@@ -522,7 +522,7 @@ class TensorNeRF(torch.nn.Module):
                 bounce_count = bounce_mask.sum()
             # this is a modified rendering equation where the emissive light and light under the integral is all multiplied by the base color
             # in addition, the light is interpolated between emissive and reflective
-            rgb[app_mask] = reflect_rgb# + matprop['diffuse']
+            rgb[app_mask] = reflect_rgb + matprop['diffuse']
             debug[app_mask] = matprop['diffuse']
 
         else:

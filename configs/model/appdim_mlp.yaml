@@ -83,20 +83,21 @@ arch:
   bg_module:
     _target_: models.bg_modules.HierarchicalCubeMap
     bg_resolution: 1024
-    mipbias: 0.5
+    mipbias: -1
     num_levels: 1
     activation: 'softplus'
     power: 2
     stds: []
-    lr: 0.05
+    lr: 0.01
     mipbias_lr: 5e-4
+    mipnoise: 0.5
 
   diffuse_module:
     _partial_: True
     _target_: models.render_modules.MLPDiffuse
     pospe: 0
     feape: 0
-    featureC: 128
+    featureC: 64
     num_layers: 3
     lr: 1e-4
 

@@ -82,7 +82,7 @@ class CubeUnwrap(torch.nn.Module):
 
 class HierarchicalCubeMap(torch.nn.Module):
     def __init__(self, bg_resolution=512, num_levels=1, featureC=128, activation='identity', power=4,
-                 stds = [1, 2, 4, 8], mipbias=+0.5, interp_pyramid=True, lr=0.15, mipbias_lr=1e-3, learnable_bias=True):
+                 stds = [1, 2, 4, 8], mipbias=+0.5, interp_pyramid=True, lr=0.15, mipbias_lr=1e-3, mipnoise=0.5, learnable_bias=True):
         super().__init__()
         self.num_levels = num_levels
         self.interp_pyramid = interp_pyramid
@@ -93,6 +93,7 @@ class HierarchicalCubeMap(torch.nn.Module):
         self.mipbias_lr = mipbias_lr
         self.lr=lr
         start_mip = self.num_levels - 1
+        self.mipnoise = mipnoise
         self.max_mip = start_mip
         if learnable_bias:
             self.register_parameter('mipbias', torch.nn.Parameter(torch.tensor(mipbias, dtype=float)))
@@ -111,7 +112,8 @@ class HierarchicalCubeMap(torch.nn.Module):
 
         self.bg_mats = nn.ParameterList([
             # nn.Parameter(0.5 * torch.randn((1, 6, bg_resolution // self.power**i , bg_resolution // self.power**i, 3)) / (self.num_levels - i))
-            nn.Parameter(-0.5 * torch.ones((1, 6, bg_resolution // self.power**i , bg_resolution // self.power**i, 3)) / (self.num_levels - i))
+            # nn.Parameter(-0.5 * torch.ones((1, 6, bg_resolution // self.power**i , bg_resolution // self.power**i, 3)) / (self.num_levels - i))
+            nn.Parameter(0.1 * torch.ones((1, 6, bg_resolution // self.power**i , bg_resolution // self.power**i, 3)) / (self.num_levels - i))
             for i in range(num_levels-1, -1, -1)])
         # self.activation_fn = torch.nn.Softplus(beta=3)
 
@@ -126,6 +128,7 @@ class HierarchicalCubeMap(torch.nn.Module):
         ]
 
     def activation_fn(self, x):
+        return x.clip(min=1e-4)
         if self.activation == 'softplus':
             return F.softplus(x, beta=6)
         else:
@@ -192,8 +195,7 @@ class HierarchicalCubeMap(torch.nn.Module):
             im = self.activation_fn(bg_mat)
             if tonemap is not None:
                 im = tonemap(im)
-            else:
-                im = im.clamp(0, 1)
+            im = im.clamp(0, 1)
             im = (255*im).short().permute(0, 2, 3, 1).squeeze(0)
             im = im.cpu().numpy()
             im = cv2.cvtColor(im.astype(np.uint8), cv2.COLOR_RGB2BGR)
@@ -213,7 +215,7 @@ class HierarchicalCubeMap(torch.nn.Module):
         # saTexel is the ratio to the solid angle subtended by one pixel of the 0th mipmap level
         num_pixels = self.bg_mats[-1].numel() // 3
         # saTexel = distortion / num_pixels
-        miplevel = ((saSample - torch.log(saTexel)) / math.log(self.power))/2 + self.mipbias
+        miplevel = ((saSample - torch.log(saTexel)) / math.log(self.power))/2 + self.mipbias + self.mipnoise * torch.rand_like(saSample)
         # miplevel = miplevel.clip(0, self.max_mip-1)
         return miplevel.clip(0)
         

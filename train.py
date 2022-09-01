@@ -273,7 +273,7 @@ def reconstruction(args):
                 diffuse_reg = data['diffuse_reg'].mean()
                 rgb_map = data['rgb_map']
                 if not train_dataset.hdr:
-                    rgb_map = rgb_map.clip(0, 1)
+                    rgb_map = rgb_map.clip(max=1)
                 whole_valid = data['whole_valid'] 
                 if params.charbonier_loss:
                     loss = torch.sqrt((rgb_map - rgb_train[whole_valid]) ** 2 + params.charbonier_eps**2).mean()
