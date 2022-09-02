@@ -206,6 +206,27 @@ class MLPRender_FP(torch.nn.Module):
 
         return rgb
 
+class PassthroughDiffuse(torch.nn.Module):
+    def __init__(self, in_channels):
+        super().__init__()
+        self.allocation = 8
+        self.lr = 0
+
+    def forward(self, pts, viewdirs, features, **kwargs):
+        B = pts.shape[0]
+        mlp_out = features
+        ambient = torch.sigmoid(mlp_out[..., 6:7]-2)
+        # max 0.5 roughness
+        roughness = torch.sigmoid(mlp_out[..., 7:8]).clip(min=1e-2)/2
+        tint = torch.sigmoid(mlp_out[..., 3:6])
+        diffuse = torch.sigmoid(mlp_out[..., :3]-2)
+        return diffuse, tint, dict(
+            ambient = ambient,
+            diffuse = diffuse,
+            roughness = roughness,
+            tint=tint,
+        )
+
 class MLPDiffuse(torch.nn.Module):
     in_channels: int
     viewpe: int
@@ -219,6 +240,7 @@ class MLPDiffuse(torch.nn.Module):
         self.in_mlpC = 2*pospe*3 + 3 + 2*max(feape, 0)*in_channels + in_channels if feape >= 0 else 0
         self.unlit_tint = unlit_tint
         self.lr = lr
+        self.allocation = 0
 
         self.view_encoder = view_encoder
         if view_encoder is not None:
@@ -323,6 +345,7 @@ class DeepMLPNormal(torch.nn.Module):
         self.in_mlpC = 2*pospe*3 + 3
         self.pospe = pospe
         self.lr = lr
+        self.allocation = 0
 
         self.mlp0 = torch.nn.Sequential(
             torch.nn.Linear(self.in_mlpC, featureC),
@@ -370,6 +393,7 @@ class MLPNormal(torch.nn.Module):
         self.pospe = pospe
         self.feape = feape
         self.lr = lr
+        self.allocation = 0
 
         self.mlp = torch.nn.Sequential(
             torch.nn.Linear(self.in_mlpC, featureC),
@@ -419,9 +443,10 @@ class AppDimNormal(torch.nn.Module):
         super().__init__()                                                                                                                                                                                         
         self.activation = activation()
         self.lr = 1
+        self.allocation = 3
                                                                                                                                                                                                                    
     def forward(self, pts, features, **kwargs):                                                                                                                                                                    
-        start_ind = 10                                                                                                                                                                                              
+        start_ind = 0
         # raw_norms = features[..., start_ind:start_ind+3]                                                                                                                                                           
         raw_norms = features[..., start_ind:start_ind+3]
         # raw_norms = 2*torch.sigmoid(raw_norms)-1

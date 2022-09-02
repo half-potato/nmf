@@ -92,24 +92,32 @@ arch:
     mipbias_lr: 5e-4
     mipnoise: 0.5
 
+  # diffuse_module:
+  #   _partial_: True
+  #   _target_: models.render_modules.MLPDiffuse
+  #   pospe: 0
+  #   feape: 0
+  #   featureC: 64
+  #   num_layers: 3
+  #   lr: 1e-5
+
   diffuse_module:
     _partial_: True
-    _target_: models.render_modules.MLPDiffuse
-    pospe: 0
-    feape: 0
-    featureC: 64
-    num_layers: 3
-    lr: 1e-4
+    _target_: models.render_modules.PassthroughDiffuse
 
   normal_module:
     _partial_: True
-    _target_: models.render_modules.MLPNormal
-    lr: 1e-3
-    pospe: 12
-    feape: 0
-    featureC: 128
-    # featureC: 64
-    num_layers: 3
+    _target_: models.render_modules.AppDimNormal
+
+  # normal_module:
+  #   _partial_: True
+  #   _target_: models.render_modules.MLPNormal
+  #   lr: 1e-3
+  #   pospe: 12
+  #   feape: 0
+  #   featureC: 128
+  #   # featureC: 64
+  #   num_layers: 3
 
   # visibility_module:
   #   _partial_: True

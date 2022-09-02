@@ -48,12 +48,14 @@ class TensorNeRF(torch.nn.Module):
                  update_sampler_list=[5000], max_floater_loss=6, **kwargs):
         super(TensorNeRF, self).__init__()
         self.rf = rf(aabb=aabb)
-        self.ref_module = ref_module(in_channels=self.rf.app_dim) if ref_module is not None else None
-        self.normal_module = normal_module(in_channels=self.rf.app_dim) if normal_module is not None else None
         self.diffuse_module = diffuse_module(in_channels=self.rf.app_dim)
-        self.brdf = brdf(in_channels=self.rf.app_dim) if brdf is not None else None
+        al = self.diffuse_module.allocation
+        self.normal_module = normal_module(in_channels=self.rf.app_dim-al) if normal_module is not None else None
+        al += self.normal_module.allocation
+        self.ref_module = ref_module(in_channels=self.rf.app_dim-al) if ref_module is not None else None
+        self.brdf = brdf(in_channels=self.rf.app_dim-al) if brdf is not None else None
         self.brdf_sampler = brdf_sampler if brdf_sampler is None else brdf_sampler(num_samples=roughness_rays)
-        self.visibility_module = visibility_module(in_channels=self.rf.app_dim) if visibility_module is not None else None
+        self.visibility_module = visibility_module(in_channels=self.rf.app_dim-al) if visibility_module is not None else None
         self.sampler = sampler(near_far=near_far, aabb=aabb)
         ic(self.sampler)
         self.selector = selector
@@ -405,6 +407,8 @@ class TensorNeRF(torch.nn.Module):
             # get base color of the point
             diffuse, tint, matprop = self.diffuse_module(
                 app_xyz, viewdirs[app_mask], app_features)
+
+            app_features = app_features[..., self.diffuse_module.allocation:]
             # diffuse = diffuse.type(rgb.dtype)
 
             # interpolate between the predicted and world normals
@@ -414,11 +418,13 @@ class TensorNeRF(torch.nn.Module):
                 v_world_normal = ((1-l)*p_world_normal + l*world_normal)
                 v_world_normal = v_world_normal / (v_world_normal.norm(dim=-1, keepdim=True) + 1e-8)
                 # TODO REMOVE
-                # if FIXED_SPHERE:
-                #     v_world_normal = xyz_sampled[..., :3] / (xyz_sampled[..., :3].norm(dim=-1, keepdim=True) + 1e-8)
-                world_normal = xyz_sampled[..., :3] / (xyz_sampled[..., :3].norm(dim=-1, keepdim=True) + 1e-8)
+                if FIXED_SPHERE:
+                    v_world_normal = xyz_sampled[..., :3] / (xyz_sampled[..., :3].norm(dim=-1, keepdim=True) + 1e-8)
+                # world_normal = xyz_sampled[..., :3] / (xyz_sampled[..., :3].norm(dim=-1, keepdim=True) + 1e-8)
             else:
                 v_world_normal = world_normal
+
+            app_features = app_features[..., self.normal_module.allocation:]
 
             # calculate reflected ray direction
             V = -viewdirs[app_mask]
