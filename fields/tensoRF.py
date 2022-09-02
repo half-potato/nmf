@@ -63,7 +63,6 @@ class TensorVMSplit(TensorVoxelBase):
                 # scale * torch.randn((1, n_component[i], grid_size[vec_id], 1))
                 # scale * torch.rand((1, n_component[i], grid_size[vec_id], 1))
             )
-            # adjust parameter so the density is always > 0
             plane_coef.append(plane_coef_v)
             line_coef.append(line_coef_v)
 
@@ -105,7 +104,7 @@ class TensorVMSplit(TensorVoxelBase):
             total = total + reg(self.density_plane[idx]) * 1e-2 + reg(self.density_line[idx]) * 1e-3
         return total
         
-    def TV_loss_app(self, reg):
+    def TV_loss_app(self, reg, start_ind=0, end_ind=-1):
         total = 0
         for idx in range(len(self.app_plane)):
             total = total + reg(self.app_plane[idx]) * 1e-2 + reg(self.app_line[idx]) * 1e-3

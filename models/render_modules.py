@@ -215,16 +215,20 @@ class PassthroughDiffuse(torch.nn.Module):
     def forward(self, pts, viewdirs, features, **kwargs):
         B = pts.shape[0]
         mlp_out = features
-        ambient = torch.sigmoid(mlp_out[..., 6:7]-2)
         # max 0.5 roughness
-        roughness = torch.sigmoid(mlp_out[..., 7:8]).clip(min=1e-2)/2
-        tint = torch.sigmoid(mlp_out[..., 3:6])
-        diffuse = torch.sigmoid(mlp_out[..., :3]-2)
+        i = 0
+        diffuse = torch.sigmoid(mlp_out[..., :i+3]-2)
+        i += 3
+        roughness = torch.sigmoid(mlp_out[..., i:i+1]).clip(min=1e-2)/2
+        i += 1
+        ambient = torch.sigmoid(mlp_out[..., i:i+1]-2)
+        i += 1
+        tint = torch.sigmoid(mlp_out[..., i:i+3])
+        i += 3
         return diffuse, tint, dict(
             ambient = ambient,
             diffuse = diffuse,
             roughness = roughness,
-            tint=tint,
         )
 
 class MLPDiffuse(torch.nn.Module):
