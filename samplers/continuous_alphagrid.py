@@ -30,6 +30,7 @@ class ContinuousAlphagrid(torch.nn.Module):
                  update_freq=16,
                  max_samples=int(1.1e6),
                  dynamic_batchsize=False,
+                 shrink_freq=1000,
                  grid_size=128):
         super().__init__()
 
@@ -44,7 +45,7 @@ class ContinuousAlphagrid(torch.nn.Module):
         self.bound = bound if aabb is None else aabb.abs().max()
         self.dynamic_batchsize = dynamic_batchsize
         self.update_freq = update_freq
-        self.cascade = int(1 + math.ceil(math.log2(bound))) - 1
+        self.cascade = int(1 + math.ceil(math.log2(bound)))# - 1
         # TODO REMOVE: The higher cascades aren't working
         self.cascade = 1
         ic(self.cascade, self.bound)
@@ -57,6 +58,7 @@ class ContinuousAlphagrid(torch.nn.Module):
         self.active_density_thresh = threshold
         self.max_samples = max_samples 
         self.stepsize = 0.003383
+        self.shrink_freq = shrink_freq
 
         self.sample_mode = sample_mode
         self.test_sample_mode = sample_mode if test_sample_mode is None else test_sample_mode
@@ -250,7 +252,7 @@ class ContinuousAlphagrid(torch.nn.Module):
         coords = (o_xyzs+1) / 2 * (self.grid_size - 1)
         return coords.long(), cas
 
-    def coords2xyz(self, coords, cas):
+    def coords2xyz(self, coords, cas, randomize=True):
         xyzs = 2 * coords.float() / (self.grid_size - 1) - 1 # [N, 3] in [-1, 1]
 
         # cascading
@@ -259,8 +261,8 @@ class ContinuousAlphagrid(torch.nn.Module):
         # scale to current cascade's resolution
         cas_xyzs = xyzs * (bound - half_grid_size)
         # add noise in [-hgs, hgs]
-        cas_xyzs += (torch.rand_like(cas_xyzs) * 2 - 1) * half_grid_size
-        # query density
+        if randomize:
+            cas_xyzs += (torch.rand_like(cas_xyzs) * 2 - 1) * half_grid_size
         return cas_xyzs
 
     @torch.no_grad()
@@ -334,6 +336,10 @@ class ContinuousAlphagrid(torch.nn.Module):
     def check_schedule(self, iteration, rf):
         if iteration % self.update_freq == 0:
             self.update(rf)
+        if self.shrink_freq > 0 and iteration >= self.shrink_freq and iteration % self.shrink_freq == 0:
+            new_aabb = self.get_bounds()
+            rf.shrink(new_aabb)
+            self.update(rf, init=True)
         return False
 
     def update(self, rf, decay=0.95, S=128, init=False):
@@ -347,6 +353,24 @@ class ContinuousAlphagrid(torch.nn.Module):
         # ic(self.nSamples, self.stepSize)
         if init:
             self.iter_density = 0
+
+    def get_bounds(self):
+        xyzs = []
+        for cas in range(self.cascade):
+            active_grid = self.density_grid[cas] > self.active_density_thresh
+            occ_indices = torch.nonzero(active_grid).squeeze(-1) # [Nz]
+            occ_coords = raymarching.morton3D_invert(occ_indices) # [N, 3]
+            # convert coords to aabb
+            xyz = self.coords2xyz(occ_coords, cas, randomize=True)
+            ic(xyz, self.bound, cas)
+            xyzs.append(xyz)
+        xyzs = torch.cat(xyzs, dim=0)
+        aabb =  torch.stack([
+            xyzs.min(dim=0).values,
+            xyzs.max(dim=0).values,
+        ])
+        ic(aabb)
+        return aabb
 
     @torch.no_grad()
     def update_density(self, rf, decay=0.95, S=128):

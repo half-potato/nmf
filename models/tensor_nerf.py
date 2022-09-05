@@ -502,8 +502,9 @@ class TensorNeRF(torch.nn.Module):
                     # s = row_mask_sum(incoming_light, ray_mask) / (ray_mask.sum(dim=1)+1e-8)[..., None]
                     # debug[full_bounce_mask] += s# / (s+1)
                     # debug[full_bounce_mask] += 1
-                    # reflect_rgb[bounce_mask] = tint[bounce_mask] * tinted_ref_rgb
-                    reflect_rgb[bounce_mask] = tinted_ref_rgb
+                    reflect_rgb[bounce_mask] = tint[bounce_mask] * tinted_ref_rgb
+                    # reflect_rgb[bounce_mask] = tint[bounce_mask] * s
+                    # reflect_rgb[bounce_mask] = tinted_ref_rgb
                     # reflect_rgb[bounce_mask] = s
 
                     # m = full_bounce_mask.sum(dim=1) > 0
@@ -555,7 +556,7 @@ class TensorNeRF(torch.nn.Module):
                 # ], dim=1)
                 # d_normal_map = torch.matmul(row_basis, d_world_normal_map.unsqueeze(-1)).squeeze(-1)
 
-                v_world_normal_map = row_mask_sum(v_world_normal*pweight[..., None], ray_valid)
+                v_world_normal_map = row_mask_sum(p_world_normal*pweight[..., None], ray_valid)
                 v_world_normal_map = acc_map[..., None] * v_world_normal_map + (1 - acc_map[..., None])
 
                 if weight.shape[1] > 0:

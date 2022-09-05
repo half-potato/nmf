@@ -177,7 +177,7 @@ class TensorVMSplit(TensorVoxelBase):
         print(f'upsampling to {res_target}. upsampling density to {density_target}')
 
     @torch.no_grad()
-    def shrink(self, new_aabb, apply_correction):
+    def shrink(self, new_aabb):
         # the new_aabb is in normalized coordinates, from -1 to 1
         print("====> shrinking ...")
         xyz_min, xyz_max = new_aabb
@@ -185,11 +185,20 @@ class TensorVMSplit(TensorVoxelBase):
         t_l, b_r = (xyz_min - self.aabb[0]) / self.units, (xyz_max - self.aabb[0]) / self.units
         # print(new_aabb, self.aabb)
         # print(t_l, b_r,self.alphaMask.alpha_volume.shape)
-        dt_l, db_r = torch.round(t_l*self.density_res_multi).long(), torch.round(b_r*self.density_res_multi).long() + 1
-        t_l, b_r = torch.round(torch.round(t_l)).long(), torch.round(b_r).long() + 1
+        dt_l, db_r = torch.ceil(t_l*self.density_res_multi).long(), torch.round(b_r*self.density_res_multi).long() + 1
+        t_l, b_r = torch.ceil(t_l).long(), torch.ceil(b_r).long() + 1
         b_r = torch.stack([b_r, self.grid_size]).amin(0)
         db_r = torch.stack([db_r, (self.density_res_multi*self.grid_size).long()]).amin(0)
-        ic(db_r, dt_l, b_r, t_l, xyz_min, xyz_max, self.units, self.aabb, self.density_line[0].shape, self.grid_size)
+
+        # update aabb
+        l1 = t_l / self.grid_size
+        l2 = b_r / self.grid_size
+        adj_aabb = torch.stack([
+            l1 * self.aabb[1] + (1-l1) * self.aabb[0],
+            l2 * self.aabb[1] + (1-l2) * self.aabb[0],
+        ], dim=0)
+        ic(db_r, dt_l, b_r, t_l, xyz_min, xyz_max, self.units, self.aabb, adj_aabb, self.density_line[0].shape, self.grid_size)
+        self.aabb = adj_aabb
 
         for i in range(len(self.vecMode)):
             mode0 = self.vecMode[i]
@@ -208,17 +217,7 @@ class TensorVMSplit(TensorVoxelBase):
             )
 
 
-        # if not torch.all(self.alphaMask.grid_size == self.grid_size):
-        if apply_correction:
-            t_l_r, b_r_r = t_l / (self.grid_size-1), (b_r-1) / (self.grid_size-1)
-            correct_aabb = torch.zeros_like(new_aabb)
-            correct_aabb[0] = (1-t_l_r)*self.aabb[0] + t_l_r*self.aabb[1]
-            correct_aabb[1] = (1-b_r_r)*self.aabb[0] + b_r_r*self.aabb[1]
-            print("aabb", new_aabb, "\ncorrect aabb", correct_aabb)
-            new_aabb = correct_aabb
-
         newSize = b_r - t_l
-        # self.aabb *= new_aabb.abs()
         self.update_stepSize((newSize[0], newSize[1], newSize[2]))
 
 

@@ -217,9 +217,9 @@ class PassthroughDiffuse(torch.nn.Module):
         mlp_out = features
         # max 0.5 roughness
         i = 0
-        diffuse = torch.sigmoid(mlp_out[..., :i+3]-2)
+        diffuse = torch.sigmoid(mlp_out[..., :i+3]-3)
         i += 3
-        roughness = torch.sigmoid(mlp_out[..., i:i+1]).clip(min=1e-2)/2
+        roughness = torch.sigmoid(mlp_out[..., i:i+1]+2).clip(min=1e-2)/2
         i += 1
         ambient = torch.sigmoid(mlp_out[..., i:i+1]-2)
         i += 1

@@ -82,17 +82,19 @@ class GridSampler2D(torch.autograd.Function):
         input, grid = ctx.saved_tensors
         grad_grid = None
         is_3d = len(grid.shape) == 5
+        Gsize = max(grid.shape)
         if ctx.needs_input_grad[1]:
             f_blur = torch.tensor([0.5, 0.5], device=grid.device)
             f_edge = SIGN*torch.tensor([1, -1], device=grid.device) / 2
             l = len(f_blur)
-            kernlen = 2*int(ctx.smoothing)+1
+            smoothing = ctx.smoothing * Gsize / 128
+            kernlen = 2*int(smoothing)+1
             if is_3d:
                 dy_filter = (f_blur[None, :, None] * f_edge[:, None, None] * f_blur[None, None, :]).reshape(1, 1, l, l, l)
                 dx_filter = dy_filter.permute(0, 1, 3, 2, 4)
                 dz_filter = dy_filter.permute(0, 1, 2, 4, 3)
 
-                g1 = gaussian_fn(kernlen, std=ctx.smoothing+1e-8, device=grad_output.device)
+                g1 = gaussian_fn(kernlen, std=smoothing+1e-8, device=grad_output.device)
                 smooth_kern = g1[:, None, None] * g1[None, :, None] * g1[None, None, :]
                 smooth_kern /= smooth_kern.sum()
                 sm_dx_filter = combine_kernels3d(smooth_kern, dx_filter)
@@ -107,7 +109,7 @@ class GridSampler2D(torch.autograd.Function):
 
                 dx = F.grid_sample(dx_input.permute(1, 0, 2, 3, 4), grid, mode=ctx.mode, padding_mode=ctx.padding_mode, align_corners=ctx.align_corners)
                 dy = F.grid_sample(dy_input.permute(1, 0, 2, 3, 4), grid, mode=ctx.mode, padding_mode=ctx.padding_mode, align_corners=ctx.align_corners)
-                dz = F.grid_sample(dy_input.permute(1, 0, 2, 3, 4), grid, mode=ctx.mode, padding_mode=ctx.padding_mode, align_corners=ctx.align_corners)
+                dz = F.grid_sample(dz_input.permute(1, 0, 2, 3, 4), grid, mode=ctx.mode, padding_mode=ctx.padding_mode, align_corners=ctx.align_corners)
 
                 grad_grid = torch.stack([(grad_output*dx).sum(dim=1), (grad_output*dy).sum(dim=1), (grad_output*dz).sum(dim=1)], dim=-1)
             else:
