@@ -8,15 +8,30 @@ from icecream import ic
 import time
 
 def expand_bits(v):
-	v = (v * 0x00010001) & 0xFF0000FF
-	v = (v * 0x00000101) & 0x0F00F00F
-	v = (v * 0x00000011) & 0xC30C30C3
-	v = (v * 0x00000005) & 0x49249249
-	return v
+    v = (v * 0x00010001) & 0xFF0000FF
+    v = (v * 0x00000101) & 0x0F00F00F
+    v = (v * 0x00000011) & 0xC30C30C3
+    v = (v * 0x00000005) & 0x49249249
+    return v
 
 def morton3D(xyz):
     exyz = expand_bits(xyz)
     return exyz[..., 0] | (exyz[..., 1] << 1) | (exyz[..., 2] << 2)
+
+def single_morton3D_invert(x):
+    x = x & 0x49249249
+    x = (x | (x >> 2)) & 0xc30c30c3
+    x = (x | (x >> 4)) & 0x0f00f00f
+    x = (x | (x >> 8)) & 0xff0000ff
+    x = (x | (x >> 16)) & 0x0000ffff
+    return x
+
+def morton3D_invert(x):
+    return torch.stack([
+        single_morton3D_invert(x),
+        single_morton3D_invert(x >> 1),
+        single_morton3D_invert(x >> 2),
+    ], dim=-1)
 
 class ContinuousAlphagrid(torch.nn.Module):
     def __init__(self,
@@ -47,7 +62,7 @@ class ContinuousAlphagrid(torch.nn.Module):
         self.update_freq = update_freq
         self.cascade = int(1 + math.ceil(math.log2(bound)))# - 1
         # TODO REMOVE: The higher cascades aren't working
-        # self.cascade = 1
+        self.cascade = 1
         ic(self.cascade, self.bound)
         self.grid_size = grid_size
         self.multiplier = int(multiplier)
@@ -300,7 +315,7 @@ class ContinuousAlphagrid(torch.nn.Module):
                     # construct points
                     xx, yy, zz = torch.meshgrid(xs, ys, zs, indexing='ij')
                     coords = torch.cat([xx.reshape(-1, 1), yy.reshape(-1, 1), zz.reshape(-1, 1)], dim=-1) # [N, 3], in [0, 128)
-                    indices = raymarching.morton3D(coords).long() # [N]
+                    indices = morton3D(coords).long() # [N]
                     world_xyzs = (2 * coords.float() / (self.grid_size - 1) - 1).unsqueeze(0) # [1, N, 3] in [-1, 1]
 
                     # cascading
@@ -359,7 +374,7 @@ class ContinuousAlphagrid(torch.nn.Module):
         for cas in range(self.cascade):
             active_grid = self.density_grid[cas] > self.active_density_thresh
             occ_indices = torch.nonzero(active_grid).squeeze(-1) # [Nz]
-            occ_coords = raymarching.morton3D_invert(occ_indices) # [N, 3]
+            occ_coords = morton3D_invert(occ_indices) # [N, 3]
             # convert coords to aabb
             xyz = self.coords2xyz(occ_coords, cas, randomize=True)
             xyzs.append(xyz)
@@ -394,7 +409,7 @@ class ContinuousAlphagrid(torch.nn.Module):
                         # construct points
                         xx, yy, zz = torch.meshgrid(xs, ys, zs, indexing='ij')
                         coords = torch.cat([xx.reshape(-1, 1), yy.reshape(-1, 1), zz.reshape(-1, 1)], dim=-1) # [N, 3], in [0, 128)
-                        indices = raymarching.morton3D(coords).long() # [N]
+                        indices = morton3D(coords).long() # [N]
 
                         # cascading
                         for cas in range(self.cascade):
@@ -415,12 +430,12 @@ class ContinuousAlphagrid(torch.nn.Module):
             for cas in range(self.cascade):
                 # random sample some positions
                 coords = torch.randint(0, self.grid_size, (N, 3), device=self.density_grid.device) # [N, 3], in [0, 128)
-                indices = raymarching.morton3D(coords).long() # [N]
+                indices = morton3D(coords).long() # [N]
                 # random sample occupied positions
                 occ_indices = torch.nonzero(self.density_grid[cas] > 0).squeeze(-1) # [Nz]
                 rand_mask = torch.randint(0, occ_indices.shape[0], [N], dtype=torch.long, device=self.density_grid.device)
                 occ_indices = occ_indices[rand_mask] # [Nz] --> [N], allow for duplication
-                occ_coords = raymarching.morton3D_invert(occ_indices) # [N, 3]
+                occ_coords = morton3D_invert(occ_indices) # [N, 3]
                 # concat
                 indices = torch.cat([indices, occ_indices], dim=0)
                 coords = torch.cat([coords, occ_coords], dim=0)
