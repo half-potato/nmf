@@ -185,8 +185,8 @@ class TensorVMSplit(TensorVoxelBase):
         t_l, b_r = (xyz_min - self.aabb[0]) / self.units, (xyz_max - self.aabb[0]) / self.units
         # print(new_aabb, self.aabb)
         # print(t_l, b_r,self.alphaMask.alpha_volume.shape)
-        dt_l, db_r = torch.ceil(t_l*self.density_res_multi).long(), torch.round(b_r*self.density_res_multi).long() + 1
-        t_l, b_r = torch.ceil(t_l).long(), torch.ceil(b_r).long() + 1
+        dt_l, db_r = torch.floor(t_l*self.density_res_multi).long(), torch.ceil(b_r*self.density_res_multi).long() + 1
+        t_l, b_r = torch.floor(t_l).long(), torch.ceil(b_r).long() + 1
         b_r = torch.stack([b_r, self.grid_size]).amin(0)
         db_r = torch.stack([db_r, (self.density_res_multi*self.grid_size).long()]).amin(0)
 

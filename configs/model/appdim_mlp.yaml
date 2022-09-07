@@ -23,11 +23,11 @@ arch:
     _target_: samplers.continuous_alphagrid.ContinuousAlphagrid
     _partial_: True
     multiplier: 1
-    shrink_freq: 2500
+    shrink_freq: 0
     dynamic_batchsize: False
     sample_mode: multi_jitter
     # test_sample_mode: midpoint
-    threshold: 0.0001
+    threshold: 0.00005
     grid_size: 128
     bound: 1.5
 
@@ -84,12 +84,12 @@ arch:
   bg_module:
     _target_: models.bg_modules.HierarchicalCubeMap
     bg_resolution: 1024
-    mipbias: -1
+    mipbias: 0
     num_levels: 1
     activation: 'exp'
     power: 2
     stds: []
-    lr: 0.2
+    lr: 0.10
     mipbias_lr: 1e-4
     mipnoise: 0.5
 

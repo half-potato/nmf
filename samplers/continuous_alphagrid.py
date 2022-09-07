@@ -47,7 +47,7 @@ class ContinuousAlphagrid(torch.nn.Module):
         self.update_freq = update_freq
         self.cascade = int(1 + math.ceil(math.log2(bound)))# - 1
         # TODO REMOVE: The higher cascades aren't working
-        self.cascade = 1
+        # self.cascade = 1
         ic(self.cascade, self.bound)
         self.grid_size = grid_size
         self.multiplier = int(multiplier)
@@ -362,7 +362,6 @@ class ContinuousAlphagrid(torch.nn.Module):
             occ_coords = raymarching.morton3D_invert(occ_indices) # [N, 3]
             # convert coords to aabb
             xyz = self.coords2xyz(occ_coords, cas, randomize=True)
-            ic(xyz, self.bound, cas)
             xyzs.append(xyz)
         xyzs = torch.cat(xyzs, dim=0)
         aabb =  torch.stack([
