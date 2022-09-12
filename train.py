@@ -209,23 +209,24 @@ def reconstruction(args):
         # tensorf.bg_module.save('test.png')
 
     # TODO REMOVE
-    # if args.ckpt is None:
-    #     space_optim = torch.optim.Adam(tensorf.parameters(), lr=0.005, betas=(0.9,0.99))
-    #     pbar = tqdm(range(1000))
-    #     for _ in pbar:
-    #         xyz = torch.rand(20000, 3, device=device)*2-1
-    #         sigma_feat = tensorf.rf.compute_densityfeature(xyz)
-    #
-    #         alpha = 1-torch.exp(-sigma_feat * 0.015 * tensorf.rf.distance_scale)
-    #         # sigma = 1-torch.exp(-sigma_feat)
-    #         # loss = (sigma-torch.rand_like(sigma)*args.start_density).abs().mean()
-    #         loss = (alpha-params.start_density).abs().mean()
-    #         # loss = (-sigma[mask].clip(max=1).sum() + sigma[~mask].clip(min=1e-8).sum())
-    #         space_optim.zero_grad()
-    #         loss.backward()
-    #         pbar.set_description(f"Mean alpha: {alpha.detach().mean().item():.06f}.")
-    #         space_optim.step()
+    if args.ckpt is None:
+        space_optim = torch.optim.Adam(tensorf.parameters(), lr=0.005, betas=(0.9,0.99))
+        pbar = tqdm(range(1000))
+        for _ in pbar:
+            xyz = torch.rand(20000, 3, device=device)*2-1
+            sigma_feat = tensorf.rf.compute_densityfeature(xyz)
+
+            alpha = 1-torch.exp(-sigma_feat * 0.015 * tensorf.rf.distance_scale)
+            # sigma = 1-torch.exp(-sigma_feat)
+            # loss = (sigma-torch.rand_like(sigma)*args.start_density).abs().mean()
+            loss = (alpha-params.start_density).abs().mean()
+            # loss = (-sigma[mask].clip(max=1).sum() + sigma[~mask].clip(min=1e-8).sum())
+            space_optim.zero_grad()
+            loss.backward()
+            pbar.set_description(f"Mean alpha: {alpha.detach().mean().item():.06f}.")
+            space_optim.step()
     # tensorf.sampler.mark_untrained_grid(train_dataset.poses, train_dataset.intrinsics)
+    torch.cuda.empty_cache()
     tensorf.sampler.update(tensorf.rf, init=True)
 
 
@@ -294,7 +295,11 @@ def reconstruction(args):
                 # ic(total_loss, params.normal_lambda*normal_loss, params.floater_lambda*floater_loss, params.backwards_rays_lambda*backwards_rays_loss, params.diffuse_lambda*diffuse_reg)
 
                 if tensorf.visibility_module is not None:
-                    visibility_loss = tensorf.compute_visibility_loss(params.N_visibility_rays)
+                    if iteration % 10 == 0:
+                        if iteration < 100:
+                            visibility_loss = tensorf.init_vis_module()
+                        else:
+                            visibility_loss = tensorf.compute_visibility_loss(params.N_visibility_rays)
                     total_loss += params.visibility_lambda * visibility_loss
                 else:
                     visibility_loss = 0

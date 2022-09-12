@@ -8,7 +8,7 @@ arch:
   roughness_rays: 200
   infinity_border: False
   appdim_noise_std: 0.0
-  world_bounces: 5000
+  world_bounces: 2500
   max_normal_similarity: 0.99
   max_floater_loss: 1
   cold_start_bg_iters: 500
@@ -142,7 +142,7 @@ params:
   backwards_rays_lambda: 0.1
   floater_lambda: 1e-3
   visibility_lambda: 20
-  N_visibility_rays: 8192
+  N_visibility_rays: 128
   # floater_lambda: 0.00001
   charbonier_eps: 1e-3
   ortho_weight: 0
@@ -153,6 +153,6 @@ params:
   num_env_train_iters: 0
   n_iters: 30000
   charbonier_loss: false
-  start_density: 1e-2
+  start_density: 1e-3
   lr_init: 0.02
   batch_size: 4096

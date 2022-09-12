@@ -108,7 +108,7 @@ for i in iter:
     iter.set_description(f"PSNR: {psnr}. LR: {scheduler.get_last_lr()}")
     scheduler.step()
 
-bg_module.reinit_mip_levels()
+# bg_module.reinit_mip_levels()
 
 torch.save(bg_module.state_dict(), 'log/mats360_bg.th')
 bg_module.save(Path('log/cubed'), tonemap=tm)

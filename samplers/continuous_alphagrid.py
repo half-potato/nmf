@@ -8,6 +8,32 @@ from icecream import ic
 import time
 from mutils import morton3D
 
+def expand_bits(v):
+    v = (v * 0x00010001) & 0xFF0000FF
+    v = (v * 0x00000101) & 0x0F00F00F
+    v = (v * 0x00000011) & 0xC30C30C3
+    v = (v * 0x00000005) & 0x49249249
+    return v
+
+def morton3D(xyz):
+    exyz = expand_bits(xyz)
+    return exyz[..., 0] | (exyz[..., 1] << 1) | (exyz[..., 2] << 2)
+
+def single_morton3D_invert(x):
+    x = x & 0x49249249
+    x = (x | (x >> 2)) & 0xc30c30c3
+    x = (x | (x >> 4)) & 0x0f00f00f
+    x = (x | (x >> 8)) & 0xff0000ff
+    x = (x | (x >> 16)) & 0x0000ffff
+    return x
+
+def morton3D_invert(x):
+    return torch.stack([
+        single_morton3D_invert(x),
+        single_morton3D_invert(x >> 1),
+        single_morton3D_invert(x >> 2),
+    ], dim=-1)
+
 class ContinuousAlphagrid(torch.nn.Module):
     def __init__(self,
                  bound=2.0,
@@ -335,6 +361,33 @@ class ContinuousAlphagrid(torch.nn.Module):
         if init:
             self.iter_density = 0
 
+    def get_bounds(self):
+        xyzs = []
+        for cas in range(self.cascade):
+            active_grid = self.density_grid[cas] > self.active_density_thresh
+            occ_indices = torch.nonzero(active_grid).squeeze(-1) # [Nz]
+            occ_coords = morton3D_invert(occ_indices) # [N, 3]
+            # convert coords to aabb
+            xyz = self.coords2xyz(occ_coords, cas, randomize=True)
+            xyzs.append(xyz)
+        xyzs = torch.cat(xyzs, dim=0)
+        aabb =  torch.stack([
+            xyzs.min(dim=0).values,
+            xyzs.max(dim=0).values,
+        ])
+        ic(aabb)
+        return aabb
+
+    def sample_occupied(self, cas, N):
+        cas = self.cascade - 1 if cas == -1 else cas
+        # random sample occupied positions
+        occ_indices = torch.nonzero(self.density_grid[cas] > 0).squeeze(-1) # [Nz]
+        rand_mask = torch.randint(0, occ_indices.shape[0], [N], dtype=torch.long, device=self.density_grid.device)
+        occ_indices = occ_indices[rand_mask] # [Nz] --> [N], allow for duplication
+        occ_coords = morton3D_invert(occ_indices) # [N, 3]
+        xyz = self.coords2xyz(occ_coords, cas)
+        return occ_indices, occ_coords, xyz
+
     @torch.no_grad()
     def update_density(self, rf, decay=0.95, S=128):
         start = time.time()
@@ -379,12 +432,8 @@ class ContinuousAlphagrid(torch.nn.Module):
             for cas in range(self.cascade):
                 # random sample some positions
                 coords = torch.randint(0, self.grid_size, (N, 3), device=self.density_grid.device) # [N, 3], in [0, 128)
-                indices = raymarching.morton3D(coords).long() # [N]
-                # random sample occupied positions
-                occ_indices = torch.nonzero(self.density_grid[cas] > 0).squeeze(-1) # [Nz]
-                rand_mask = torch.randint(0, occ_indices.shape[0], [N], dtype=torch.long, device=self.density_grid.device)
-                occ_indices = occ_indices[rand_mask] # [Nz] --> [N], allow for duplication
-                occ_coords = raymarching.morton3D_invert(occ_indices) # [N, 3]
+                indices = morton3D(coords).long() # [N]
+                occ_indices, occ_coords, _ = self.sample_occupied(cas, N)
                 # concat
                 indices = torch.cat([indices, occ_indices], dim=0)
                 coords = torch.cat([coords, occ_coords], dim=0)
