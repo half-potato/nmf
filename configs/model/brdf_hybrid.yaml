@@ -8,7 +8,7 @@ arch:
   roughness_rays: 200
   infinity_border: False
   appdim_noise_std: 0.0
-  world_bounces: 000
+  world_bounces: 0
   max_normal_similarity: 0.87
   max_floater_loss: 1
   cold_start_bg_iters: 0
@@ -23,13 +23,13 @@ arch:
     _target_: samplers.continuous_alphagrid.ContinuousAlphagrid
     _partial_: True
     multiplier: 1
-    shrink_freq: 0
-    dynamic_batchsize: False
+    dynamic_batchsize: True
     sample_mode: multi_jitter
-    # test_sample_mode: midpoint
-    threshold: 0.00005
+    test_sample_mode: midpoint
+    threshold: 0.0001
     grid_size: 128
     bound: 1.5
+    max_samples: 400000
 
     # _target_: samplers.alphagrid.AlphaGridSampler
     # _partial_: True
@@ -84,78 +84,54 @@ arch:
   bg_module:
     _target_: models.bg_modules.HierarchicalCubeMap
     bg_resolution: 1024
-    mipbias: 0
+    mipbias: -1
     num_levels: 1
     activation: 'exp'
     power: 2
     stds: []
-    lr: 0.10
-    betas: [0.9, 0.999]
-    mipbias_lr: 1e-4
+    lr: 0.01
+    mipbias_lr: 5e-4
     mipnoise: 0.5
 
   diffuse_module:
     _partial_: True
     _target_: models.render_modules.MLPDiffuse
-    pospe: 12
+    pospe: 0
     feape: 0
-    featureC: 128
+    featureC: 64
     num_layers: 3
     lr: 1e-4
-
-  # diffuse_module:
-  #   _partial_: True
-  #   _target_: models.render_modules.PassthroughDiffuse
-
-  # normal_module:
-  #   _partial_: True
-  #   _target_: models.render_modules.AppDimNormal
 
   normal_module:
     _partial_: True
     _target_: models.render_modules.MLPNormal
-    lr: 1e-3
-    pospe: 12
+    lr: 3e-3
+    pospe: 0
     feape: 0
-    featureC: 128
+    featureC: 64
     # featureC: 64
     num_layers: 4
 
   # visibility_module:
   #   _partial_: True
   #   _target_: models.render_modules.VisibilityMLP
-  #   lr: 1e-3
-  #   view_encoder:
-  #     _target_: models.ish.ListISH
-  #     degs: [0,1,2,4]
+  #   lr: 1e-2
   #   feape: 0
   #   featureC: 64
   #   num_layers: 3
 
-  visibility_module:
-    _partial_: True
-    _target_: modules.naive_vis_cache.NaiveVisCache
-    grid_size: 128
-    # lr: 1e-3
-    # view_encoder:
-    #   _target_: models.ish.ListISH
-    #   degs: [0,1,2,4]
-    # feape: 0
-    # featureC: 64
-    # num_layers: 3
-
 params:
-  L1_weight_inital: 8e-5
-  L1_weight_rest: 4e-5
+  L1_weight_inital: 0
+  L1_weight_rest: 0
 
   TV_weight_density: 0.0
   TV_weight_app: 0.0
-  normal_lambda: 3e-3
-  diffuse_lambda: 0 #1e-5
+  normal_lambda: 1e-2
+  diffuse_lambda: 0
   backwards_rays_lambda: 0.1
   floater_lambda: 1e-3
   visibility_lambda: 20
-  N_visibility_rays: 128
+  N_visibility_rays: 256
   # floater_lambda: 0.00001
   charbonier_eps: 1e-3
   ortho_weight: 0
@@ -166,6 +142,7 @@ params:
   num_env_train_iters: 0
   n_iters: 30000
   charbonier_loss: false
-  start_density: 1e-3
+  start_density: 1e-2
   lr_init: 0.02
   batch_size: 4096
+

@@ -19,6 +19,11 @@ def morton3D(xyz):
     exyz = expand_bits(xyz)
     return exyz[..., 0] | (exyz[..., 1] << 1) | (exyz[..., 2] << 2)
 
+def morton3D(xyz):
+    return raymarching.morton3D(xyz[..., :3].contiguous())
+    exyz = expand_bits(xyz)
+    return exyz[..., 0] | (exyz[..., 1] << 1) | (exyz[..., 2] << 2)
+
 def single_morton3D_invert(x):
     x = x & 0x49249249
     x = (x | (x >> 2)) & 0xc30c30c3
@@ -28,6 +33,33 @@ def single_morton3D_invert(x):
     return x
 
 def morton3D_invert(x):
+    return torch.stack([
+        single_morton3D_invert(x),
+        single_morton3D_invert(x >> 1),
+        single_morton3D_invert(x >> 2),
+    ], dim=-1)
+
+def expand_bits(v):
+    v = (v * 0x00010001) & 0xFF0000FF
+    v = (v * 0x00000101) & 0x0F00F00F
+    v = (v * 0x00000011) & 0xC30C30C3
+    v = (v * 0x00000005) & 0x49249249
+    return v
+
+def morton3D(xyz):
+    exyz = expand_bits(xyz)
+    return exyz[..., 0] | (exyz[..., 1] << 1) | (exyz[..., 2] << 2)
+
+def single_morton3D_invert(x):
+    x = x & 0x49249249
+    x = (x | (x >> 2)) & 0xc30c30c3
+    x = (x | (x >> 4)) & 0x0f00f00f
+    x = (x | (x >> 8)) & 0xff0000ff
+    x = (x | (x >> 16)) & 0x0000ffff
+    return x
+
+def morton3D_invert(x):
+    return raymarching.morton3D_invert(x.contiguous())
     return torch.stack([
         single_morton3D_invert(x),
         single_morton3D_invert(x >> 1),
@@ -46,6 +78,7 @@ class ContinuousAlphagrid(torch.nn.Module):
                  update_freq=16,
                  max_samples=int(1.1e6),
                  dynamic_batchsize=False,
+                 shrink_freq=1000,
                  grid_size=128):
         super().__init__()
 
@@ -60,7 +93,7 @@ class ContinuousAlphagrid(torch.nn.Module):
         self.bound = bound if aabb is None else aabb.abs().max()
         self.dynamic_batchsize = dynamic_batchsize
         self.update_freq = update_freq
-        self.cascade = int(1 + math.ceil(math.log2(bound))) - 1
+        self.cascade = int(1 + math.ceil(math.log2(bound)))# - 1
         # TODO REMOVE: The higher cascades aren't working
         self.cascade = 1
         ic(self.cascade, self.bound)
@@ -73,6 +106,7 @@ class ContinuousAlphagrid(torch.nn.Module):
         self.active_density_thresh = threshold
         self.max_samples = max_samples 
         self.stepsize = 0.003383
+        self.shrink_freq = shrink_freq
 
         self.sample_mode = sample_mode
         self.test_sample_mode = sample_mode if test_sample_mode is None else test_sample_mode
@@ -211,7 +245,8 @@ class ContinuousAlphagrid(torch.nn.Module):
         #     xyz_sampled[ray_valid], contract_space=self.contract_space)
         coords, cas = self.xyz2coords(xyz_sampled[ray_valid][..., :3])
         # indices = raymarching.morton3D(coords).long() # [N]
-        indices = morton3D(coords.long()) # [N]
+        indices = morton3D(coords).long() # [N]
+        indices = indices.clip(min=0, max=self.density_bitfield.shape[0]*8) # [N]
         alpha = self.density_grid[cas, indices]
         alpha_mask = alpha > self.active_density_thresh
 
@@ -263,7 +298,7 @@ class ContinuousAlphagrid(torch.nn.Module):
         coords = (o_xyzs+1) / 2 * (self.grid_size - 1)
         return coords.long(), cas
 
-    def coords2xyz(self, coords, cas):
+    def coords2xyz(self, coords, cas, randomize=True):
         xyzs = 2 * coords.float() / (self.grid_size - 1) - 1 # [N, 3] in [-1, 1]
 
         # cascading
@@ -272,8 +307,8 @@ class ContinuousAlphagrid(torch.nn.Module):
         # scale to current cascade's resolution
         cas_xyzs = xyzs * (bound - half_grid_size)
         # add noise in [-hgs, hgs]
-        cas_xyzs += (torch.rand_like(cas_xyzs) * 2 - 1) * half_grid_size
-        # query density
+        if randomize:
+            cas_xyzs += (torch.rand_like(cas_xyzs) * 2 - 1) * half_grid_size
         return cas_xyzs
 
     @torch.no_grad()
@@ -311,7 +346,7 @@ class ContinuousAlphagrid(torch.nn.Module):
                     # construct points
                     xx, yy, zz = torch.meshgrid(xs, ys, zs, indexing='ij')
                     coords = torch.cat([xx.reshape(-1, 1), yy.reshape(-1, 1), zz.reshape(-1, 1)], dim=-1) # [N, 3], in [0, 128)
-                    indices = raymarching.morton3D(coords).long() # [N]
+                    indices = morton3D(coords).long() # [N]
                     world_xyzs = (2 * coords.float() / (self.grid_size - 1) - 1).unsqueeze(0) # [1, N, 3] in [-1, 1]
 
                     # cascading
@@ -347,6 +382,10 @@ class ContinuousAlphagrid(torch.nn.Module):
     def check_schedule(self, iteration, rf):
         if iteration % self.update_freq == 0:
             self.update(rf)
+        if self.shrink_freq > 0 and iteration >= self.shrink_freq and iteration % self.shrink_freq == 0:
+            new_aabb = self.get_bounds()
+            rf.shrink(new_aabb)
+            self.update(rf, init=True)
         return False
 
     def update(self, rf, decay=0.95, S=128, init=False):
@@ -411,7 +450,7 @@ class ContinuousAlphagrid(torch.nn.Module):
                         # construct points
                         xx, yy, zz = torch.meshgrid(xs, ys, zs, indexing='ij')
                         coords = torch.cat([xx.reshape(-1, 1), yy.reshape(-1, 1), zz.reshape(-1, 1)], dim=-1) # [N, 3], in [0, 128)
-                        indices = raymarching.morton3D(coords).long() # [N]
+                        indices = morton3D(coords).long() # [N]
 
                         # cascading
                         for cas in range(self.cascade):
@@ -433,7 +472,11 @@ class ContinuousAlphagrid(torch.nn.Module):
                 # random sample some positions
                 coords = torch.randint(0, self.grid_size, (N, 3), device=self.density_grid.device) # [N, 3], in [0, 128)
                 indices = morton3D(coords).long() # [N]
-                occ_indices, occ_coords, _ = self.sample_occupied(cas, N)
+                # random sample occupied positions
+                occ_indices = torch.nonzero(self.density_grid[cas] > 0).squeeze(-1) # [Nz]
+                rand_mask = torch.randint(0, occ_indices.shape[0], [N], dtype=torch.long, device=self.density_grid.device)
+                occ_indices = occ_indices[rand_mask] # [Nz] --> [N], allow for duplication
+                occ_coords = morton3D_invert(occ_indices) # [N, 3]
                 # concat
                 indices = torch.cat([indices, occ_indices], dim=0)
                 coords = torch.cat([coords, occ_coords], dim=0)

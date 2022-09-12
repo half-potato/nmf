@@ -53,7 +53,11 @@ class TensorNeRF(torch.nn.Module):
         self.normal_module = normal_module(in_channels=self.rf.app_dim) if normal_module is not None else None
         bound = aabb.abs().max()
         self.diffuse_module = diffuse_module(in_channels=self.rf.app_dim)
-        self.brdf = brdf(in_channels=self.rf.app_dim) if brdf is not None else None
+        al = self.diffuse_module.allocation
+        self.normal_module = normal_module(in_channels=self.rf.app_dim-al) if normal_module is not None else None
+        al += self.normal_module.allocation
+        self.ref_module = ref_module(in_channels=self.rf.app_dim-al) if ref_module is not None else None
+        self.brdf = brdf(in_channels=self.rf.app_dim-al) if brdf is not None else None
         self.brdf_sampler = brdf_sampler if brdf_sampler is None else brdf_sampler(num_samples=roughness_rays)
         self.visibility_module = visibility_module(in_channels=self.rf.app_dim-al, bound=bound) if visibility_module is not None else None
         self.sampler = sampler(near_far=near_far, aabb=aabb)
@@ -280,7 +284,8 @@ class TensorNeRF(torch.nn.Module):
             norms = normalize(-g[0][:, :3])
             return norms
 
-    def init_vis_module(self, S=16, G=8):
+    def init_vis_module(self, S=8, G=8):
+        device = self.get_device()
         _theta = torch.linspace(-np.pi/2, np.pi/2, G//2, device=device)
         _phi = torch.linspace(-np.pi, np.pi, G, device=device)
         _theta += torch.rand(1, device=device)
@@ -291,6 +296,10 @@ class TensorNeRF(torch.nn.Module):
             torch.cos(theta) * torch.sin(phi),
             -torch.sin(theta),
         ], dim=-1).reshape(-1, 1, 3)
+
+        X = torch.linspace(0, 1, self.visibility_module.grid_size, device=device).split(S)
+        Y = torch.linspace(0, 1, self.visibility_module.grid_size, device=device).split(S)
+        Z = torch.linspace(0, 1, self.visibility_module.grid_size, device=device).split(S)
 
         for xs in X:
             for ys in Y:
@@ -494,10 +503,10 @@ class TensorNeRF(torch.nn.Module):
             #  Compute normals for app mask
 
             # TODO REMOVE
-            # norms = self.calculate_normals(xyz_sampled[papp_mask])
-            # world_normal[papp_mask] = norms
-            # # pred norms is initialized to world norms to set loss to zero for align_world_loss when prediction is none
-            # p_world_normal[papp_mask] = norms.detach()
+            norms = self.calculate_normals(xyz_sampled[papp_mask])
+            world_normal[papp_mask] = norms
+            # pred norms is initialized to world norms to set loss to zero for align_world_loss when prediction is none
+            p_world_normal[papp_mask] = norms.detach()
 
             app_xyz = xyz_normed[papp_mask]
 
@@ -507,12 +516,14 @@ class TensorNeRF(torch.nn.Module):
                 app_features = all_app_features[papp_mask]
                 # _, app_features = self.rf.compute_feature(app_xyz)
 
+            noise_app_features = (app_features + torch.randn_like(app_features) * self.appdim_noise_std)
+
             # get base color of the point
             diffuse, tint, matprop = self.diffuse_module(
                 app_xyz, viewdirs[app_mask], app_features)
-            # diffuse = diffuse.type(rgb.dtype)
 
-            noise_app_features = (app_features + torch.randn_like(app_features) * self.appdim_noise_std)
+            app_features = app_features[..., self.diffuse_module.allocation:]
+            # diffuse = diffuse.type(rgb.dtype)
 
             # interpolate between the predicted and world normals
             if self.normal_module is not None:
@@ -541,6 +552,8 @@ class TensorNeRF(torch.nn.Module):
                 # world_normal = xyz_sampled[..., :3] / (xyz_sampled[..., :3].norm(dim=-1, keepdim=True) + 1e-8)
             else:
                 v_world_normal = world_normal
+
+            app_features = app_features[..., self.normal_module.allocation:]
 
             # calculate reflected ray direction
             V = -viewdirs[app_mask]
@@ -628,8 +641,8 @@ class TensorNeRF(torch.nn.Module):
                     # s = incoming_light[:, 0]
                     # debug[full_bounce_mask] += s# / (s+1)
                     # debug[full_bounce_mask] += 1
-                    # debug[full_bounce_mask] += bounce_rays[:, 0, 3:6]/2 + 0.5
                     reflect_rgb[bounce_mask] = tint[bounce_mask] * tinted_ref_rgb
+                    # reflect_rgb[bounce_mask] = tint[bounce_mask] * s
                     # reflect_rgb[bounce_mask] = tinted_ref_rgb
                     # reflect_rgb[bounce_mask] = s
 
@@ -654,6 +667,7 @@ class TensorNeRF(torch.nn.Module):
             # this is a modified rendering equation where the emissive light and light under the integral is all multiplied by the base color
             # in addition, the light is interpolated between emissive and reflective
             rgb[app_mask] = reflect_rgb + matprop['diffuse']
+            debug[app_mask] = matprop['diffuse']
 
         else:
             v_world_normal = world_normal
@@ -681,7 +695,7 @@ class TensorNeRF(torch.nn.Module):
                 # ], dim=1)
                 # d_normal_map = torch.matmul(row_basis, d_world_normal_map.unsqueeze(-1)).squeeze(-1)
 
-                v_world_normal_map = row_mask_sum(v_world_normal*pweight[..., None], ray_valid)
+                v_world_normal_map = row_mask_sum(p_world_normal*pweight[..., None], ray_valid)
                 v_world_normal_map = acc_map[..., None] * v_world_normal_map + (1 - acc_map[..., None])
 
                 if weight.shape[1] > 0:
@@ -729,7 +743,7 @@ class TensorNeRF(torch.nn.Module):
             # align_world_loss = torch.linalg.norm(p_world_normal - world_normal, dim=-1)
             normal_loss = (pweight * align_world_loss).sum() / B
 
-            output['diffuse_reg'] = roughness.mean() + diffuse.mean() + 0.1*self.bg_module.mipbias
+            output['diffuse_reg'] = roughness.mean()
             output['normal_loss'] = normal_loss
             output['backwards_rays_loss'] = backwards_rays_loss
             output['floater_loss'] = floater_loss

@@ -74,7 +74,7 @@ class NaiveVisCache(torch.nn.Module):
         # output mask is true if bg is not visible
         i, j, k, face_index = self.rays2inds(norm_ray_origins, viewdirs)
         eps = 2e-2
-        vals = self.cache[i, j, k, face_index].int() + torch.where(bgvisibility, 0, -self.jump)
+        vals = self.cache[i, j, k, face_index].int() + torch.where(bgvisibility, 1, -self.jump)
         # vals = self.cache[i, j, k, face_index].int() + torch.where(~vis_mask, 0, -self.jump)
         # vals = self.cache[indices, face_index].int() + torch.where(bgvisibility, self.jump, -self.jump)
 

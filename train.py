@@ -125,11 +125,11 @@ def reconstruction(args):
         # tensorf.rf.update_stepSize(grid_size)
 
     # TODO REMOVE
-    bg_sd = torch.load('log/mats360_bg.th')
-    from models import bg_modules
-    bg_module = bg_modules.HierarchicalCubeMap(bg_resolution=2048, num_levels=1, featureC=128, activation='softplus', power=2, lr=1e-2)
-    bg_module.load_state_dict(bg_sd, strict=False)
-    tensorf.bg_module = bg_module
+    # bg_sd = torch.load('log/mats360_bg.th')
+    # from models import bg_modules
+    # bg_module = bg_modules.HierarchicalCubeMap(bg_resolution=2048, num_levels=1, featureC=128, activation='softplus', power=2, lr=1e-2)
+    # bg_module.load_state_dict(bg_sd, strict=False)
+    # tensorf.bg_module = bg_module
 
     tensorf = tensorf.to(device)
 
@@ -247,7 +247,7 @@ def reconstruction(args):
         for iteration in pbar:
 
             if iteration < 500:
-                ray_idx, rgb_idx = trainingSampler.nextids(batch=params.batch_size//2)
+                ray_idx, rgb_idx = trainingSampler.nextids(batch=params.batch_size//3)
             else:
                 ray_idx, rgb_idx = trainingSampler.nextids()
 
@@ -275,7 +275,7 @@ def reconstruction(args):
                 diffuse_reg = data['diffuse_reg'].mean()
                 rgb_map = data['rgb_map']
                 if not train_dataset.hdr:
-                    rgb_map = rgb_map.clip(0, 1)
+                    rgb_map = rgb_map.clip(max=1)
                 whole_valid = data['whole_valid'] 
                 if params.charbonier_loss:
                     loss = torch.sqrt((rgb_map - rgb_train[whole_valid]) ** 2 + params.charbonier_eps**2).mean()
@@ -296,7 +296,7 @@ def reconstruction(args):
 
                 if tensorf.visibility_module is not None:
                     if iteration % 10 == 0:
-                        if iteration < 100:
+                        if iteration < 100:# or iteration % 1000 == 0:
                             visibility_loss = tensorf.init_vis_module()
                         else:
                             visibility_loss = tensorf.compute_visibility_loss(params.N_visibility_rays)
@@ -352,12 +352,12 @@ def reconstruction(args):
             # logger.info the current values of the losses.
             if iteration % args.progress_refresh_rate == 0:
                 pbar.set_description(
-                    f'train_psnr = {float(np.mean(PSNRs)):.2f}'
+                    f'psnr = {float(np.mean(PSNRs)):.2f}'
                     + f' test_psnr = {float(np.mean(PSNRs_test)):.2f}'
-                    + f' roughness = {data["roughness"].mean().item():.5f}'
+                    + f' rough = {data["roughness"].mean().item():.5f}'
                     + f' nerr = {float(normal_loss):.1e}'
                     + f' back = {backwards_rays_loss:.5e}'
-                    + f' floater = {floater_loss:.1e}'
+                    + f' float = {floater_loss:.1e}'
                     + f' mipbias = {float(tensorf.bg_module.mipbias):.1e}'
                     + f' vis = {float(visibility_loss):.1e}'
                     # + f' mse = {photo_loss:.6f}'
