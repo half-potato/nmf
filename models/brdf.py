@@ -377,7 +377,10 @@ class MLPBRDF(torch.nn.Module):
         if self.mul_ggx:
             D = ggx_dist(NdotH, roughness.reshape(-1, 1))
             LdotN = LdotN*D
+        LdotN = LdotN.clip(min=0)
 
-        spec_color = row_mask_sum(incoming_light * ref_weight * LdotN, ray_mask) / row_mask_sum(LdotN, ray_mask)
+        # spec_color = row_mask_sum(incoming_light * ref_weight * LdotN, ray_mask) / row_mask_sum(LdotN * ref_weight, ray_mask).clip(min=1e-8)
+        # ic((row_mask_sum(ref_weight * LdotN, ray_mask) / row_mask_sum(LdotN, ray_mask).clip(min=1e-8)).max())
+        spec_color = row_mask_sum(incoming_light * ref_weight * LdotN, ray_mask) / row_mask_sum(LdotN, ray_mask).clip(min=1e-8).sum(dim=-1, keepdim=True)
 
         return spec_color

@@ -16,3 +16,5 @@ imageio-ffmpeg
 hydra-core
 icecream
 warp-lang
+loguru
+git+https://github.com/NVlabs/nvdiffrast

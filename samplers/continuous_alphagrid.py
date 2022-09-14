@@ -2,7 +2,6 @@ import torch
 import math
 import raymarching_full as raymarching 
 import torch.nn.functional as F
-from numba import jit
 import numpy as np
 from icecream import ic
 import time
@@ -298,7 +297,7 @@ class ContinuousAlphagrid(torch.nn.Module):
         coords = (o_xyzs+1) / 2 * (self.grid_size - 1)
         return coords.long(), cas
 
-    def coords2xyz(self, coords, cas, randomize=True):
+    def coords2xyz(self, coords, cas, randomize=True, conv_size=3):
         xyzs = 2 * coords.float() / (self.grid_size - 1) - 1 # [N, 3] in [-1, 1]
 
         # cascading
@@ -308,7 +307,7 @@ class ContinuousAlphagrid(torch.nn.Module):
         cas_xyzs = xyzs * (bound - half_grid_size)
         # add noise in [-hgs, hgs]
         if randomize:
-            cas_xyzs += (torch.rand_like(cas_xyzs) * 2 - 1) * half_grid_size
+            cas_xyzs += (torch.rand_like(cas_xyzs) * 2 - 1) * half_grid_size * conv_size / 2
         return cas_xyzs
 
     @torch.no_grad()

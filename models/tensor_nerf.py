@@ -137,10 +137,11 @@ class TensorNeRF(torch.nn.Module):
         torch.save(ckpt, path)
 
     @staticmethod
-    def load(ckpt, config=None, **kwargs):
+    def load(ckpt, config=None, near_far=None, **kwargs):
         config = ckpt['config'] if config is None else config
         aabb = ckpt['state_dict']['rf.aabb']
-        rf = hydra.utils.instantiate(config)(aabb=aabb)
+        near_far = near_far if near_far is not None else [1, 6]
+        rf = hydra.utils.instantiate(config)(aabb=aabb, near_far=near_far)
         # if 'alphaMask.aabb' in ckpt.keys():
         #     #  length = np.prod(ckpt['alphaMask.shape'])
         #     #  alpha_volume = torch.from_numpy(np.unpackbits(ckpt['alphaMask.mask'])[
@@ -351,7 +352,7 @@ class TensorNeRF(torch.nn.Module):
                     bgvisibility = ray_valid.sum(dim=1) > 0
                     normed_origins = self.rf.normalize_coord(origins)
 
-                    self.visibility_module.update(normed_origins, viewdirs, app_features, termination, bgvisibility)
+                    self.visibility_module.update(normed_origins, viewdirs, bgvisibility)
         torch.cuda.empty_cache()
         return torch.tensor(0.0, device=device)
 
@@ -415,9 +416,9 @@ class TensorNeRF(torch.nn.Module):
 
         # get value from MLP and compare to get loss
         norm_ray_origins = self.rf.normalize_coord(origins)
-        app_features = self.rf.compute_appfeature(norm_ray_origins)
+        # app_features = self.rf.compute_appfeature(norm_ray_origins)
         torch.cuda.empty_cache()
-        return self.visibility_module.update(norm_ray_origins, viewdirs, app_features, termination, bgvisibility)
+        return self.visibility_module.update(norm_ray_origins, viewdirs, bgvisibility)
 
     def render_just_bg(self, rays_chunk, roughness, white_bg=True):
         if rays_chunk.shape[0] == 0:
@@ -493,6 +494,9 @@ class TensorNeRF(torch.nn.Module):
         pweight = weight[ray_valid]
         app_mask = (weight > self.rayMarch_weight_thres)
         papp_mask = app_mask[ray_valid]
+
+        if self.visibility_module is not None:
+            self.visibility_module.ray_update(xyz_normed, viewdirs[ray_valid], app_mask, ray_valid)
 
         debug = torch.zeros((B, n_samples, 3), dtype=torch.float, device=device, requires_grad=False)
         bounce_count = 0
@@ -629,8 +633,12 @@ class TensorNeRF(torch.nn.Module):
                     # miplevel = self.bg_module.sa2mip(mipval)
                     # debug[full_bounce_mask][..., 0] += miplevel.mean(dim=1) / (self.bg_module.max_mip-1)
                     
-                    tinted_ref_rgb = self.brdf(incoming_light, V[bounce_mask], bounce_rays[..., 3:6], outward.reshape(-1, 1, 3), app_features[bounce_mask], roughness[bounce_mask], matprop, bounce_mask, ray_mask)
-                    s = row_mask_sum(incoming_light, ray_mask) / (ray_mask.sum(dim=1)+1e-8)[..., None]
+                    tinted_ref_rgb = self.brdf(incoming_light,
+                            V[bounce_mask], bounce_rays[..., 3:6], outward.reshape(-1, 1, 3),
+                            app_features[bounce_mask], roughness[bounce_mask], matprop,
+                            bounce_mask, ray_mask)
+                    # ic(ray_mask.sum(dim=-1).float().mean(), ray_mask.shape)
+                    # s = row_mask_sum(incoming_light, ray_mask) / (ray_mask.sum(dim=1)+1e-8)[..., None]
                     # s = incoming_light.max(dim=1).values
 
                     # if not is_train:
@@ -667,7 +675,7 @@ class TensorNeRF(torch.nn.Module):
             # this is a modified rendering equation where the emissive light and light under the integral is all multiplied by the base color
             # in addition, the light is interpolated between emissive and reflective
             rgb[app_mask] = reflect_rgb + matprop['diffuse']
-            debug[app_mask] = matprop['diffuse']
+            # debug[app_mask] = matprop['diffuse']
 
         else:
             v_world_normal = world_normal

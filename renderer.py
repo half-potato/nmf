@@ -167,7 +167,6 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
     os.makedirs(savePath+"/err", exist_ok=True)
     os.makedirs(savePath+"/surf_width", exist_ok=True)
     os.makedirs(savePath+"/debug", exist_ok=True)
-    os.makedirs(savePath+"/envmaps", exist_ok=True)
 
     if tensorf.bg_module is not None:
         tm = tonemap.HDRTonemap()
@@ -186,11 +185,15 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
     brender = BundleRender(renderer, H, W, focal)
 
     if tensorf.ref_module is not None:
+        os.makedirs(savePath+"/envmaps", exist_ok=True)
         env_map, col_map = tensorf.recover_envmap(512, xyz=torch.tensor([-0.3042,  0.8466,  0.8462,  0.0027], device='cuda:0'))
         env_map = (env_map.clamp(0, 1).detach().cpu().numpy() * 255).astype('uint8')
         col_map = (col_map.clamp(0, 1).detach().cpu().numpy() * 255).astype('uint8')
         imageio.imwrite(f'{savePath}/envmaps/{prtx}view_map.png', col_map)
         imageio.imwrite(f'{savePath}/envmaps/{prtx}ref_map.png', env_map)
+    if tensorf.visibility_module is not None:
+        os.makedirs(savePath+"/viscache", exist_ok=True)
+        tensorf.visibility_module.save(f'{savePath}/viscache/', prtx)
 
     T2 = torch.tensor([
         [0.0, 0.0, -1.0],

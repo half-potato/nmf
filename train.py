@@ -47,15 +47,15 @@ def render_test(args):
         logger.info('the ckpt path does not exists!!')
         return
 
-    ckpt = torch.load(args.ckpt)
-    tensorf = TensorNeRF.load(ckpt, args.model.arch, strict=False).to(device)
-    tensorf.sampler.update(tensorf.rf, init=True)
-
     # init dataset
     dataset = dataset_dict[args.dataset.dataset_name]
     test_dataset = dataset(os.path.join(args.datadir, args.dataset.scenedir), split='test', downsample=args.dataset.downsample_train, is_stack=True)
     white_bg = test_dataset.white_bg
     ndc_ray = args.dataset.ndc_ray
+
+    ckpt = torch.load(args.ckpt)
+    tensorf = TensorNeRF.load(ckpt, args.model.arch, near_far=test_dataset.near_far, strict=False).to(device)
+    tensorf.sampler.update(tensorf.rf, init=True)
 
     logfolder = os.path.dirname(args.ckpt)
     if args.render_train:
@@ -247,7 +247,7 @@ def reconstruction(args):
         for iteration in pbar:
 
             if iteration < 500:
-                ray_idx, rgb_idx = trainingSampler.nextids(batch=params.batch_size//3)
+                ray_idx, rgb_idx = trainingSampler.nextids(batch=params.batch_size//4)
             else:
                 ray_idx, rgb_idx = trainingSampler.nextids()
 
@@ -296,11 +296,11 @@ def reconstruction(args):
 
                 if tensorf.visibility_module is not None:
                     if iteration % 10 == 0:
-                        if iteration < 100:# or iteration % 1000 == 0:
-                            visibility_loss = tensorf.init_vis_module()
+                        if iteration < 100 or iteration % 1000 == 0:
+                            tensorf.init_vis_module()
                         else:
-                            visibility_loss = tensorf.compute_visibility_loss(params.N_visibility_rays)
-                    total_loss += params.visibility_lambda * visibility_loss
+                            tensorf.compute_visibility_loss(params.N_visibility_rays)
+                    # total_loss += params.visibility_lambda * visibility_loss
                 else:
                     visibility_loss = 0
 
@@ -359,7 +359,6 @@ def reconstruction(args):
                     + f' back = {backwards_rays_loss:.5e}'
                     + f' float = {floater_loss:.1e}'
                     + f' mipbias = {float(tensorf.bg_module.mipbias):.1e}'
-                    + f' vis = {float(visibility_loss):.1e}'
                     # + f' mse = {photo_loss:.6f}'
                 )
                 PSNRs = []
