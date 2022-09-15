@@ -77,6 +77,7 @@ class ContinuousAlphagrid(torch.nn.Module):
                  update_freq=16,
                  max_samples=int(1.1e6),
                  dynamic_batchsize=False,
+                 conv=7,
                  shrink_freq=1000,
                  grid_size=128):
         super().__init__()
@@ -89,6 +90,7 @@ class ContinuousAlphagrid(torch.nn.Module):
         # distance of the candidate from the center. The resolution decreases by a factor of 2 for
         # each cascade.
 
+        self.conv = conv
         self.bound = bound if aabb is None else aabb.abs().max()
         self.dynamic_batchsize = dynamic_batchsize
         self.update_freq = update_freq
@@ -297,7 +299,7 @@ class ContinuousAlphagrid(torch.nn.Module):
         coords = (o_xyzs+1) / 2 * (self.grid_size - 1)
         return coords.long(), cas
 
-    def coords2xyz(self, coords, cas, randomize=True, conv_size=3):
+    def coords2xyz(self, coords, cas, randomize=True, conv=1):
         xyzs = 2 * coords.float() / (self.grid_size - 1) - 1 # [N, 3] in [-1, 1]
 
         # cascading
@@ -307,7 +309,7 @@ class ContinuousAlphagrid(torch.nn.Module):
         cas_xyzs = xyzs * (bound - half_grid_size)
         # add noise in [-hgs, hgs]
         if randomize:
-            cas_xyzs += (torch.rand_like(cas_xyzs) * 2 - 1) * half_grid_size * conv_size / 2
+            cas_xyzs += (torch.randn_like(cas_xyzs)) * half_grid_size * conv / 2
         return cas_xyzs
 
     @torch.no_grad()
@@ -453,7 +455,7 @@ class ContinuousAlphagrid(torch.nn.Module):
 
                         # cascading
                         for cas in range(self.cascade):
-                            cas_xyzs = self.coords2xyz(coords, cas)
+                            cas_xyzs = self.coords2xyz(coords, cas, conv=self.conv)
                             # query density
                             cas_norm = rf.normalize_coord(cas_xyzs)
                             sigmas = rf.compute_densityfeature(cas_norm).reshape(-1)
@@ -480,7 +482,7 @@ class ContinuousAlphagrid(torch.nn.Module):
                 indices = torch.cat([indices, occ_indices], dim=0)
                 coords = torch.cat([coords, occ_coords], dim=0)
                 # same below
-                cas_xyzs = self.coords2xyz(coords, cas)
+                cas_xyzs = self.coords2xyz(coords, cas, conv=self.conv)
                 # query density
                 cas_norm = rf.normalize_coord(cas_xyzs)
                 sigmas = rf.compute_densityfeature(cas_norm).reshape(-1)
