@@ -66,7 +66,7 @@ class BundleRender:
         device = rays.device
 
         LOGGER.reset()
-        data = self.base_renderer(rays, tensorf, keys=['depth_map', 'rgb_map', 'normal_map', 'acc_map', 'termination_xyz', 'debug_map', 'surf_width'],
+        data = self.base_renderer(rays, tensorf, keys=['depth_map', 'rgb_map', 'normal_map', 'acc_map', 'termination_xyz', 'debug_map', 'surf_width', 'world_normal_map'],
                                   focal=self.focal, chunk=self.chunk, render2completion=True, **kwargs)
 
         LOGGER.save('rays.pkl')
@@ -94,6 +94,7 @@ class BundleRender:
             return val_map
 
 
+        world_normal_map = reshape(data['world_normal_map'].detach()).cpu()
         rgb_map, depth_map, acc_map = reshape(rgb_map.detach()).cpu(), reshape(depth_map.detach()).cpu(), reshape(acc_map.detach()).cpu()
         debug_map = reshape(debug_map.detach()).cpu()
         surf_width = reshape(surf_width).cpu()
@@ -135,7 +136,7 @@ class BundleRender:
         # fig.show()
         # assert(False)
 
-        return rgb_map, depth_map, debug_map, normal_map, env_map, col_map, surf_width, acc_map
+        return rgb_map, depth_map, debug_map, normal_map, env_map, col_map, surf_width, acc_map, world_normal_map
 
 
 def depth_to_normals(depth, focal):
@@ -163,6 +164,7 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
     os.makedirs(savePath, exist_ok=True)
     os.makedirs(savePath+"/rgbd", exist_ok=True)
     os.makedirs(savePath+"/normal", exist_ok=True)
+    os.makedirs(savePath+"/world_normal", exist_ok=True)
     os.makedirs(savePath+"/normal_err", exist_ok=True)
     os.makedirs(savePath+"/err", exist_ok=True)
     os.makedirs(savePath+"/surf_width", exist_ok=True)
@@ -209,15 +211,16 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
     tensorf.eval()
     for idx, im_idx, rays, gt_rgb in iterator():
 
-        rgb_map, depth_map, debug_map, normal_map, env_map, col_map, surf_width, acc_map = brender(
+        rgb_map, depth_map, debug_map, normal_map, env_map, col_map, surf_width, acc_map, world_normal_map = brender(
                 rays, tensorf, N_samples=N_samples, ndc_ray=ndc_ray, white_bg = white_bg, is_train=False)
 
-        H, W, _ = normal_map.shape
-        normal_map = normal_map.reshape(-1, 3)# @ pose[:3, :3]
-        normal_map = normal_map.reshape(H, W, 3)
+        # H, W, _ = normal_map.shape
+        # normal_map = normal_map.reshape(-1, 3)# @ pose[:3, :3]
+        # normal_map = normal_map.reshape(H, W, 3)
         # bottom of the sphere is green
         # top is blue
         vis_normal_map = (normal_map * 127 + 128).clamp(0, 255).byte()
+        vis_world_normal_map = (world_normal_map * 127 + 128).clamp(0, 255).byte()
         # vis_normal_map = (normal_map * 255).clamp(0, 255).byte()
 
         err_map = (rgb_map.clip(0, 1) - gt_rgb.clip(0, 1)) + 0.5
@@ -271,6 +274,7 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
             rgb_map = np.concatenate((rgb_map, vis_depth_map), axis=1)
             imageio.imwrite(f'{savePath}/rgbd/{prtx}{idx:03d}.exr', depth_map.numpy())
             imageio.imwrite(f'{savePath}/normal/{prtx}{idx:03d}.png', vis_normal_map)
+            imageio.imwrite(f'{savePath}/world_normal/{prtx}{idx:03d}.png', vis_world_normal_map)
             imageio.imwrite(f'{savePath}/err/{prtx}{idx:03d}.png', err_map)
             imageio.imwrite(f'{savePath}/surf_width/{prtx}{idx:03d}.png', surf_width.numpy().astype(np.uint8))
             imageio.imwrite(f'{savePath}/debug/{prtx}{idx:03d}.png', (255*debug_map.clamp(0, 1).numpy()).astype(np.uint8))

@@ -125,11 +125,11 @@ def reconstruction(args):
         # tensorf.rf.update_stepSize(grid_size)
 
     # TODO REMOVE
-    # bg_sd = torch.load('log/mats360_bg.th')
-    # from models import bg_modules
-    # bg_module = bg_modules.HierarchicalCubeMap(bg_resolution=2048, num_levels=1, featureC=128, activation='softplus', power=2, lr=1e-2)
-    # bg_module.load_state_dict(bg_sd, strict=False)
-    # tensorf.bg_module = bg_module
+    bg_sd = torch.load('log/mats360_bg.th')
+    from models import bg_modules
+    bg_module = bg_modules.HierarchicalCubeMap(bg_resolution=2048, num_levels=1, featureC=128, activation='softplus', power=2, lr=1e-2)
+    bg_module.load_state_dict(bg_sd, strict=False)
+    tensorf.bg_module = bg_module
 
     tensorf = tensorf.to(device)
 
@@ -246,7 +246,9 @@ def reconstruction(args):
     # with torch.autograd.detect_anomaly():
         for iteration in pbar:
 
-            if iteration < 500:
+            if iteration < 50:
+                ray_idx, rgb_idx = trainingSampler.nextids(batch=params.batch_size//8)
+            elif iteration < 500:
                 ray_idx, rgb_idx = trainingSampler.nextids(batch=params.batch_size//4)
             else:
                 ray_idx, rgb_idx = trainingSampler.nextids()
@@ -295,14 +297,13 @@ def reconstruction(args):
                 # ic(total_loss, params.normal_lambda*normal_loss, params.floater_lambda*floater_loss, params.backwards_rays_lambda*backwards_rays_loss, params.diffuse_lambda*diffuse_reg)
 
                 if tensorf.visibility_module is not None:
-                    if iteration % 10 == 0:
-                        if iteration < 100 or iteration % 1000 == 0:
+                    pass
+                    if iteration % 1 == 0:
+                        # if iteration < 100 or iteration % 1000 == 0:
+                        if iteration % 500 == 0 and iteration < 5000:
                             tensorf.init_vis_module()
                         else:
                             tensorf.compute_visibility_loss(params.N_visibility_rays)
-                    # total_loss += params.visibility_lambda * visibility_loss
-                else:
-                    visibility_loss = 0
 
                 if ortho_reg_weight > 0:
                     loss_reg = tensorf.rf.vector_comp_diffs()

@@ -5,6 +5,7 @@ from icecream import ic
 from models.grid_sample_Cinf import grid_sample
 import random
 import math
+from models import safemath
 
 # here is original grid sample derivative for testing
 # def grid_sample(*args, smoothing, **kwargs):
@@ -15,11 +16,12 @@ def d_softplus(x, beta=1.0, shift=-10):
 
 
 class TensorVMSplit(TensorVoxelBase):
-    def __init__(self, aabb, *args, smoothing, **kargs):
+    def __init__(self, aabb, init_mode='trig', *args, smoothing, **kargs):
         super(TensorVMSplit, self).__init__(aabb, *args, **kargs)
 
         # num_levels x num_outputs
         # self.interp_mode = 'bilinear'
+        self.init_mode = init_mode
         self.interp_mode = 'bicubic'
         self.align_corners = True
 
@@ -42,29 +44,35 @@ class TensorVMSplit(TensorVoxelBase):
             mat_id_0, mat_id_1 = self.matMode[i]
             pos_vals = xy.reshape(1, 1, grid_size[mat_id_0], grid_size[mat_id_1])
             # freqs = torch.arange(n_component[i]//2).reshape(1, -1, 1, 1)
-            freqs = 2**torch.arange(n_component[i]//2-1).reshape(1, -1, 1, 1)
+            n_degs = n_component[i]//2
+            freqs = 2**torch.arange(n_degs-1).reshape(1, -1, 1, 1)
             freqs = torch.cat([torch.zeros_like(freqs[:, 0:1]), freqs], dim=1)
             line_pos_vals = torch.linspace(-1, 1, grid_size[vec_id]).reshape(1, 1, -1, 1)
             scales = scale * 1/(freqs+1)
             # scales[:, scales.shape[1]//2:] = 0
-            plane_coef_v = torch.nn.Parameter(
-                torch.cat([
-                    scales * torch.sin(freqs * pos_vals * math.pi),
-                    scales * torch.cos(freqs * pos_vals * math.pi),
-                ], dim=1)
-                # scale * torch.randn((1, n_component[i], grid_size[mat_id_1], grid_size[mat_id_0]))
-                # scale * torch.rand((1, n_component[i], grid_size[mat_id_1], grid_size[mat_id_0])) + shift/sum(n_component)
-            )
-            line_coef_v = torch.nn.Parameter(
-                torch.cat([
-                    scales * torch.sin(freqs * line_pos_vals * math.pi),
-                    scales * torch.cos(freqs * line_pos_vals * math.pi),
-                ], dim=1)
-                # scale * torch.randn((1, n_component[i], grid_size[vec_id], 1))
-                # scale * torch.rand((1, n_component[i], grid_size[vec_id], 1))
-            )
-            plane_coef.append(plane_coef_v)
-            line_coef.append(line_coef_v)
+            match self.init_mode:
+                case 'trig':
+                    plane_coef_v = torch.cat([
+                        scales * torch.sin(freqs * pos_vals * math.pi),
+                        scales * torch.cos(freqs * pos_vals * math.pi),
+                    ], dim=1)
+                    line_coef_v = torch.cat([
+                        scales * torch.sin(freqs * line_pos_vals * math.pi),
+                        scales * torch.cos(freqs * line_pos_vals * math.pi),
+                    ], dim=1)
+                case 'integrated':
+                    b = safemath.integrated_pos_enc((pos_vals.reshape(-1, 1), torch.zeros_like(pos_vals).reshape(-1, 1)), 0, n_degs)
+                    b = b.T.reshape(1, b.shape[1], *pos_vals.shape[-2:])
+
+                    a = safemath.integrated_pos_enc((line_pos_vals.reshape(-1, 1), torch.zeros_like(line_pos_vals).reshape(-1, 1)), 0, n_degs)
+                    a = a.T.reshape(1, a.shape[1], *line_pos_vals.shape[-2:])
+                    plane_coef_v = b
+                    line_coef_v = a
+                case 'rand':
+                    plane_coef_v = scale * torch.randn((1, n_component[i], grid_size[mat_id_1], grid_size[mat_id_0]))
+                    line_coef_v = scale * torch.randn((1, n_component[i], grid_size[vec_id], 1))
+            plane_coef.append(torch.nn.Parameter(plane_coef_v))
+            line_coef.append(torch.nn.Parameter(line_coef_v))
 
         return torch.nn.ParameterList(plane_coef), torch.nn.ParameterList(line_coef)
     

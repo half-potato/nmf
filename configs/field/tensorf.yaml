@@ -12,6 +12,7 @@ smoothing: 0.25
 # activation: 'softplus'
 activation: 'exp'
 # activation: 'relu_shift'
+init_mode: integrated
 density_shift: -10
 
 N_voxel_init: 2097156 # 128**3

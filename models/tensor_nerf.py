@@ -117,8 +117,8 @@ class TensorNeRF(torch.nn.Module):
         if isinstance(self.brdf, torch.nn.Module):
             grad_vars += [{'params': self.brdf.parameters(),
                            'lr': self.brdf.lr}]
-        if isinstance(self.bg_module, torch.nn.Module):
-            grad_vars += self.bg_module.get_optparam_groups()
+        # if isinstance(self.bg_module, torch.nn.Module):
+        #     grad_vars += self.bg_module.get_optparam_groups()
         return grad_vars
 
     def save(self, path, config):
@@ -308,7 +308,7 @@ class TensorNeRF(torch.nn.Module):
                     # construct points
                     xx, yy, zz = torch.meshgrid(xs, ys, zs, indexing='ij')
                     samples = torch.cat([xx.reshape(-1, 1), yy.reshape(-1, 1), zz.reshape(-1, 1)], dim=-1) # [N, 3], in [0, 1)
-                    samples = (samples + (torch.rand_like(samples)*2-1) / self.visibility_module.grid_size).clip(0, 1)
+                    samples = (samples + (torch.rand_like(samples)) / (self.visibility_module.grid_size-1)).clip(0, 1)
                     porigins = self.rf.aabb[0] * (1-samples) + self.rf.aabb[1] * samples
 
                     origins = porigins.reshape(1, -1, 3).expand(pviewdirs.shape[0], -1, -1).reshape(-1, 3)
@@ -585,11 +585,8 @@ class TensorNeRF(torch.nn.Module):
                 # compute which rays to reflect
                 bounce_mask, full_bounce_mask, inv_full_bounce_mask, ray_mask = self.selector(
                         app_mask, weight.detach(), VdotL, 1-roughness.detach(), num_roughness_rays)
-                # if the bounce is not calculated, set the ratio to 0 to make sure we don't get black spots
-                # if not bounce_mask.all() and not is_train:
-                #     ratio_diffuse[~bounce_mask] += ratio_reflected[~bounce_mask]
-                #     ratio_reflected[~bounce_mask] = 0
-                # if not is_train:
+                # bounce mask says which of the sampled points has greater than 0 rays
+                # ray mask assumes that each of the bounce mask points has num_roughness_rays and masks out rays from each point according to the limit per a ray
 
                 if bounce_mask.sum() > 0:
                     # decide how many bounces to calculate
@@ -607,9 +604,8 @@ class TensorNeRF(torch.nn.Module):
 
                     if recur <= 0 and self.world_bounces > 0:
                         norm_ray_origins = self.rf.normalize_coord(bounce_rays[..., :3])
-                        masked_features = app_features[bounce_mask].reshape(-1, 1, app_features.shape[-1]).expand(-1, num_roughness_rays, -1)
-                        masked_features = masked_features[ray_mask]
-                        vis_mask = self.visibility_module.mask(norm_ray_origins.reshape(-1, 3), bounce_rays[:, 3:6].reshape(-1, 3), self.world_bounces, masked_features)
+                        # vis_mask takes in each outgoing ray and predicts whether it will terminate at the background
+                        vis_mask = self.visibility_module.mask(norm_ray_origins.reshape(-1, 3), bounce_rays[:, 3:6].reshape(-1, 3), self.world_bounces, full_bounce_mask, ray_mask, weight)
                         # eps = 2e-2
                         # vis_mask = ((bounce_rays[..., 0] < eps) & (bounce_rays[..., 1] > -eps))
                         incoming_light = torch.zeros((n, 3), device=device)
@@ -705,6 +701,8 @@ class TensorNeRF(torch.nn.Module):
 
                 v_world_normal_map = row_mask_sum(p_world_normal*pweight[..., None], ray_valid)
                 v_world_normal_map = acc_map[..., None] * v_world_normal_map + (1 - acc_map[..., None])
+                world_normal_map = row_mask_sum(world_normal*pweight[..., None], ray_valid)
+                world_normal_map = acc_map[..., None] * world_normal_map + (1 - acc_map[..., None])
 
                 if weight.shape[1] > 0:
                     inds = ((weight).max(dim=1).indices).clip(min=0)
@@ -724,6 +722,7 @@ class TensorNeRF(torch.nn.Module):
                 debug_map = (weight[..., None]*debug).sum(dim=1)
             output['depth_map'] = depth_map.detach().cpu()
             output['normal_map'] = v_world_normal_map.detach().cpu()
+            output['world_normal_map'] = world_normal_map.detach().cpu()
             output['termination_xyz'] = termination_xyz
             output['debug_map'] = debug_map.detach().cpu()
             output['surf_width'] = surface_width
