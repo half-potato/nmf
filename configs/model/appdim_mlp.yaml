@@ -101,7 +101,7 @@ arch:
     feape: 0
     featureC: 128
     num_layers: 3
-    lr: 1e-4
+    lr: 1e-3
 
   # diffuse_module:
   #   _partial_: True

@@ -610,7 +610,7 @@ class TensorNeRF(torch.nn.Module):
                         # vis_mask = ((bounce_rays[..., 0] < eps) & (bounce_rays[..., 1] > -eps))
                         incoming_light = torch.zeros((n, 3), device=device)
                         # for high sigvis, this implies that the ray terminates and needs to be rendered fully
-                        debug[full_bounce_mask] += row_mask_sum(vis_mask.float().reshape(-1, 1), ray_mask).expand(-1, 3)
+                        # debug[full_bounce_mask] += row_mask_sum(vis_mask.float().reshape(-1, 1), ray_mask).expand(-1, 3)
                         if vis_mask.sum() > 0:
                             # ic(bounce_rays.reshape(-1, D)[vis_mask].shape, mipval.reshape(-1)[vis_mask].shape)
                             incoming_data = self(bounce_rays.reshape(-1, D)[vis_mask], focal, recur=recur+1, white_bg=False,
@@ -671,7 +671,7 @@ class TensorNeRF(torch.nn.Module):
             # this is a modified rendering equation where the emissive light and light under the integral is all multiplied by the base color
             # in addition, the light is interpolated between emissive and reflective
             rgb[app_mask] = reflect_rgb + matprop['diffuse']
-            # debug[app_mask] = matprop['diffuse']
+            debug[app_mask] = matprop['diffuse']
 
         else:
             v_world_normal = world_normal
