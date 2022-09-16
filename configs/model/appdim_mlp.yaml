@@ -8,6 +8,7 @@ arch:
   roughness_rays: 50
   infinity_border: False
   appdim_noise_std: 0.0
+  # world_bounces: 40000
   world_bounces: 0000
   max_normal_similarity: 0.87
   max_floater_loss: 1
@@ -167,6 +168,6 @@ params:
   num_env_train_iters: 0
   n_iters: 30000
   charbonier_loss: false
-  start_density: 1e-3
+  start_density: 1e-2
   lr_init: 0.02
   batch_size: 4096

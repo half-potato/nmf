@@ -285,7 +285,7 @@ class TensorNeRF(torch.nn.Module):
             norms = normalize(-g[0][:, :3])
             return norms
 
-    def init_vis_module(self, S=8, G=8):
+    def init_vis_module(self, S=4, G=8):
         device = self.get_device()
         _theta = torch.linspace(-np.pi/2, np.pi/2, G//2, device=device)
         _phi = torch.linspace(-np.pi, np.pi, G, device=device)
@@ -326,7 +326,7 @@ class TensorNeRF(torch.nn.Module):
                     # z_vals: (b, N) float. distance along ray to sample
                     # dists: (b, N) float. distance between samples
                     # whole_valid: mask into origin rays_chunk of which B rays where able to be fully sampled.
-                    """
+                    # """
                     B = ray_valid.shape[0]
                     xyz_normed = self.rf.normalize_coord(xyz_sampled)
                     full_shape = (B, max_samps, 3)
@@ -343,13 +343,10 @@ class TensorNeRF(torch.nn.Module):
                     alpha, weight, bg_weight = raw2alpha(sigma, dists * self.rf.distance_scale)
 
                     # app_features = self.rf.compute_appfeature(norm_ray_origins)
-                    app_features = None
                     termination = (z_vals * weight).median()
-                    """
-                    termination = None
-                    app_features = None
-                    # bgvisibility = bg_weight[..., 0] > 0.1
-                    bgvisibility = ray_valid.sum(dim=1) > 0
+                    bgvisibility = bg_weight[..., 0] > 0.1
+                    # """
+                    # bgvisibility = ray_valid.sum(dim=1) > 0
                     normed_origins = self.rf.normalize_coord(origins)
 
                     self.visibility_module.update(normed_origins, viewdirs, bgvisibility)
@@ -390,7 +387,7 @@ class TensorNeRF(torch.nn.Module):
         # z_vals: (b, N) float. distance along ray to sample
         # dists: (b, N) float. distance between samples
         # whole_valid: mask into origin rays_chunk of which B rays where able to be fully sampled.
-        """
+        # """
         B = ray_valid.shape[0]
         xyz_normed = self.rf.normalize_coord(xyz_sampled)
         full_shape = (B, max_samps, 3)
@@ -405,13 +402,11 @@ class TensorNeRF(torch.nn.Module):
 
         # weight: [N_rays, N_samples]
         alpha, weight, bg_weight = raw2alpha(sigma, dists * self.rf.distance_scale)
-        """
+        # """
 
         # termination = (z_vals * weight).median()
-        # bgvisibility = bg_weight[..., 0] > 0.1
-        app_features = None
-        termination = None
-        bgvisibility = ray_valid.sum(dim=1) > 0
+        # bgvisibility = ray_valid.sum(dim=1) > 0
+        bgvisibility = bg_weight[..., 0] > 0.1
         # ic(bgvisibility.sum() / bgvisibility.numel())
 
         # get value from MLP and compare to get loss
@@ -495,8 +490,8 @@ class TensorNeRF(torch.nn.Module):
         app_mask = (weight > self.rayMarch_weight_thres)
         papp_mask = app_mask[ray_valid]
 
-        if self.visibility_module is not None:
-            self.visibility_module.ray_update(xyz_normed, viewdirs[ray_valid], app_mask, ray_valid)
+        # if self.visibility_module is not None:
+        #     self.visibility_module.ray_update(xyz_normed, viewdirs[ray_valid], app_mask, ray_valid)
 
         debug = torch.zeros((B, n_samples, 3), dtype=torch.float, device=device, requires_grad=False)
         bounce_count = 0
@@ -570,6 +565,7 @@ class TensorNeRF(torch.nn.Module):
 
             reflect_rgb = torch.zeros_like(diffuse)
             roughness = matprop['roughness'].squeeze(-1)
+            # roughness = 1e-2*torch.ones_like(roughness)
             # roughness = torch.where((xyz_sampled[..., 0].abs() < 0.15) | (xyz_sampled[..., 1].abs() < 0.15), 0.30, 0.15)[papp_mask]
             if recur >= self.max_recurs and self.ref_module is None:
                 pass
@@ -607,12 +603,12 @@ class TensorNeRF(torch.nn.Module):
                     if recur <= 0 and self.world_bounces > 0:
                         norm_ray_origins = self.rf.normalize_coord(bounce_rays[..., :3])
                         # vis_mask takes in each outgoing ray and predicts whether it will terminate at the background
-                        vis_mask = self.visibility_module.mask(norm_ray_origins.reshape(-1, 3), bounce_rays[:, 3:6].reshape(-1, 3), self.world_bounces, full_bounce_mask, ray_mask, weight)
-                        # eps = 2e-2
-                        # vis_mask = ((bounce_rays[..., 0] < eps) & (bounce_rays[..., 1] > -eps))
+                        # vis_mask = self.visibility_module.mask(norm_ray_origins.reshape(-1, 3), bounce_rays[:, 3:6].reshape(-1, 3), self.world_bounces, full_bounce_mask, ray_mask, weight)
+                        eps = 5e-3
+                        vis_mask = ((bounce_rays[..., 0] < eps) & (bounce_rays[..., 1] > -eps)) & (bounce_rays.abs().min(dim=1).values < eps)
                         incoming_light = torch.zeros((n, 3), device=device)
                         # for high sigvis, this implies that the ray terminates and needs to be rendered fully
-                        # debug[full_bounce_mask] += row_mask_sum(vis_mask.float().reshape(-1, 1), ray_mask).expand(-1, 3)
+                        debug[full_bounce_mask] += row_mask_sum(vis_mask.float().reshape(-1, 1), ray_mask).expand(-1, 3)
                         if vis_mask.sum() > 0:
                             # ic(bounce_rays.reshape(-1, D)[vis_mask].shape, mipval.reshape(-1)[vis_mask].shape)
                             incoming_data = self(bounce_rays.reshape(-1, D)[vis_mask], focal, recur=recur+1, white_bg=False,
@@ -732,19 +728,23 @@ class TensorNeRF(torch.nn.Module):
             output['surf_width'] = surface_width
 
             if app_mask.any():
-                tint_im = row_mask_sum(tint.detach(), app_mask).cpu()
-                diffuse_im = row_mask_sum(matprop['diffuse'].detach(), app_mask).cpu()
+                eweight = weight[app_mask][..., None]
+                tint_map = row_mask_sum(tint.detach()*eweight, app_mask).cpu()
+                diffuse_map = row_mask_sum(matprop['diffuse'].detach()*eweight, app_mask).cpu()
+                roughness_map = row_mask_sum(roughness.reshape(-1, 1).detach()*eweight, app_mask).cpu()
             else:
-                tint_im = torch.zeros(rgb_map.shape)
-                diffuse_im = torch.zeros(rgb_map.shape)
+                tint_map = torch.zeros(rgb_map.shape)
+                diffuse_map = torch.zeros(rgb_map.shape)
+                diffuse_map = torch.zeros(rgb_map.shape[:2])
             if app_mask.any() and bounce_mask.any():
                 s = row_mask_sum(incoming_light.detach(), ray_mask) / (ray_mask.sum(dim=1)+1e-8)[..., None]
-                spec_im = row_mask_sum(s, full_bounce_mask).cpu()
+                spec_map = row_mask_sum(s*weight[full_bounce_mask][..., None], full_bounce_mask).cpu()
             else:
-                spec_im = torch.zeros(rgb_map.shape)
-            output['tint_im'] = tint_im
-            output['diffuse_im'] = diffuse_im
-            output['spec_im'] = spec_im
+                spec_map = torch.zeros(rgb_map.shape)
+            output['tint_map'] = tint_map
+            output['diffuse_map'] = diffuse_map
+            output['spec_map'] = spec_map
+            output['roughness_map'] = roughness_map
         else:
             # viewdirs point inward. -viewdirs aligns with p_world_normal. So we want it below 0
             backwards_rays_loss = torch.matmul(viewdirs[ray_valid].reshape(-1, 1, 3), p_world_normal.reshape(-1, 3, 1)).reshape(pweight.shape).clamp(min=0)**2

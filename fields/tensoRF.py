@@ -61,10 +61,10 @@ class TensorVMSplit(TensorVoxelBase):
                         scales * torch.cos(freqs * line_pos_vals * math.pi),
                     ], dim=1)
                 case 'integrated':
-                    b = safemath.integrated_pos_enc((pos_vals.reshape(-1, 1), torch.zeros_like(pos_vals).reshape(-1, 1)), 0, n_degs)
+                    b = safemath.integrated_pos_enc((pos_vals.reshape(-1, 1)*torch.pi, torch.zeros_like(pos_vals).reshape(-1, 1)), 0, n_degs)
                     b = b.T.reshape(1, b.shape[1], *pos_vals.shape[-2:])
 
-                    a = safemath.integrated_pos_enc((line_pos_vals.reshape(-1, 1), torch.zeros_like(line_pos_vals).reshape(-1, 1)), 0, n_degs)
+                    a = safemath.integrated_pos_enc((line_pos_vals.reshape(-1, 1)*torch.pi, torch.zeros_like(line_pos_vals).reshape(-1, 1)), 0, n_degs)
                     a = a.T.reshape(1, a.shape[1], *line_pos_vals.shape[-2:])
                     plane_coef_v = b
                     line_coef_v = a
@@ -144,6 +144,7 @@ class TensorVMSplit(TensorVoxelBase):
         sigma_feature = torch.cat(sigma_feature, dim=0).T
         # ic(sigma_feature[0], sigma_feature[0].sum())
         sigma_feature = self.dbasis_mat(sigma_feature).squeeze(-1)
+        # sigma_feature = (sigma_feature).sum(dim=1).squeeze(-1)
         # sigma_feature = sigma_feature.sum(dim=-1)
         return self.feature2density(sigma_feature)
 

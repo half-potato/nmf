@@ -73,7 +73,7 @@ class BundleRender:
 
         LOGGER.reset()
         data = self.base_renderer(
-            rays, tensorf, keys=['depth_map', 'rgb_map', 'normal_map', 'acc_map', 'termination_xyz', 'debug_map', 'surf_width', 'world_normal_map', 'tint_im', 'diffuse_im', 'spec_im'],
+            rays, tensorf, keys=['depth_map', 'rgb_map', 'normal_map', 'acc_map', 'termination_xyz', 'debug_map', 'surf_width', 'world_normal_map', 'tint_map', 'diffuse_map', 'spec_map', 'roughness_map'],
             focal=self.focal, chunk=self.chunk, render2completion=True, **kwargs)
 
         LOGGER.save('rays.pkl')
@@ -122,9 +122,10 @@ class BundleRender:
             surf_width=surf_width,
             acc_map=acc_map,
             world_normal_map=world_normal_map,
-            tint_im=reshape(data['tint_im'].detach()).cpu(),
-            diffuse_im=reshape(data['diffuse_im'].detach()).cpu(),
-            spec_im=reshape(data['spec_im'].detach()).cpu(),
+            roughness_map=reshape(data['roughness_map'].detach()).cpu(),
+            tint_map=reshape(data['tint_map'].detach()).cpu(),
+            diffuse_map=reshape(data['diffuse_map'].detach()).cpu(),
+            spec_map=reshape(data['spec_map'].detach()).cpu(),
         )
 
 
@@ -161,6 +162,7 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
     os.makedirs(savePath+"/tint", exist_ok=True)
     os.makedirs(savePath+"/spec", exist_ok=True)
     os.makedirs(savePath+"/diffuse", exist_ok=True)
+    os.makedirs(savePath+"/roughness", exist_ok=True)
 
     if tensorf.bg_module is not None:
         tm = tonemap.HDRTonemap()
@@ -266,9 +268,10 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
             rgb_map = np.concatenate((rgb_map, vis_depth_map), axis=1)
             imageio.imwrite(f'{savePath}/rgbd/{prtx}{idx:03d}.exr', data.depth_map.numpy())
             imageio.imwrite(f'{savePath}/normal/{prtx}{idx:03d}.png', vis_normal_map)
-            imageio.imwrite(f'{savePath}/spec/{prtx}{idx:03d}.png', (255*data.spec_im.clamp(0, 1).numpy()).astype(np.uint8))
-            imageio.imwrite(f'{savePath}/diffuse/{prtx}{idx:03d}.png', (255*data.diffuse_im.clamp(0, 1).numpy()).astype(np.uint8))
-            imageio.imwrite(f'{savePath}/tint/{prtx}{idx:03d}.png', (255*data.tint_im.clamp(0, 1).numpy()).astype(np.uint8))
+            imageio.imwrite(f'{savePath}/spec/{prtx}{idx:03d}.png', (255*data.spec_map.clamp(0, 1).numpy()).astype(np.uint8))
+            imageio.imwrite(f'{savePath}/roughness/{prtx}{idx:03d}.exr', data.roughness_map)
+            imageio.imwrite(f'{savePath}/diffuse/{prtx}{idx:03d}.png', (255*data.diffuse_map.clamp(0, 1).numpy()).astype(np.uint8))
+            imageio.imwrite(f'{savePath}/tint/{prtx}{idx:03d}.png', (255*data.tint_map.clamp(0, 1).numpy()).astype(np.uint8))
             imageio.imwrite(f'{savePath}/world_normal/{prtx}{idx:03d}.png', vis_world_normal_map)
             imageio.imwrite(f'{savePath}/err/{prtx}{idx:03d}.png', err_map)
             imageio.imwrite(f'{savePath}/surf_width/{prtx}{idx:03d}.png', data.surf_width.numpy().astype(np.uint8))

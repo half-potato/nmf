@@ -299,7 +299,7 @@ def reconstruction(args):
 
                 if tensorf.visibility_module is not None:
                     pass
-                    if iteration % 1 == 0:
+                    if iteration % 1 == 0 and iteration > 1000:
                         # if iteration < 100 or iteration % 1000 == 0:
                         if iteration % 500 == 0 and iteration < 5000:
                             tensorf.init_vis_module()

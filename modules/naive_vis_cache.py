@@ -11,7 +11,7 @@ class NaiveVisCache(torch.nn.Module):
         self.grid_size = grid_size
         self.bound = bound
         self.midpoint = 128
-        self.jump = 20
+        self.jump = 1
         cache = (self.midpoint) * torch.ones((self.grid_size, self.grid_size, self.grid_size, 6), dtype=torch.uint8)
         self.register_buffer('cache', cache)
 
@@ -118,9 +118,9 @@ class NaiveVisCache(torch.nn.Module):
         # output mask is true if bg is not visible
         i, j, k, face_index = self.rays2inds(norm_ray_origins, viewdirs)
         eps = 5e-3
-        # vals = self.cache[i, j, k, face_index].int() + torch.where(bgvisibility, 1, -self.jump)
-        vis_mask = ((norm_ray_origins[..., 0] < eps) & (norm_ray_origins[..., 1] > -eps))
-        vals = self.cache[i, j, k, face_index].int() + torch.where(~vis_mask, 0, -self.jump)
+        vals = self.cache[i, j, k, face_index].int() + torch.where(bgvisibility, 1, -self.jump)
+        vis_mask = ((norm_ray_origins[..., 0] < eps) & (norm_ray_origins[..., 1] > -eps)) & (norm_ray_origins.abs().min(dim=1).values < eps)
+        # vals = self.cache[i, j, k, face_index].int() + torch.where(~vis_mask, 1, -self.jump)
         # vals = self.cache[indices, face_index].int() + torch.where(bgvisibility, self.jump, -self.jump)
 
         # ic((vis_mask | bgvisibility).sum(), (vis_mask & bgvisibility).sum())
