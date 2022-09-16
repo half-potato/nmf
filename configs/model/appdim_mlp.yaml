@@ -101,7 +101,8 @@ arch:
     feape: 0
     featureC: 128
     num_layers: 3
-    lr: 1e-3
+    lr: 5e-4
+    allocation: 0
 
   # diffuse_module:
   #   _partial_: True
@@ -117,7 +118,7 @@ arch:
     lr: 1e-3
     pospe: 12
     feape: 0
-    featureC: 128
+    featureC: 256
     # featureC: 64
     num_layers: 4
 
@@ -151,7 +152,7 @@ params:
   TV_weight_density: 0.0
   TV_weight_app: 0.0
   normal_lambda: 3e-2
-  diffuse_lambda: 0 #1e-5
+  diffuse_lambda: 1e-5
   backwards_rays_lambda: 0.1
   floater_lambda: 1e-3
   visibility_lambda: 20

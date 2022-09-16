@@ -13,6 +13,12 @@ from models.tensor_nerf import LOGGER
 import traceback
 from pathlib import Path
 
+class dotdict(dict):
+    """dot.notation access to dictionary attributes"""
+    __getattr__ = dict.__getitem__
+    __setattr__ = dict.__setitem__
+    __delattr__ = dict.__delitem__
+
 def chunk_renderer(rays, tensorf, focal, keys=['rgb_map'], chunk=4096, render2completion=False, **kwargs):
 
     data = defaultdict(list)
@@ -66,8 +72,9 @@ class BundleRender:
         device = rays.device
 
         LOGGER.reset()
-        data = self.base_renderer(rays, tensorf, keys=['depth_map', 'rgb_map', 'normal_map', 'acc_map', 'termination_xyz', 'debug_map', 'surf_width', 'world_normal_map'],
-                                  focal=self.focal, chunk=self.chunk, render2completion=True, **kwargs)
+        data = self.base_renderer(
+            rays, tensorf, keys=['depth_map', 'rgb_map', 'normal_map', 'acc_map', 'termination_xyz', 'debug_map', 'surf_width', 'world_normal_map', 'tint_im', 'diffuse_im', 'spec_im'],
+            focal=self.focal, chunk=self.chunk, render2completion=True, **kwargs)
 
         LOGGER.save('rays.pkl')
         LOGGER.reset()
@@ -105,38 +112,20 @@ class BundleRender:
             print(f"Falling back to normals from depth map. ")
             normal_map = depth_to_normals(depth_map, self.focal)
 
-        # normal_map = acc_map * normal_map + (1-acc_map) * 0
-        # plt.imshow(normal_map/2+0.5)
-        # plt.figure()
-
-        # normal_map = depth_to_normals(depth_map, self.focal)
-        # normal_map = acc_map * normal_map + (1-acc_map) * 0
-        # plt.imshow(acc_map)
-        # plt.figure()
-        # plt.imshow(depth_map)
-        # plt.figure()
-        # plt.imshow(rgb_map)
-        # plt.figure()
-        # plt.imshow(normal_map/2+0.5)
-        # plt.show()
-        # points = points.cpu()
-        # ic(points.shape, acc_map.shape)
-        # mask = acc_map.flatten() > 0.1
-        # fig = go.Figure(data=go.Cone(
-        #     x=points[mask, 0],
-        #     y=points[mask, 1],
-        #     z=points[mask, 2],
-        #     # u=normal_map.reshape(-1, 3)[mask, 0],
-        #     # v=normal_map.reshape(-1, 3)[mask, 2],
-        #     # w=normal_map.reshape(-1, 3)[mask, 1],
-        #     u=normal_map.reshape(-1, 3)[mask, 0],
-        #     v=normal_map.reshape(-1, 3)[mask, 1],
-        #     w=normal_map.reshape(-1, 3)[mask, 2],
-        # ))
-        # fig.show()
-        # assert(False)
-
-        return rgb_map, depth_map, debug_map, normal_map, env_map, col_map, surf_width, acc_map, world_normal_map
+        return dotdict(
+            rgb_map=rgb_map,
+            depth_map=depth_map,
+            debug_map=debug_map,
+            normal_map=normal_map,
+            env_map=env_map,
+            col_map=col_map,
+            surf_width=surf_width,
+            acc_map=acc_map,
+            world_normal_map=world_normal_map,
+            tint_im=reshape(data['tint_im'].detach()).cpu(),
+            diffuse_im=reshape(data['diffuse_im'].detach()).cpu(),
+            spec_im=reshape(data['spec_im'].detach()).cpu(),
+        )
 
 
 def depth_to_normals(depth, focal):
@@ -169,6 +158,9 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
     os.makedirs(savePath+"/err", exist_ok=True)
     os.makedirs(savePath+"/surf_width", exist_ok=True)
     os.makedirs(savePath+"/debug", exist_ok=True)
+    os.makedirs(savePath+"/tint", exist_ok=True)
+    os.makedirs(savePath+"/spec", exist_ok=True)
+    os.makedirs(savePath+"/diffuse", exist_ok=True)
 
     if tensorf.bg_module is not None:
         tm = tonemap.HDRTonemap()
@@ -211,7 +203,7 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
     tensorf.eval()
     for idx, im_idx, rays, gt_rgb in iterator():
 
-        rgb_map, depth_map, debug_map, normal_map, env_map, col_map, surf_width, acc_map, world_normal_map = brender(
+        data = brender(
                 rays, tensorf, N_samples=N_samples, ndc_ray=ndc_ray, white_bg = white_bg, is_train=False)
 
         # H, W, _ = normal_map.shape
@@ -219,13 +211,13 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
         # normal_map = normal_map.reshape(H, W, 3)
         # bottom of the sphere is green
         # top is blue
-        vis_normal_map = (normal_map * 127 + 128).clamp(0, 255).byte()
-        vis_world_normal_map = (world_normal_map * 127 + 128).clamp(0, 255).byte()
+        vis_normal_map = (data.normal_map * 127 + 128).clamp(0, 255).byte()
+        vis_world_normal_map = (data.world_normal_map * 127 + 128).clamp(0, 255).byte()
         # vis_normal_map = (normal_map * 255).clamp(0, 255).byte()
 
-        err_map = (rgb_map.clip(0, 1) - gt_rgb.clip(0, 1)) + 0.5
+        err_map = (data.rgb_map.clip(0, 1) - gt_rgb.clip(0, 1)) + 0.5
 
-        vis_depth_map, _ = visualize_depth_numpy(depth_map.numpy(),near_far)
+        vis_depth_map, _ = visualize_depth_numpy(data.depth_map.numpy(),near_far)
         if gt_rgb is not None:
             try:
                 gt_normal_map = test_dataset.get_normal(im_idx)
@@ -236,9 +228,9 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
                 # ic(u @ vh)
                 # mask = (gt_normal_map[..., 0] == 1) & (gt_normal_map[..., 1] == 1) & (gt_normal_map[..., 2] == 1)
                 # gt_normal_map[mask] = 0
-                norm_err = torch.arccos((normal_map * gt_normal_map).sum(dim=-1).clip(min=1e-8, max=1-1e-8)) * 180/np.pi
+                norm_err = torch.arccos((data.normal_map * gt_normal_map).sum(dim=-1).clip(min=1e-8, max=1-1e-8)) * 180/np.pi
                 norm_err[torch.isnan(norm_err)] = 0
-                norm_err *= acc_map.squeeze(-1)
+                norm_err *= data.acc_map.squeeze(-1)
                 norm_errs.append(norm_err.mean())
                 if savePath is not None:
                     imageio.imwrite(f'{savePath}/normal_err/{prtx}{idx:03d}.png', norm_err.clip(max=255).numpy().astype(np.uint8))
@@ -246,7 +238,7 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
             except:
                 pass
                 # traceback.print_exc()
-            loss = torch.mean((rgb_map.clip(0, 1) - gt_rgb.clip(0, 1)) ** 2)
+            loss = torch.mean((data.rgb_map.clip(0, 1) - gt_rgb.clip(0, 1)) ** 2)
             PSNRs.append(-10.0 * np.log(loss.item()) / np.log(10.0))
 
             # fig, axs = plt.subplots(2, 2)
@@ -257,14 +249,14 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
             # plt.show()
 
             if compute_extra_metrics:
-                ssim = rgb_ssim(rgb_map, gt_rgb, 1)
-                l_a = rgb_lpips(gt_rgb.numpy(), rgb_map.numpy(), 'alex', device)
-                l_v = rgb_lpips(gt_rgb.numpy(), rgb_map.numpy(), 'vgg', device)
+                ssim = rgb_ssim(data.rgb_map, gt_rgb, 1)
+                l_a = rgb_lpips(gt_rgb.numpy(), data.rgb_map.numpy(), 'alex', device)
+                l_v = rgb_lpips(gt_rgb.numpy(), data.rgb_map.numpy(), 'vgg', device)
                 ssims.append(ssim)
                 l_alex.append(l_a)
                 l_vgg.append(l_v)
 
-        rgb_map = (rgb_map.clamp(0, 1).numpy() * 255).astype('uint8')
+        rgb_map = (data.rgb_map.clamp(0, 1).numpy() * 255).astype('uint8')
         err_map = (err_map.clamp(0, 1).numpy() * 255).astype('uint8')
         # rgb_map = np.concatenate((rgb_map, depth_map), axis=1)
         rgb_maps.append(rgb_map)
@@ -272,12 +264,15 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
         if savePath is not None:
             imageio.imwrite(f'{savePath}/{prtx}{idx:03d}.png', rgb_map)
             rgb_map = np.concatenate((rgb_map, vis_depth_map), axis=1)
-            imageio.imwrite(f'{savePath}/rgbd/{prtx}{idx:03d}.exr', depth_map.numpy())
+            imageio.imwrite(f'{savePath}/rgbd/{prtx}{idx:03d}.exr', data.depth_map.numpy())
             imageio.imwrite(f'{savePath}/normal/{prtx}{idx:03d}.png', vis_normal_map)
+            imageio.imwrite(f'{savePath}/spec/{prtx}{idx:03d}.png', (255*data.spec_im.clamp(0, 1).numpy()).astype(np.uint8))
+            imageio.imwrite(f'{savePath}/diffuse/{prtx}{idx:03d}.png', (255*data.diffuse_im.clamp(0, 1).numpy()).astype(np.uint8))
+            imageio.imwrite(f'{savePath}/tint/{prtx}{idx:03d}.png', (255*data.tint_im.clamp(0, 1).numpy()).astype(np.uint8))
             imageio.imwrite(f'{savePath}/world_normal/{prtx}{idx:03d}.png', vis_world_normal_map)
             imageio.imwrite(f'{savePath}/err/{prtx}{idx:03d}.png', err_map)
-            imageio.imwrite(f'{savePath}/surf_width/{prtx}{idx:03d}.png', surf_width.numpy().astype(np.uint8))
-            imageio.imwrite(f'{savePath}/debug/{prtx}{idx:03d}.png', (255*debug_map.clamp(0, 1).numpy()).astype(np.uint8))
+            imageio.imwrite(f'{savePath}/surf_width/{prtx}{idx:03d}.png', data.surf_width.numpy().astype(np.uint8))
+            imageio.imwrite(f'{savePath}/debug/{prtx}{idx:03d}.png', (255*data.debug_map.clamp(0, 1).numpy()).astype(np.uint8))
             if tensorf.ref_module is not None:
                 imageio.imwrite(f'{savePath}/envmaps/{prtx}ref_map_{idx:03d}.png', env_map)
                 imageio.imwrite(f'{savePath}/envmaps/{prtx}view_map_{idx:03d}.png', col_map)

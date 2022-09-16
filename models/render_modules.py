@@ -252,13 +252,14 @@ class MLPDiffuse(torch.nn.Module):
     refpe: int
     featureC: int
     num_layers: int
-    def __init__(self, in_channels, pospe=12, view_encoder=None, feape=6, featureC=128, num_layers=0, unlit_tint=False, lr=1e-4):
+    def __init__(self, in_channels, pospe=12, view_encoder=None, feape=6, featureC=128, num_layers=0, allocation=0, unlit_tint=False, lr=1e-4):
         super().__init__()
 
+        in_channels = in_channels if allocation <= 0 else allocation
         self.in_mlpC = 2*pospe*3 + 3 + 2*max(feape, 0)*in_channels + in_channels if feape >= 0 else 0
         self.unlit_tint = unlit_tint
         self.lr = lr
-        self.allocation = 0
+        self.allocation = allocation
 
         self.view_encoder = view_encoder
         if view_encoder is not None:
@@ -293,6 +294,8 @@ class MLPDiffuse(torch.nn.Module):
             torch.nn.init.xavier_uniform_(m.weight, gain=torch.nn.init.calculate_gain('relu'))
 
     def forward(self, pts, viewdirs, features, **kwargs):
+        if self.allocation > 0:
+            features = features[..., :self.allocation]
         B = pts.shape[0]
         size = pts[..., 3:4].expand(pts[..., :3].shape)
         pts = pts[..., :3]
@@ -321,18 +324,7 @@ class MLPDiffuse(torch.nn.Module):
         # albedo = F.softplus(mlp_out[..., 14:17]-2)
         albedo = torch.sigmoid(mlp_out[..., 14:17])
         ratio_diffuse = rgb[..., 9:10]
-        if self.unlit_tint:
-            h = mlp_out[..., 3]
-            t = mlp_out[..., 4]
-            sphere = torch.stack([
-                torch.cos(h)*torch.cos(t),
-                torch.sin(h)*torch.cos(t),
-                torch.sin(t),
-            ], dim=-1)
-            tint = sphere/2 - 0.5
-        else:
-            # tint = F.softplus(mlp_out[..., 3:6])
-            tint = torch.sigmoid(mlp_out[..., 3:6])
+        tint = torch.sigmoid(mlp_out[..., 3:6])
         # diffuse = rgb[..., :3]
         # tint = F.softplus(mlp_out[..., 3:6])
         diffuse = torch.sigmoid(mlp_out[..., :3]-1)
@@ -404,14 +396,15 @@ class MLPNormal(torch.nn.Module):
     feape: int
     featureC: int
     num_layers: int
-    def __init__(self, in_channels, pospe=6, feape=6, featureC=128, num_layers=2, lr=1e-4):
+    def __init__(self, in_channels, pospe=6, feape=6, featureC=128, num_layers=2, allocation=0, lr=1e-4):
         super().__init__()
 
+        in_channels = in_channels if allocation <= 0 else allocation
         self.in_mlpC = 2*pospe*3 + 2*max(feape, 0)*in_channels + 3 + in_channels if feape >= 0 else 0
         self.pospe = pospe
         self.feape = feape
         self.lr = lr
-        self.allocation = 0
+        self.allocation = allocation
 
         self.mlp = torch.nn.Sequential(
             torch.nn.Linear(self.in_mlpC, featureC),
@@ -434,6 +427,8 @@ class MLPNormal(torch.nn.Module):
         size = pts[..., 3:4].expand(pts[..., :3].shape)
         pts = pts[..., :3]
         indata = [pts]
+        if self.allocation > 0:
+            features = features[..., :self.allocation]
         if self.feape >= 0:
             indata.append(features)
 
