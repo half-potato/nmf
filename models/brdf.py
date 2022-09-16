@@ -379,8 +379,8 @@ class MLPBRDF(torch.nn.Module):
             LdotN = LdotN*D
         LdotN = LdotN.clip(min=0)
 
-        # spec_color = row_mask_sum(incoming_light * ref_weight * LdotN, ray_mask) / row_mask_sum(LdotN * ref_weight, ray_mask).clip(min=1e-8)
+        spec_color = row_mask_sum(incoming_light * ref_weight * LdotN, ray_mask) / row_mask_sum(LdotN * ref_weight, ray_mask).clip(min=1e-8).mean(dim=-1, keepdim=True)
         # ic((row_mask_sum(ref_weight * LdotN, ray_mask) / row_mask_sum(LdotN, ray_mask).clip(min=1e-8)).max())
-        spec_color = row_mask_sum(incoming_light * ref_weight * LdotN, ray_mask) / row_mask_sum(LdotN, ray_mask).clip(min=1e-8).sum(dim=-1, keepdim=True)
+        # spec_color = row_mask_sum(incoming_light * ref_weight * LdotN, ray_mask) / row_mask_sum(LdotN, ray_mask).clip(min=1e-8).mean(dim=-1, keepdim=True)
 
         return spec_color

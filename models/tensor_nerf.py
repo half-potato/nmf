@@ -117,8 +117,8 @@ class TensorNeRF(torch.nn.Module):
         if isinstance(self.brdf, torch.nn.Module):
             grad_vars += [{'params': self.brdf.parameters(),
                            'lr': self.brdf.lr}]
-        # if isinstance(self.bg_module, torch.nn.Module):
-        #     grad_vars += self.bg_module.get_optparam_groups()
+        if isinstance(self.bg_module, torch.nn.Module):
+            grad_vars += self.bg_module.get_optparam_groups()
         return grad_vars
 
     def save(self, path, config):
@@ -634,7 +634,7 @@ class TensorNeRF(torch.nn.Module):
                             app_features[bounce_mask], roughness[bounce_mask], matprop,
                             bounce_mask, ray_mask)
                     # ic(ray_mask.sum(dim=-1).float().mean(), ray_mask.shape)
-                    # s = row_mask_sum(incoming_light, ray_mask) / (ray_mask.sum(dim=1)+1e-8)[..., None]
+                    s = row_mask_sum(incoming_light, ray_mask) / (ray_mask.sum(dim=1)+1e-8)[..., None]
                     # s = incoming_light.max(dim=1).values
 
                     # if not is_train:
@@ -644,6 +644,7 @@ class TensorNeRF(torch.nn.Module):
 
                     # s = incoming_light[:, 0]
                     # debug[full_bounce_mask] += s# / (s+1)
+                    debug[full_bounce_mask] += tint[bounce_mask]
                     # debug[full_bounce_mask] += 1
                     reflect_rgb[bounce_mask] = tint[bounce_mask] * tinted_ref_rgb
                     # reflect_rgb[bounce_mask] = tint[bounce_mask] * s
@@ -671,9 +672,11 @@ class TensorNeRF(torch.nn.Module):
             # this is a modified rendering equation where the emissive light and light under the integral is all multiplied by the base color
             # in addition, the light is interpolated between emissive and reflective
             rgb[app_mask] = reflect_rgb + matprop['diffuse']
-            debug[app_mask] = matprop['diffuse']
+            # debug[app_mask] = matprop['diffuse']
 
         else:
+            tint = torch.tensor(0.0)
+            reflect_rgb = torch.tensor(0.0)
             v_world_normal = world_normal
             diffuse = torch.tensor(0.0)
             roughness = torch.tensor(0.0)
@@ -750,7 +753,7 @@ class TensorNeRF(torch.nn.Module):
             # align_world_loss = torch.linalg.norm(p_world_normal - world_normal, dim=-1)
             normal_loss = (pweight * align_world_loss).sum() / B
 
-            output['diffuse_reg'] = roughness.mean()
+            output['diffuse_reg'] = reflect_rgb.mean()
             output['normal_loss'] = normal_loss
             output['backwards_rays_loss'] = backwards_rays_loss
             output['floater_loss'] = floater_loss
