@@ -278,7 +278,7 @@ class MLPDiffuse(torch.nn.Module):
                         # torch.nn.BatchNorm1d(featureC)
                     ] for _ in range(num_layers-2)], []),
                 torch.nn.ReLU(inplace=True),
-                torch.nn.Linear(featureC, 20),
+                torch.nn.Linear(featureC, 8),
             )
             torch.nn.init.constant_(self.mlp[-1].bias, 0)
             self.mlp.apply(self.init_weights)
@@ -291,6 +291,10 @@ class MLPDiffuse(torch.nn.Module):
 
     def init_weights(self, m):
         if isinstance(m, nn.Linear):
+            # if m.weight.shape[0] <= 60:
+            #     torch.nn.init.constant_(m.weight, np.sqrt(2) / m.weight.shape[1])
+            # else:
+            #     torch.nn.init.xavier_uniform_(m.weight, gain=np.sqrt(2))
             torch.nn.init.xavier_uniform_(m.weight, gain=torch.nn.init.calculate_gain('relu'))
 
     def forward(self, pts, viewdirs, features, **kwargs):
@@ -313,32 +317,36 @@ class MLPDiffuse(torch.nn.Module):
         mlp_out = self.mlp(mlp_in)
         rgb = torch.sigmoid(mlp_out)
 
+        """
         # ambient = F.softplus(mlp_out[..., 6:7]-3)
-        ambient = torch.sigmoid(mlp_out[..., 6:7]-2)
         refraction_index = F.softplus(mlp_out[..., 7:8]-1) + self.min_refraction_index
         reflectivity = 50*F.softplus(mlp_out[..., 8:9])
         # roughness = F.softplus(mlp_out[..., 10:11]-1)
         # max 0.5 roughness
-        roughness = torch.sigmoid(mlp_out[..., 10:11]).clip(min=1e-2)/2
         f0 = torch.sigmoid(mlp_out[..., 11:14])
         # albedo = F.softplus(mlp_out[..., 14:17]-2)
         albedo = torch.sigmoid(mlp_out[..., 14:17])
         ratio_diffuse = rgb[..., 9:10]
-        tint = torch.sigmoid(mlp_out[..., 3:6])
+        """
+
+        ambient = torch.sigmoid(mlp_out[..., 6:7]-2)
+        roughness = torch.sigmoid(mlp_out[..., 7:8]-1).clip(min=1e-2)#/2
+        # ic(mlp_out[..., 0:6])
+        tint = torch.sigmoid((mlp_out[..., 3:6]-1).clip(min=-10, max=10))
         # diffuse = rgb[..., :3]
         # tint = F.softplus(mlp_out[..., 3:6])
-        diffuse = torch.sigmoid(mlp_out[..., :3]-1)
+        diffuse = torch.sigmoid((mlp_out[..., :3]-1).clip(min=-10, max=10))
 
         # ic(f0)
         return diffuse, tint, dict(
-            refraction_index = refraction_index,
-            ratio_diffuse = ratio_diffuse,
-            reflectivity = reflectivity,
+            # refraction_index = refraction_index,
+            # ratio_diffuse = ratio_diffuse,
+            # reflectivity = reflectivity,
             ambient = ambient,
-            albedo=albedo,
+            # albedo=albedo,
             diffuse = diffuse,
             roughness = roughness,
-            f0 = f0,
+            # f0 = f0,
             tint=tint,
         )
 

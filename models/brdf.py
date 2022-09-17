@@ -308,6 +308,10 @@ class MLPBRDF(torch.nn.Module):
 
     def init_weights(self, m):
         if isinstance(m, torch.nn.Linear):
+            # if m.weight.shape[0] <= 4:
+            #     torch.nn.init.constant_(m.weight, np.sqrt(2) / m.weight.shape[1])
+            # else:
+            #     torch.nn.init.xavier_uniform_(m.weight, gain=np.sqrt(2))
             torch.nn.init.xavier_uniform_(m.weight, gain=np.sqrt(2))
 
     def activation(self, x):
@@ -315,13 +319,14 @@ class MLPBRDF(torch.nn.Module):
         # ic(x, y)
         # return y
         col = torch.sigmoid(x[..., :3])
-        brightness = torch.exp(x[..., 3:4]).clamp(max=1000)
+        brightness = torch.exp(x[..., 3:4].clip(min=-10, max=10))
         return col * brightness
         # return torch.sigmoid(x)
         # return F.softplus(x+1.0)/2
 
     def forward(self, incoming_light, V, L, N,
-            features, roughness, matprop, mask, ray_mask):
+            features, roughness, matprop,
+            mask, ray_mask):
         # V: (n, 3)-viewdirs, the outgoing light direction
         # L: (n, m, 3) incoming light direction. bounce_rays
         # N: (n, 1, 3) outward normal
@@ -379,8 +384,7 @@ class MLPBRDF(torch.nn.Module):
             LdotN = LdotN*D
         LdotN = LdotN.clip(min=0)
 
-        spec_color = row_mask_sum(incoming_light * ref_weight * LdotN, ray_mask) / row_mask_sum(LdotN * ref_weight, ray_mask).clip(min=1e-8).mean(dim=-1, keepdim=True)
-        # ic((row_mask_sum(ref_weight * LdotN, ray_mask) / row_mask_sum(LdotN, ray_mask).clip(min=1e-8)).max())
-        # spec_color = row_mask_sum(incoming_light * ref_weight * LdotN, ray_mask) / row_mask_sum(LdotN, ray_mask).clip(min=1e-8).mean(dim=-1, keepdim=True)
+        weight = ref_weight * LdotN
+        spec_color = row_mask_sum(incoming_light * weight, ray_mask) / row_mask_sum(weight, ray_mask).clip(min=1e-8).mean(dim=-1, keepdim=True)
 
         return spec_color

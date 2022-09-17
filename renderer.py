@@ -268,7 +268,7 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
             rgb_map = np.concatenate((rgb_map, vis_depth_map), axis=1)
             imageio.imwrite(f'{savePath}/rgbd/{prtx}{idx:03d}.exr', data.depth_map.numpy())
             imageio.imwrite(f'{savePath}/normal/{prtx}{idx:03d}.png', vis_normal_map)
-            imageio.imwrite(f'{savePath}/spec/{prtx}{idx:03d}.png', (255*data.spec_map.clamp(0, 1).numpy()).astype(np.uint8))
+            imageio.imwrite(f'{savePath}/spec/{prtx}{idx:03d}.png', (255*(data.spec_map/(1+data.spec_map)).numpy()).astype(np.uint8))
             imageio.imwrite(f'{savePath}/roughness/{prtx}{idx:03d}.exr', data.roughness_map)
             imageio.imwrite(f'{savePath}/diffuse/{prtx}{idx:03d}.png', (255*data.diffuse_map.clamp(0, 1).numpy()).astype(np.uint8))
             imageio.imwrite(f'{savePath}/tint/{prtx}{idx:03d}.png', (255*data.tint_map.clamp(0, 1).numpy()).astype(np.uint8))
