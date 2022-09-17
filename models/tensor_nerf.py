@@ -672,8 +672,10 @@ class TensorNeRF(torch.nn.Module):
                 bounce_count = bounce_mask.sum()
             # this is a modified rendering equation where the emissive light and light under the integral is all multiplied by the base color
             # in addition, the light is interpolated between emissive and reflective
+            # ic(reflect_rgb.mean(), matprop['diffuse'].mean())
             rgb[app_mask] = reflect_rgb + matprop['diffuse']
             # debug[app_mask] = matprop['diffuse']
+            tint = tint[..., 0:1]
         else:
             tint = torch.tensor(0.0)
             reflect_rgb = torch.tensor(0.0)
@@ -775,7 +777,8 @@ class TensorNeRF(torch.nn.Module):
             # align_world_loss = torch.linalg.norm(p_world_normal - world_normal, dim=-1)
             normal_loss = (pweight * align_world_loss).sum() / B
 
-            output['diffuse_reg'] = roughness.mean() + reflect_rgb.mean()
+            output['diffuse_reg'] = roughness.mean() + tint.clip(min=1e-3).mean()
+            # output['diffuse_reg'] = roughness.mean() + reflect_rgb.mean()
             output['normal_loss'] = normal_loss
             output['backwards_rays_loss'] = backwards_rays_loss
             output['floater_loss'] = floater_loss
