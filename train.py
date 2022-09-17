@@ -211,6 +211,8 @@ def reconstruction(args):
 
     # TODO REMOVE
     if args.ckpt is None:
+        # dparams = tensorf.parameters()
+        # space_optim = torch.optim.Adam(tensorf.rf.dbasis_mat.parameters(), lr=0.5, betas=(0.9,0.99))
         space_optim = torch.optim.Adam(tensorf.parameters(), lr=0.005, betas=(0.9,0.99))
         pbar = tqdm(range(1000))
         for _ in pbar:
@@ -220,7 +222,11 @@ def reconstruction(args):
             alpha = 1-torch.exp(-sigma_feat * 0.015 * tensorf.rf.distance_scale)
             # sigma = 1-torch.exp(-sigma_feat)
             # loss = (sigma-torch.rand_like(sigma)*args.start_density).abs().mean()
-            loss = (alpha-params.start_density).abs().mean()
+            # target_alpha = (params.start_density+params.start_density*(2*torch.rand_like(alpha)-1))
+            # target_alpha = (params.start_density+params.start_density*torch.randn_like(alpha))
+            # target_alpha = target_alpha.clip(min=params.start_density/2, max=params.start_density*2)
+            target_alpha = params.start_density
+            loss = (alpha-target_alpha).abs().mean()
             # loss = (-sigma[mask].clip(max=1).sum() + sigma[~mask].clip(min=1e-8).sum())
             space_optim.zero_grad()
             loss.backward()

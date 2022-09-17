@@ -90,7 +90,7 @@ arch:
     activation: 'exp'
     power: 2
     stds: []
-    lr: 0.20
+    lr: 0.4
     betas: [0.9, 0.999]
     mipbias_lr: 1e-4
     mipnoise: 0.5

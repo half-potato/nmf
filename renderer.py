@@ -281,8 +281,8 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
                 imageio.imwrite(f'{savePath}/envmaps/{prtx}view_map_{idx:03d}.png', col_map)
 
     tensorf.train()
-    imageio.mimwrite(f'{savePath}/{prtx}video.mp4', np.stack(rgb_maps), fps=30, quality=10)
-    imageio.mimwrite(f'{savePath}/{prtx}depthvideo.mp4', np.stack(depth_maps), fps=30, quality=10)
+    imageio.mimwrite(f'{savePath}/{prtx}video.mp4', np.stack(rgb_maps), fps=10, quality=10)
+    imageio.mimwrite(f'{savePath}/{prtx}depthvideo.mp4', np.stack(depth_maps), fps=10, quality=10)
     # for i in range(100):
     #     env_map, col_map = tensorf.recover_envmap(1024)
     #     # plt.imshow(col_map.cpu())

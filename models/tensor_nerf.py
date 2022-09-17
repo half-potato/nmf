@@ -777,7 +777,8 @@ class TensorNeRF(torch.nn.Module):
             # align_world_loss = torch.linalg.norm(p_world_normal - world_normal, dim=-1)
             normal_loss = (pweight * align_world_loss).sum() / B
 
-            output['diffuse_reg'] = roughness.mean() + tint.clip(min=1e-3).mean()
+            # output['diffuse_reg'] = (roughness-0.5).clip(min=0).mean() + tint.clip(min=1e-3).mean()
+            output['diffuse_reg'] = tint.clip(min=1e-3).mean()
             # output['diffuse_reg'] = roughness.mean() + reflect_rgb.mean()
             output['normal_loss'] = normal_loss
             output['backwards_rays_loss'] = backwards_rays_loss
