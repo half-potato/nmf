@@ -4,6 +4,7 @@ from icecream import ic
 import imageio
 from pathlib import Path
 import numpy as np
+import nvdiffrast.torch as nvdr
 
 class NaiveVisCache(torch.nn.Module):
     def __init__(self, grid_size, bound, **kwargs):
@@ -49,10 +50,17 @@ class NaiveVisCache(torch.nn.Module):
     def mask(self, norm_ray_origins, viewdirs, world_bounces, full_bounce_mask, ray_mask, weight, *args, **kwargs):
         i, j, k, face_index = self.rays2inds(norm_ray_origins, -viewdirs)
         vals = self.cache[i, j, k, face_index]
+        # cubes = self.cache[i, j, k].reshape(-1, 6, 1, 1, 1).float().contiguous()
+
+        # uv = -viewdirs.reshape(-1, 1, 1, 3).contiguous()
+        # vals2 = nvdr.texture(cubes, uv, boundary_mode='cube')
+        # ic(vals2, vals)
+
         mask = torch.zeros_like(full_bounce_mask)
         mask[range(mask.shape[0]), weight.max(dim=1).indices] = True
         max_weight_mask = mask[full_bounce_mask].reshape(-1, 1).expand(*ray_mask.shape)[ray_mask]
         vals[~max_weight_mask] = 255
+        # ic(max_weight_mask.sum(), (~max_weight_mask).sum(), mask.sum(), full_bounce_mask.sum(), ray_mask.sum(), ray_mask.shape)
 
         # select a maximum of one point along each ray to allow for world bounces
         
@@ -119,7 +127,7 @@ class NaiveVisCache(torch.nn.Module):
         i, j, k, face_index = self.rays2inds(norm_ray_origins, viewdirs)
         eps = 5e-3
         vals = self.cache[i, j, k, face_index].int() + torch.where(bgvisibility, 1, -self.jump)
-        vis_mask = ((norm_ray_origins[..., 0] < eps) & (norm_ray_origins[..., 1] > -eps)) & (norm_ray_origins.abs().min(dim=1).values < eps)
+        # vis_mask = ((norm_ray_origins[..., 0] < eps) & (norm_ray_origins[..., 1] > -eps)) & (norm_ray_origins.abs().min(dim=1).values < eps)
         # vals = self.cache[i, j, k, face_index].int() + torch.where(~vis_mask, 1, -self.jump)
         # vals = self.cache[indices, face_index].int() + torch.where(bgvisibility, self.jump, -self.jump)
 

@@ -81,10 +81,11 @@ class GGXSampler(torch.nn.Module):
     def update(self, *args, **kwargs):
         pass
 
-    def sample(self, num_samples, refdirs, viewdir, normal, roughness, ray_mask):
+    def sample(self, num_samples, refdirs, viewdir, normal, roughness, ray_mask, mipshift):
         # viewdir: (B, 3)
         # normal: (B, 3)
         # roughness: B
+        # mipshift: (B, 1)
         device = normal.device
         B = normal.shape[0]
 
@@ -138,6 +139,8 @@ class GGXSampler(torch.nn.Module):
 
         V = viewdir.unsqueeze(1).expand(-1, num_samples, 3)[ray_mask]
         N = normal.reshape(-1, 1, 3).expand(-1, num_samples, 3)[ray_mask]
+        first_mask = torch.zeros(1, num_samples, device=device, dtype=bool).expand(viewdir.shape[0], -1)[ray_mask]
+        H[first_mask] = N[first_mask]
         L = (2.0 * (V * H).sum(dim=-1, keepdim=True) * H - V)
 
         # calculate mipval, which will be used to calculate the mip level
@@ -159,6 +162,9 @@ class GGXSampler(torch.nn.Module):
         # pdf = NdotH / 4 / HdotV
         # pdf = D# / NdotH
         mipval = -math.log(num_samples) - lpdf
+        if mipshift is not None:
+            mipshift_f = mipshift.reshape(-1, 1).expand(-1, num_samples)[ray_mask]
+            mipval += mipshift_f
         # ic(phi.max(), phi.min(), a.min(), a.max(), mipval.min(), mipval.max(), roughness.min(), roughness.max())
         # ic(roughness.grad, lpdf.grad)
         # if phi.grad is not None:
@@ -348,6 +354,14 @@ class MLPBRDF(torch.nn.Module):
         LdotN = (L * N_mask).sum(dim=-1, keepdim=True).clip(min=1e-8)
         VdotN = (V_mask * N_mask).sum(dim=-1, keepdim=True).clip(min=1e-8)
         NdotH = ((half * N_mask).sum(dim=-1, keepdim=True)+1e-3).clip(min=1e-20, max=1)
+
+        # dat = LdotN.detach().cpu().numpy()
+        # if dat.shape[0] > 100:
+        #     ic(dat.shape)
+        #     counts, bins = np.histogram(dat.flatten(), bins=100)
+        #     ic(counts.shape, bins.shape)
+        #     plt.hist(bins[:-1], bins, weights=counts)
+        #     plt.show()
 
         # indata = [LdotN.reshape(-1, 1), VdotN.reshape(-1, 1), NdotH.reshape(-1, 1)]
         indata = [LdotN, torch.sqrt((1-LdotN**2).clip(min=1e-8, max=1)),

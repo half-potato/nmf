@@ -54,7 +54,15 @@ def render_test(args):
     ndc_ray = args.dataset.ndc_ray
 
     ckpt = torch.load(args.ckpt)
-    tensorf = TensorNeRF.load(ckpt, args.model.arch, near_far=test_dataset.near_far, strict=False).to(device)
+    tensorf = TensorNeRF.load(ckpt, args.model.arch, near_far=test_dataset.near_far, strict=False)
+
+    if args.fixed_bg:
+        bg_sd = torch.load('log/mats360_bg.th')
+        from models import bg_modules
+        bg_module = bg_modules.HierarchicalCubeMap(bg_resolution=2048, num_levels=1, featureC=128, activation='softplus', power=2, lr=1e-2)
+        bg_module.load_state_dict(bg_sd, strict=False)
+        tensorf.bg_module = bg_module
+    tensorf = tensorf.to(device)
     tensorf.sampler.update(tensorf.rf, init=True)
 
     logfolder = os.path.dirname(args.ckpt)
@@ -114,17 +122,6 @@ def reconstruction(args):
         ckpt = torch.load(args.ckpt)
         tensorf = TensorNeRF.load(ckpt, args.model.arch)
 
-        # del ckpt['state_dict']['bg_module.bg_mats.0']
-        # del ckpt['state_dict']['bg_module.bg_mats.1']
-        # del ckpt['state_dict']['bg_module.bg_mats.2']
-        # tensorf2 = TensorNeRF.load(ckpt, strict=False)
-        # tensorf.normal_module = tensorf2.normal_module
-        # tensorf.rf = tensorf2.rf
-        # tensorf.diffuse_module = tensorf2.diffuse_module
-        # grid_size = N_to_reso(params.N_voxel_final, tensorf.rf.aabb)
-        # tensorf.rf.update_stepSize(grid_size)
-
-    # TODO REMOVE
     if args.fixed_bg:
         bg_sd = torch.load('log/mats360_bg.th')
         from models import bg_modules
@@ -220,6 +217,8 @@ def reconstruction(args):
             sigma_feat = tensorf.rf.compute_densityfeature(xyz)
 
             alpha = 1-torch.exp(-sigma_feat * 0.015 * tensorf.rf.distance_scale)
+            # target_alpha = (params.start_density+params.start_density*torch.randn_like(alpha)).clip(min=1e-3)
+
             # sigma = 1-torch.exp(-sigma_feat)
             # loss = (sigma-torch.rand_like(sigma)*args.start_density).abs().mean()
             # target_alpha = (params.start_density+params.start_density*(2*torch.rand_like(alpha)-1))
