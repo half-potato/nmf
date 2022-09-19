@@ -43,7 +43,7 @@ class TensorNeRF(torch.nn.Module):
                  visibility_module=None,
                  alphaMask=None, specularity_threshold=0.005, max_recurs=0,
                  max_normal_similarity=1, infinity_border=False, min_refraction=1.1, enable_refraction=True,
-                 alphaMask_thres=0.001, rayMarch_weight_thres=0.0001,
+                 alphaMask_thres=0.001, rayMarch_weight_thres=0.0001, detach_inter=False,
                  max_bounce_rays=4000, roughness_rays=3, bounce_min_weight=0.001, appdim_noise_std=0.0,
                  world_bounces=0, selector=None, cold_start_bg_iters = 0,
                  update_sampler_list=[5000], max_floater_loss=6, **kwargs):
@@ -59,7 +59,7 @@ class TensorNeRF(torch.nn.Module):
         self.ref_module = ref_module(in_channels=self.rf.app_dim-al) if ref_module is not None else None
         self.brdf = brdf(in_channels=self.rf.app_dim-al) if brdf is not None else None
         self.brdf_sampler = brdf_sampler if brdf_sampler is None else brdf_sampler(num_samples=roughness_rays)
-        self.visibility_module = visibility_module(in_channels=self.rf.app_dim-al, bound=bound) if visibility_module is not None else None
+        self.visibility_module = visibility_module(in_channels=self.rf.app_dim-al, bound=bound) if (visibility_module is not None) and world_bounces > 0 else None
         self.sampler = sampler(near_far=near_far, aabb=aabb)
         ic(self.sampler)
         self.selector = selector
@@ -88,6 +88,7 @@ class TensorNeRF(torch.nn.Module):
 
         self.cold_start_bg_iters = cold_start_bg_iters
         self.detach_bg = True
+        self.detach_inter = detach_inter
 
 
         f_blur = torch.tensor([1, 2, 1]) / 4
@@ -519,7 +520,7 @@ class TensorNeRF(torch.nn.Module):
 
             # get base color of the point
             diffuse, tint, matprop = self.diffuse_module(
-                app_xyz, viewdirs[app_mask], app_features)
+                app_xyz, viewdirs[app_mask], noise_app_features)
 
             app_features = app_features[..., self.diffuse_module.allocation:]
             noise_app_features = noise_app_features[..., self.diffuse_module.allocation:]
@@ -603,16 +604,18 @@ class TensorNeRF(torch.nn.Module):
                     if recur <= 0 and self.world_bounces > 0:
                         norm_ray_origins = self.rf.normalize_coord(bounce_rays[..., :3])
                         # vis_mask takes in each outgoing ray and predicts whether it will terminate at the background
-                        # vis_mask = self.visibility_module.mask(norm_ray_origins.reshape(-1, 3), bounce_rays[:, 3:6].reshape(-1, 3), self.world_bounces, full_bounce_mask, ray_mask, weight)
-                        eps = 5e-3
-                        vis_mask = ((bounce_rays[..., 0] < eps) & (bounce_rays[..., 1] > -eps)) & (bounce_rays.abs().min(dim=1).values < eps)
+                        vis_mask = self.visibility_module.mask(norm_ray_origins.reshape(-1, 3), bounce_rays[:, 3:6].reshape(-1, 3), self.world_bounces, full_bounce_mask, ray_mask, weight)
+                        # eps = 5e-3
+                        # vis_mask = ((bounce_rays[..., 0] < eps) & (bounce_rays[..., 1] > -eps)) & (bounce_rays.abs().min(dim=1).values < eps)
                         incoming_light = torch.zeros((n, 3), device=device)
                         # for high sigvis, this implies that the ray terminates and needs to be rendered fully
                         debug[full_bounce_mask] += row_mask_sum(vis_mask.float().reshape(-1, 1), ray_mask).expand(-1, 3)
+
                         if vis_mask.sum() > 0:
                             # ic(bounce_rays.reshape(-1, D)[vis_mask].shape, mipval.reshape(-1)[vis_mask].shape)
+                            # with torch.no_grad():
                             incoming_data = self(bounce_rays.reshape(-1, D)[vis_mask], focal, recur=recur+1, white_bg=False,
-                                                 start_mipval=mipval.reshape(-1)[vis_mask], override_near=0.05, is_train=is_train,
+                                                 start_mipval=mipval.reshape(-1)[vis_mask], override_near=0.025, is_train=is_train,
                                                  ndc_ray=ndc_ray, N_samples=N_samples, tonemap=False)
                             # if not is_train:
                             #     ic(incoming_data['depth_map'].max())
@@ -627,9 +630,9 @@ class TensorNeRF(torch.nn.Module):
                     # miplevel = self.bg_module.sa2mip(bounce_rays[..., 3:6], mipval)
                     # debug[full_bounce_mask][..., 0] += miplevel.mean(dim=1) / (self.bg_module.max_mip-1)
                     
-                    tinted_ref_rgb = self.brdf(incoming_light,
+                    tinted_ref_rgb, brdf_rgb = self.brdf(incoming_light,
                             V[bounce_mask], bounce_rays[..., 3:6], outward.reshape(-1, 1, 3),
-                            noise_app_features[bounce_mask], roughness[bounce_mask], matprop,
+                            app_features[bounce_mask], roughness[bounce_mask], matprop,
                             bounce_mask, ray_mask)
                     # ic(ray_mask.sum(dim=-1).float().mean(), ray_mask.shape)
                     # s = incoming_light.max(dim=1).values
@@ -744,14 +747,18 @@ class TensorNeRF(torch.nn.Module):
                 diffuse_map = torch.zeros(rgb_map.shape)
                 roughness_map = torch.zeros((rgb_map.shape[0], 1))
             if app_mask.any() and bounce_mask.any():
-                # s = row_mask_sum(incoming_light.detach(), ray_mask) / (ray_mask.sum(dim=1)+1e-8)[..., None]
-                s = tinted_ref_rgb
+                s = row_mask_sum(incoming_light.detach(), ray_mask) / (ray_mask.sum(dim=1)+1e-8)[..., None]
+                # s = tinted_ref_rgb
+                # s = brdf_rgb
                 spec_map = row_mask_sum(s*weight[full_bounce_mask][..., None], full_bounce_mask).cpu()
+                brdf_map = row_mask_sum(brdf_rgb*weight[full_bounce_mask][..., None], full_bounce_mask).cpu()
             else:
                 spec_map = torch.zeros(rgb_map.shape)
+                brdf_map = torch.zeros(rgb_map.shape)
             output['tint_map'] = tint_map
             output['diffuse_map'] = diffuse_map
             output['spec_map'] = spec_map
+            output['brdf_map'] = brdf_map
             output['roughness_map'] = roughness_map
         else:
             # viewdirs point inward. -viewdirs aligns with p_world_normal. So we want it below 0

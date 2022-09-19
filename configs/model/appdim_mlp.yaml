@@ -9,7 +9,9 @@ arch:
   infinity_border: False
   appdim_noise_std: 0.0
   # world_bounces: 40000
-  world_bounces: 0000
+  # world_bounces: 2048000
+  detach_inter: False
+  world_bounces: 0
   max_normal_similarity: 0.87
   max_floater_loss: 1
   cold_start_bg_iters: 0
@@ -73,6 +75,7 @@ arch:
     # featureC: 128
     num_layers: 4
     feape: 0
+    dotpe: 0
     featureC: 64
     activation: 'softplus'
     # activation: 'sigmoid'
@@ -135,10 +138,10 @@ arch:
   #   featureC: 64
   #   num_layers: 3
 
-  # visibility_module:
-  #   _partial_: True
-  #   _target_: modules.naive_vis_cache.NaiveVisCache
-  #   grid_size: 128
+  visibility_module:
+    _partial_: True
+    _target_: modules.naive_vis_cache.NaiveVisCache
+    grid_size: 128
     # lr: 1e-3
     # view_encoder:
     #   _target_: models.ish.ListISH
@@ -154,9 +157,9 @@ params:
   TV_weight_density: 0.0
   TV_weight_app: 0.0
   normal_lambda: 3e-2
-  diffuse_lambda: 1e-5
+  diffuse_lambda: 2e-4
   backwards_rays_lambda: 0.1
-  floater_lambda: 1e-4
+  floater_lambda: 0 # 1e-4
   visibility_lambda: 20
   N_visibility_rays: 128
   # floater_lambda: 0.00001

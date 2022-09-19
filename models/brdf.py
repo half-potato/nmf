@@ -264,7 +264,7 @@ class PBR(torch.nn.Module):
         return spec_color
 
 class MLPBRDF(torch.nn.Module):
-    def __init__(self, in_channels, v_encoder=None, n_encoder=None, l_encoder=None, feape=6, featureC=128, num_layers=2,
+    def __init__(self, in_channels, v_encoder=None, n_encoder=None, l_encoder=None, feape=6, featureC=128, num_layers=2, dotpe=0,
                  mul_ggx=False, activation='sigmoid', use_roughness=False, lr=1e-4, detach_roughness=False, shift=0):
         super().__init__()
 
@@ -272,7 +272,8 @@ class MLPBRDF(torch.nn.Module):
         self.use_roughness = use_roughness
         self.detach_roughness = detach_roughness
         self.mul_ggx = mul_ggx
-        self.in_mlpC = 2*feape*in_channels + in_channels + (1 if use_roughness else 0) + 6
+        self.dotpe = dotpe
+        self.in_mlpC = 2*feape*in_channels + in_channels + (1 if use_roughness else 0) + 6 + 2*dotpe*6
         # self.in_mlpC = 2*feape*in_channels + (1 if use_roughness else 0) + 6
         self.v_encoder = v_encoder
         self.n_encoder = n_encoder
@@ -352,8 +353,11 @@ class MLPBRDF(torch.nn.Module):
         indata = [LdotN, torch.sqrt((1-LdotN**2).clip(min=1e-8, max=1)),
                   VdotN, torch.sqrt((1-LdotN**2).clip(min=1e-8, max=1)),
                   NdotH, torch.sqrt((1-NdotH**2).clip(min=1e-8, max=1))]
-        # indata = [safemath.arccos(LdotN.reshape(-1, 1)), safemath.arccos(VdotN.reshape(-1, 1)), safemath.arccos(NdotH.reshape(-1, 1))]
         indata = [d.reshape(-1, 1) for d in indata]
+        if self.dotpe > 0:
+            dotvals = torch.cat(indata, dim=-1)
+            indata += [positional_encoding(dotvals * torch.pi, self.dotpe)]
+        # indata = [safemath.arccos(LdotN.reshape(-1, 1)), safemath.arccos(VdotN.reshape(-1, 1)), safemath.arccos(NdotH.reshape(-1, 1))]
         indata += [features]
 
         # ic(indata)
@@ -374,6 +378,9 @@ class MLPBRDF(torch.nn.Module):
         if self.l_encoder is not None:
             indata += [self.l_encoder(L, eroughness).reshape(B, -1), L]
 
+        # for d in indata:
+        #     ic(d.shape)
+
         mlp_in = torch.cat(indata, dim=-1)
         raw_mlp_out = self.mlp(mlp_in)
         mlp_out = self.activation(raw_mlp_out)
@@ -384,7 +391,8 @@ class MLPBRDF(torch.nn.Module):
             LdotN = LdotN*D
         LdotN = LdotN.clip(min=0)
 
-        weight = ref_weight * LdotN
+        weight = ref_weight# * LdotN
         spec_color = row_mask_sum(incoming_light * weight, ray_mask) / row_mask_sum(weight, ray_mask).clip(min=1e-8).mean(dim=-1, keepdim=True)
+        brdf_color = row_mask_sum(weight, ray_mask) / row_mask_sum(weight, ray_mask).clip(min=1e-8).mean(dim=-1, keepdim=True)
 
-        return spec_color
+        return spec_color, brdf_color

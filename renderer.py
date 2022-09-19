@@ -73,7 +73,7 @@ class BundleRender:
 
         LOGGER.reset()
         data = self.base_renderer(
-            rays, tensorf, keys=['depth_map', 'rgb_map', 'normal_map', 'acc_map', 'termination_xyz', 'debug_map', 'surf_width', 'world_normal_map', 'tint_map', 'diffuse_map', 'spec_map', 'roughness_map'],
+            rays, tensorf, keys=['depth_map', 'rgb_map', 'normal_map', 'acc_map', 'termination_xyz', 'debug_map', 'surf_width', 'world_normal_map', 'tint_map', 'diffuse_map', 'spec_map', 'roughness_map', 'brdf_map'],
             focal=self.focal, chunk=self.chunk, render2completion=True, **kwargs)
 
         LOGGER.save('rays.pkl')
@@ -126,6 +126,7 @@ class BundleRender:
             tint_map=reshape(data['tint_map'].detach()).cpu(),
             diffuse_map=reshape(data['diffuse_map'].detach()).cpu(),
             spec_map=reshape(data['spec_map'].detach()).cpu(),
+            brdf_map=reshape(data['brdf_map'].detach()).cpu(),
         )
 
 
@@ -161,6 +162,7 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
     os.makedirs(savePath+"/debug", exist_ok=True)
     os.makedirs(savePath+"/tint", exist_ok=True)
     os.makedirs(savePath+"/spec", exist_ok=True)
+    os.makedirs(savePath+"/brdf", exist_ok=True)
     os.makedirs(savePath+"/diffuse", exist_ok=True)
     os.makedirs(savePath+"/roughness", exist_ok=True)
 
@@ -271,11 +273,14 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
             imageio.imwrite(f'{savePath}/spec/{prtx}{idx:03d}.png', (255*(data.spec_map/(1+data.spec_map)).numpy()).astype(np.uint8))
             imageio.imwrite(f'{savePath}/roughness/{prtx}{idx:03d}.exr', data.roughness_map)
             imageio.imwrite(f'{savePath}/diffuse/{prtx}{idx:03d}.png', (255*data.diffuse_map.clamp(0, 1).numpy()).astype(np.uint8))
+            imageio.imwrite(f'{savePath}/brdf/{prtx}{idx:03d}.png', (255*data.brdf_map.clamp(0, 1).numpy()).astype(np.uint8))
             imageio.imwrite(f'{savePath}/tint/{prtx}{idx:03d}.png', (255*data.tint_map.clamp(0, 1).numpy()).astype(np.uint8))
             imageio.imwrite(f'{savePath}/world_normal/{prtx}{idx:03d}.png', vis_world_normal_map)
             imageio.imwrite(f'{savePath}/err/{prtx}{idx:03d}.png', err_map)
             imageio.imwrite(f'{savePath}/surf_width/{prtx}{idx:03d}.png', data.surf_width.numpy().astype(np.uint8))
-            imageio.imwrite(f'{savePath}/debug/{prtx}{idx:03d}.png', (255*data.debug_map.clamp(0, 1).numpy()).astype(np.uint8))
+            # debug = 255*data.debug_map.clamp(0, 1)
+            debug = data.debug_map
+            imageio.imwrite(f'{savePath}/debug/{prtx}{idx:03d}.png', (debug.numpy()).astype(np.uint8))
             if tensorf.ref_module is not None:
                 imageio.imwrite(f'{savePath}/envmaps/{prtx}ref_map_{idx:03d}.png', env_map)
                 imageio.imwrite(f'{savePath}/envmaps/{prtx}view_map_{idx:03d}.png', col_map)
