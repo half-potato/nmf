@@ -20,9 +20,9 @@ class TensorVMSplit(TensorVoxelBase):
         super(TensorVMSplit, self).__init__(aabb, *args, **kargs)
 
         # num_levels x num_outputs
-        # self.interp_mode = 'bilinear'
+        self.interp_mode = 'bilinear'
         self.init_mode = init_mode
-        self.interp_mode = 'bicubic'
+        # self.interp_mode = 'bicubic'
         self.align_corners = True
 
         self.density_plane, self.density_line = self.init_one_svd(self.density_n_comp, [int(self.density_res_multi*g) for g in self.grid_size], 0.1, -0)
@@ -61,10 +61,10 @@ class TensorVMSplit(TensorVoxelBase):
                         scales * torch.cos(freqs * line_pos_vals * math.pi),
                     ], dim=1)
                 case 'integrated':
-                    b = safemath.integrated_pos_enc((pos_vals.reshape(-1, 1)*torch.pi, torch.zeros_like(pos_vals).reshape(-1, 1)), 0, n_degs)
+                    b = safemath.integrated_pos_enc((pos_vals.reshape(-1, 1)*torch.pi, torch.ones_like(pos_vals).reshape(-1, 1)), 0, n_degs)
                     b = b.T.reshape(1, b.shape[1], *pos_vals.shape[-2:])
 
-                    a = safemath.integrated_pos_enc((line_pos_vals.reshape(-1, 1)*torch.pi, torch.zeros_like(line_pos_vals).reshape(-1, 1)), 0, n_degs)
+                    a = safemath.integrated_pos_enc((line_pos_vals.reshape(-1, 1)*torch.pi, torch.ones_like(line_pos_vals).reshape(-1, 1)), 0, n_degs)
                     a = a.T.reshape(1, a.shape[1], *line_pos_vals.shape[-2:])
                     plane_coef_v = b
                     line_coef_v = a

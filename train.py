@@ -210,27 +210,28 @@ def reconstruction(args):
     if args.ckpt is None:
         # dparams = tensorf.parameters()
         # space_optim = torch.optim.Adam(tensorf.rf.dbasis_mat.parameters(), lr=0.5, betas=(0.9,0.99))
-        space_optim = torch.optim.Adam(tensorf.parameters(), lr=0.005, betas=(0.9,0.99))
-        pbar = tqdm(range(1000))
-        for _ in pbar:
-            xyz = torch.rand(20000, 3, device=device)*2-1
-            sigma_feat = tensorf.rf.compute_densityfeature(xyz)
+        if len(list(tensorf.rf.parameters())) > 0:
+            space_optim = torch.optim.Adam(tensorf.parameters(), lr=0.005, betas=(0.9,0.99))
+            pbar = tqdm(range(1000))
+            for _ in pbar:
+                xyz = torch.rand(20000, 3, device=device)*2-1
+                sigma_feat = tensorf.rf.compute_densityfeature(xyz)
 
-            alpha = 1-torch.exp(-sigma_feat * 0.015 * tensorf.rf.distance_scale)
-            # target_alpha = (params.start_density+params.start_density*torch.randn_like(alpha)).clip(min=1e-3)
+                alpha = 1-torch.exp(-sigma_feat * 0.015 * tensorf.rf.distance_scale)
+                # target_alpha = (params.start_density+params.start_density*torch.randn_like(alpha)).clip(min=1e-3)
 
-            # sigma = 1-torch.exp(-sigma_feat)
-            # loss = (sigma-torch.rand_like(sigma)*args.start_density).abs().mean()
-            # target_alpha = (params.start_density+params.start_density*(2*torch.rand_like(alpha)-1))
-            # target_alpha = (params.start_density+params.start_density*torch.randn_like(alpha))
-            # target_alpha = target_alpha.clip(min=params.start_density/2, max=params.start_density*2)
-            target_alpha = params.start_density
-            loss = (alpha-target_alpha).abs().mean()
-            # loss = (-sigma[mask].clip(max=1).sum() + sigma[~mask].clip(min=1e-8).sum())
-            space_optim.zero_grad()
-            loss.backward()
-            pbar.set_description(f"Mean alpha: {alpha.detach().mean().item():.06f}.")
-            space_optim.step()
+                # sigma = 1-torch.exp(-sigma_feat)
+                # loss = (sigma-torch.rand_like(sigma)*args.start_density).abs().mean()
+                # target_alpha = (params.start_density+params.start_density*(2*torch.rand_like(alpha)-1))
+                # target_alpha = (params.start_density+params.start_density*torch.randn_like(alpha))
+                # target_alpha = target_alpha.clip(min=params.start_density/2, max=params.start_density*2)
+                target_alpha = params.start_density
+                loss = (alpha-target_alpha).abs().mean()
+                # loss = (-sigma[mask].clip(max=1).sum() + sigma[~mask].clip(min=1e-8).sum())
+                space_optim.zero_grad()
+                loss.backward()
+                pbar.set_description(f"Mean alpha: {alpha.detach().mean().item():.06f}.")
+                space_optim.step()
     # tensorf.sampler.mark_untrained_grid(train_dataset.poses, train_dataset.intrinsics)
     torch.cuda.empty_cache()
     tensorf.sampler.update(tensorf.rf, init=True)
@@ -274,13 +275,14 @@ def reconstruction(args):
             with torch.cuda.amp.autocast(enabled=args.fp16):
             # if True:
                 data = renderer(rays_train, tensorf,
-                        keys = ['rgb_map', 'floater_loss', 'normal_loss', 'backwards_rays_loss', 'diffuse_reg', 'bounce_count', 'color_count', 'roughness', 'whole_valid'],
+                        keys = ['rgb_map', 'floater_loss', 'normal_loss', 'backwards_rays_loss', 'diffuse_reg', 'bounce_count', 'color_count', 'roughness', 'whole_valid', 'brdf_loss'],
                         focal=focal, output_alpha=alpha_train, chunk=params.batch_size, white_bg = white_bg, is_train=True, ndc_ray=ndc_ray)
 
                 # loss = torch.mean((rgb_map[:, 1, 1] - rgb_train[:, 1, 1]) ** 2)
                 normal_loss = data['normal_loss'].mean()
                 floater_loss = data['floater_loss'].mean()
                 diffuse_reg = data['diffuse_reg'].mean()
+                brdf_loss = data['brdf_loss'].mean()
                 rgb_map = data['rgb_map']
                 if not train_dataset.hdr:
                     rgb_map = rgb_map.clip(max=1)
@@ -299,7 +301,8 @@ def reconstruction(args):
                     params.normal_lambda*normal_loss + \
                     params.floater_lambda*floater_loss + \
                     params.backwards_rays_lambda*backwards_rays_loss + \
-                    params.diffuse_lambda * diffuse_reg
+                    params.diffuse_lambda * diffuse_reg + \
+                    params.brdf_lambda * brdf_loss
                 # ic(total_loss, params.normal_lambda*normal_loss, params.floater_lambda*floater_loss, params.backwards_rays_lambda*backwards_rays_loss, params.diffuse_lambda*diffuse_reg)
 
                 if tensorf.visibility_module is not None:
@@ -362,10 +365,11 @@ def reconstruction(args):
                     f'psnr = {float(np.mean(PSNRs)):.2f}'
                     + f' test_psnr = {float(np.mean(PSNRs_test)):.2f}'
                     + f' rough = {data["roughness"].mean().item():.5f}'
-                    + f' nerr = {float(normal_loss):.1e}'
-                    + f' back = {backwards_rays_loss:.5e}'
-                    + f' float = {floater_loss:.1e}'
+                    # + f' nerr = {float(normal_loss):.1e}'
+                    # + f' back = {backwards_rays_loss:.5e}'
+                    # + f' float = {floater_loss:.1e}'
                     + f' mipbias = {float(tensorf.bg_module.mipbias):.1e}'
+                    + f' brdf = {float(brdf_loss):.2e}'
                     # + f' mse = {photo_loss:.6f}'
                 )
                 PSNRs = []

@@ -256,7 +256,9 @@ class MLPDiffuse(torch.nn.Module):
         super().__init__()
 
         in_channels = in_channels if allocation <= 0 else allocation
-        self.in_mlpC = 2*pospe*3 + 3 + 2*max(feape, 0)*in_channels + in_channels if feape >= 0 else 0
+        self.in_mlpC = 2*pospe*3 + 3
+        if feape >= 0:
+            self.in_mlpC += 2*feape*in_channels + in_channels
         self.unlit_tint = unlit_tint
         self.lr = lr
         self.allocation = allocation

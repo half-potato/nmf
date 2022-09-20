@@ -3,6 +3,8 @@ import torch.nn.functional as F
 from icecream import ic
 import numpy as np
 import utils
+from mutils import normalize
+from torch.autograd import grad
 
 class TensorBase(torch.nn.Module):
     def __init__(self, aabb, density_shift, activation, lr, lr_net, contract_space=False, distance_scale=25, num_pretrain=0):
@@ -18,6 +20,21 @@ class TensorBase(torch.nn.Module):
         self.set_register('aabbSize', self.aabb[1] - self.aabb[0])
         self.set_register('invaabbSize', 2.0/self.aabbSize)
         self.set_register('aabbDiag', torch.sqrt(torch.sum(torch.square(self.aabbSize))))
+
+    def calculate_normals(self, xyz):
+        with torch.enable_grad():
+            xyz_g = xyz.clone()
+            xyz_g.requires_grad = True
+
+            # compute sigma
+            xyz_g_normed = self.normalize_coord(xyz_g)
+            validsigma = self.compute_densityfeature(xyz_g_normed)
+
+            # compute normal
+            grad_outputs = torch.ones_like(validsigma)
+            g = grad(validsigma, xyz_g, grad_outputs=grad_outputs, create_graph=True, allow_unused=True)
+            norms = normalize(-g[0][:, :3])
+            return norms
 
     def get_device(self):
         return self.aabbSize.device

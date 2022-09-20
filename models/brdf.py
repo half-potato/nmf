@@ -190,7 +190,7 @@ class Phong(torch.nn.Module):
         refdir = 2*(N * L).sum(dim=-1, keepdim=True) * N - L
         RdotV = (refdir * V.reshape(-1, 1, 3)).sum(dim=-1, keepdim=True).clip(min=1e-8)#.reshape(-1, 1, 1)
         # ic(RdotV, V, refdir)
-        LdotN = (L * N).sum(dim=-1, keepdim=True).clip(min=1e-8)
+        LdotN = (L * N).sum(dim=-1, keepdim=True).clip(min=1e-16)
         tint = matprop['tint'][mask].reshape(-1, 1, 3)
         f0 = matprop['f0'][mask].reshape(-1, 1, 3)
         alpha = matprop['reflectivity'][mask].reshape(-1, 1, 1)
@@ -270,16 +270,19 @@ class PBR(torch.nn.Module):
         return spec_color
 
 class MLPBRDF(torch.nn.Module):
-    def __init__(self, in_channels, v_encoder=None, n_encoder=None, l_encoder=None, feape=6, featureC=128, num_layers=2, dotpe=0,
+    def __init__(self, in_channels, v_encoder=None, n_encoder=None, l_encoder=None, feape=6, featureC=128, num_layers=2, dotpe=0, normalize=False,
                  mul_ggx=False, activation='sigmoid', use_roughness=False, lr=1e-4, detach_roughness=False, shift=0):
         super().__init__()
 
         self.in_channels = in_channels
+        self.normalize = normalize
         self.use_roughness = use_roughness
         self.detach_roughness = detach_roughness
         self.mul_ggx = mul_ggx
         self.dotpe = dotpe
-        self.in_mlpC = 2*feape*in_channels + in_channels + (1 if use_roughness else 0) + 6 + 2*dotpe*6
+        self.in_mlpC = (1 if use_roughness else 0) + 6 + 2*dotpe*6
+        if feape >= 0:
+            self.in_mlpC += 2*feape*in_channels + in_channels
         # self.in_mlpC = 2*feape*in_channels + (1 if use_roughness else 0) + 6
         self.v_encoder = v_encoder
         self.n_encoder = n_encoder
@@ -351,8 +354,8 @@ class MLPBRDF(torch.nn.Module):
         N_mask = N.reshape(-1, 1, 3).expand(n, m, 3)[ray_mask]
         half = normalize(L + V_mask)
 
-        LdotN = (L * N_mask).sum(dim=-1, keepdim=True).clip(min=1e-8)
-        VdotN = (V_mask * N_mask).sum(dim=-1, keepdim=True).clip(min=1e-8)
+        LdotN = (L * N_mask).sum(dim=-1, keepdim=True).clip(min=1e-20)
+        VdotN = (V_mask * N_mask).sum(dim=-1, keepdim=True).clip(min=1e-20)
         NdotH = ((half * N_mask).sum(dim=-1, keepdim=True)+1e-3).clip(min=1e-20, max=1)
 
         # dat = LdotN.detach().cpu().numpy()
@@ -364,15 +367,16 @@ class MLPBRDF(torch.nn.Module):
         #     plt.show()
 
         # indata = [LdotN.reshape(-1, 1), VdotN.reshape(-1, 1), NdotH.reshape(-1, 1)]
-        indata = [LdotN, torch.sqrt((1-LdotN**2).clip(min=1e-8, max=1)),
-                  VdotN, torch.sqrt((1-LdotN**2).clip(min=1e-8, max=1)),
-                  NdotH, torch.sqrt((1-NdotH**2).clip(min=1e-8, max=1))]
+        indata = [LdotN, torch.sqrt((1-LdotN**2).clip(min=1e-20, max=1)),
+                  VdotN, torch.sqrt((1-LdotN**2).clip(min=1e-20, max=1)),
+                  NdotH, torch.sqrt((1-NdotH**2).clip(min=1e-20, max=1))]
         indata = [d.reshape(-1, 1) for d in indata]
         if self.dotpe > 0:
             dotvals = torch.cat(indata, dim=-1)
-            indata += [positional_encoding(dotvals * torch.pi, self.dotpe)]
+            indata += [safemath.integrated_pos_enc((dotvals, 0.05*torch.ones_like(dotvals)), 0, self.dotpe)]
         # indata = [safemath.arccos(LdotN.reshape(-1, 1)), safemath.arccos(VdotN.reshape(-1, 1)), safemath.arccos(NdotH.reshape(-1, 1))]
-        indata += [features]
+        if self.feape >= 0:
+            indata += [features]
 
         # ic(indata)
         # indata = [features]
@@ -405,8 +409,11 @@ class MLPBRDF(torch.nn.Module):
             LdotN = LdotN*D
         LdotN = LdotN.clip(min=0)
 
-        weight = ref_weight# * LdotN
-        spec_color = row_mask_sum(incoming_light * weight, ray_mask) / row_mask_sum(weight, ray_mask).clip(min=1e-8).mean(dim=-1, keepdim=True)
-        brdf_color = row_mask_sum(weight, ray_mask) / row_mask_sum(weight, ray_mask).clip(min=1e-8).mean(dim=-1, keepdim=True)
+        weight = ref_weight
+        spec_color = row_mask_sum(incoming_light * weight * LdotN, ray_mask)
+        brdf_color = row_mask_sum(weight, ray_mask)
+        if self.normalize:
+            spec_color = spec_color / row_mask_sum(weight, ray_mask).clip(min=1e-20).mean(dim=-1, keepdim=True)
+            brdf_color = brdf_color / row_mask_sum(weight, ray_mask).clip(min=1e-20).mean(dim=-1, keepdim=True)
 
         return spec_color, brdf_color

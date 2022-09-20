@@ -1,48 +1,82 @@
-from tkinter import W
-from .tensor_base import TensorBase
+from .tensor_base import TensorVoxelBase
 import torch
 import torch.nn.functional as F
 from icecream import ic
-import time
-from .convolver import Convolver
+from models.grid_sample_Cinf import grid_sample
+import random
+import math
+from models import safemath
 
-class Triplanar(TensorBase):
-    def __init__(self, aabb, grid_size, *args, hier_sizes, **kargs):
-        super(Triplanar, self).__init__(aabb, grid_size, *args, **kargs)
+# here is original grid sample derivative for testing
+# def grid_sample(*args, smoothing, **kwargs):
+#     return F.grid_sample(*args, **kwargs)
+
+def d_softplus(x, beta=1.0, shift=-10):
+    return torch.exp(shift+beta*x) / (1.0 + torch.exp(shift+beta*x))
 
 
-        self.convolver = Convolver(hier_sizes, False)
-        self.sizes = self.convolver.sizes
+class Triplanar(TensorVoxelBase):
+    def __init__(self, aabb, init_mode='trig', *args, smoothing, **kargs):
+        super(Triplanar, self).__init__(aabb, *args, **kargs)
 
         # num_levels x num_outputs
+        # self.interp_mode = 'bilinear'
+        self.init_mode = init_mode
         self.interp_mode = 'bilinear'
-        # self.interp_mode = 'bicubic'
-        self.set_smoothing(1.0)
+        self.align_corners = True
 
-    def set_smoothing(self, sm):
-        self.convolver.set_smoothing(sm)
-
-    def init_svd_volume(self, res):
         self.density_plane = self.init_one_svd(self.density_n_comp, [int(self.density_res_multi*g) for g in self.grid_size], 0.1, -0)
         self.app_plane = self.init_one_svd(self.app_n_comp, self.grid_size, 0.1, 0)
-        self.basis_mat = torch.nn.Linear(sum(self.app_n_comp), self.app_dim, bias=False)
+        m = sum(self.app_n_comp)
+        self.basis_mat = torch.nn.Linear(m, self.app_dim, bias=False)
+        self.dbasis_mat = torch.nn.Linear(sum(self.density_n_comp), 1, bias=False)
 
+        self.smoothing = smoothing
 
     def init_one_svd(self, n_component, grid_size, scale, shift):
         plane_coef = []
+
+        xyg = torch.meshgrid(torch.linspace(-1, 1, grid_size[0]), torch.linspace(-1, 1, grid_size[1]), indexing='ij')
+        xy = xyg[0] + xyg[1]
+
         for i in range(len(self.vecMode)):
+            vec_id = self.vecMode[i]
             mat_id_0, mat_id_1 = self.matMode[i]
-            plane_coef.append(torch.nn.Parameter(
-                scale * torch.randn((1, n_component[i], grid_size[mat_id_1], grid_size[mat_id_0])) + shift/sum(n_component)
-            ))
+            pos_vals = xy.reshape(1, 1, grid_size[mat_id_0], grid_size[mat_id_1])
+            # freqs = torch.arange(n_component[i]//2).reshape(1, -1, 1, 1)
+            n_degs = n_component[i]//2
+            freqs = 2**torch.arange(n_degs-1).reshape(1, -1, 1, 1)
+            freqs = torch.cat([torch.zeros_like(freqs[:, 0:1]), freqs], dim=1)
+            line_pos_vals = torch.linspace(-1, 1, grid_size[vec_id]).reshape(1, 1, -1, 1)
+            scales = scale * 1/(freqs+1)
+            # scales[:, scales.shape[1]//2:] = 0
+            match self.init_mode:
+                case 'trig':
+                    plane_coef_v = torch.cat([
+                        scales * torch.sin(freqs * pos_vals * math.pi),
+                        scales * torch.cos(freqs * pos_vals * math.pi),
+                    ], dim=1)
+                case 'integrated':
+                    b = safemath.integrated_pos_enc((pos_vals.reshape(-1, 1)*torch.pi, torch.ones_like(pos_vals).reshape(-1, 1)), 0, n_degs)
+                    b = b.T.reshape(1, b.shape[1], *pos_vals.shape[-2:])
+
+                    a = safemath.integrated_pos_enc((line_pos_vals.reshape(-1, 1)*torch.pi, torch.ones_like(line_pos_vals).reshape(-1, 1)), 0, n_degs)
+                    a = a.T.reshape(1, a.shape[1], *line_pos_vals.shape[-2:])
+                    plane_coef_v = b
+                case 'rand':
+                    plane_coef_v = scale * torch.randn((1, n_component[i], grid_size[mat_id_1], grid_size[mat_id_0]))
+            plane_coef.append(torch.nn.Parameter(plane_coef_v))
 
         return torch.nn.ParameterList(plane_coef)
     
     
-    def get_optparam_groups(self, lr_init_spatialxyz = 0.02, lr_init_network = 0.001):
-        grad_vars = [{'params': self.density_plane, 'lr': lr_init_spatialxyz},
-                     {'params': self.app_plane, 'lr': lr_init_spatialxyz},
-                     {'params': self.basis_mat.parameters(), 'lr':lr_init_network}]
+    def get_optparam_groups(self):
+        grad_vars = [
+            {'params': self.density_plane, 'lr': self.lr}, 
+            {'params': self.app_plane, 'lr': self.lr},
+            {'params': self.basis_mat.parameters(), 'lr': self.lr_net},
+            {'params': self.dbasis_mat.parameters(), 'lr': self.lr_net},
+        ]
         return grad_vars
 
     def vectorDiffs(self, vector_comps):
@@ -57,7 +91,7 @@ class Triplanar(TensorBase):
         return total
 
     def vector_comp_diffs(self):
-        return self.vectorDiffs(self.density_line)
+        return self.vectorDiffs(self.density_line) + self.vectorDiffs(self.app_line)
     
     def density_L1(self):
         total = 0
@@ -71,101 +105,94 @@ class Triplanar(TensorBase):
             total = total + reg(self.density_plane[idx]) * 1e-2
         return total
         
-    def TV_loss_app(self, reg):
+    def TV_loss_app(self, reg, start_ind=0, end_ind=-1):
         total = 0
         for idx in range(len(self.app_plane)):
             total = total + reg(self.app_plane[idx]) * 1e-2
         return total
 
     def coordinates(self, xyz_sampled):
-        # coordinate_plane = torch.stack((xyz_sampled[..., self.matMode[0]], xyz_sampled[..., self.matMode[1]], xyz_sampled[..., self.matMode[2]])).detach().view(3, -1, 1, 2)
-        # coordinate_line = torch.stack((xyz_sampled[..., self.vecMode[0]], xyz_sampled[..., self.vecMode[1]], xyz_sampled[..., self.vecMode[2]]))
-        # coordinate_line = torch.stack((torch.zeros_like(coordinate_line), coordinate_line), dim=-1).detach().view(3, -1, 1, 2)
         coordinate_plane = torch.stack((xyz_sampled[..., self.matMode[0]], xyz_sampled[..., self.matMode[1]], xyz_sampled[..., self.matMode[2]])).view(3, -1, 1, 2)
         return coordinate_plane
 
-
     def compute_densityfeature(self, xyz_sampled):
+        # mask1 = torch.linalg.norm(xyz_sampled[..., :3], dim=-1, ord=torch.inf) < 0.613/1.5
+        # mask2 = (xyz_sampled[..., 0] < 0) & (xyz_sampled[..., 1] > 0)
+        # return torch.where(mask1 & ~mask2, 99999999.0, 0.0)
+
         coordinate_plane = self.coordinates(xyz_sampled)
-        sigma_feature = torch.zeros((self.density_n_comp[0], xyz_sampled.shape[0]), device=xyz_sampled.device)
-        size_weights = self.convolver.compute_size_weights(xyz_sampled, self.units/self.density_res_multi)
-        # plane_kerns, line_kerns = self.convolver.get_kernels(size_weights)
-        plane_kerns, line_kerns = [[None]], [[None]]
+        sigma_feature = torch.zeros((xyz_sampled.shape[0],), device=xyz_sampled.device)
+        sigma_feature = []
 
         for idx_plane in range(len(self.density_plane)):
-            plane_coef_point = self.convolver.multi_size_plane(self.density_plane[idx_plane], coordinate_plane[[idx_plane]], size_weights, plane_kerns)
-            # ic(plane_coef_point.mean(), line_coef_point.mean())
-            sigma_feature = sigma_feature * plane_coef_point
-        return sigma_feature.sum(dim=0)
+            plane_coef_point = grid_sample(self.density_plane[idx_plane], coordinate_plane[[idx_plane]],
+                                                align_corners=self.align_corners, mode=self.interp_mode, smoothing=self.smoothing).view(-1, *xyz_sampled.shape[:1])
+            sigma_feature.append(plane_coef_point)
 
-    def compute_density_norm(self, xyz_sampled, activation_fn):
-        coordinate_plane = self.coordinates(xyz_sampled)
-        world_normals = torch.zeros((xyz_sampled.shape[0], 3), device=xyz_sampled.device)
-        size_weights = self.convolver.compute_size_weights(xyz_sampled, self.units/self.density_res_multi)
+        # return self.dbasis_mat(sigma_feature.reshape(-1, 1)).reshape(-1)
+        sigma_feature = torch.cat(sigma_feature, dim=0).T
+        # ic(sigma_feature[0], sigma_feature[0].sum())
+        sigma_feature = self.dbasis_mat(sigma_feature).squeeze(-1)
+        # ic(list(self.dbasis_mat.parameters()))
+        # sigma_feature = (sigma_feature).sum(dim=1).squeeze(-1)
+        # sigma_feature = sigma_feature.sum(dim=-1)
+        return self.feature2density(sigma_feature)
 
-        plane_kerns, line_kerns = self.convolver.get_kernels(size_weights, with_normals=True)
-
-        # self.matMode = [[0,1], [0,2], [1,2]]
-        plane_coef_point1, dx_point1, dy_point1 = self.convolver.multi_size_plane(self.density_plane[0], coordinate_plane[[0]], size_weights, convs=plane_kerns)
-        plane_coef_point2, dx_point2, dz_point2 = self.convolver.multi_size_plane(self.density_plane[1], coordinate_plane[[1]], size_weights, convs=plane_kerns)
-        plane_coef_point3, dy_point3, dz_point3 = self.convolver.multi_size_plane(self.density_plane[2], coordinate_plane[[2]], size_weights, convs=plane_kerns)
-        world_normals[:, 0] = (plane_coef_point3*plane_coef_point2*dx_point1 + plane_coef_point1*plane_coef_point3*dx_point2).sum(dim=0)
-        world_normals[:, 1] = (plane_coef_point3*plane_coef_point2*dy_point1 + plane_coef_point1*plane_coef_point2*dy_point3).sum(dim=0)
-        world_normals[:, 2] = (plane_coef_point3*plane_coef_point1*dz_point2 + plane_coef_point1*plane_coef_point2*dz_point3).sum(dim=0)
-        
-        sigma_feature = (plane_coef_point1 * plane_coef_point2 * plane_coef_point3).sum(dim=0)
-
-        world_normals = world_normals / (torch.norm(world_normals, dim=1, keepdim=True)+1e-6)
-        return sigma_feature, world_normals
 
     def compute_appfeature(self, xyz_sampled):
         coordinate_plane = self.coordinates(xyz_sampled)
-        size_weights = self.convolver.compute_size_weights(xyz_sampled, self.units/self.density_res_multi)
-        # app_feature = torch.zeros((self.app_n_comp[0], xyz_sampled.shape[0]), device=xyz_sampled.device)
-        app_feature = []
-        # plane_kerns = [self.norm_plane_kernels[0][0:1]]
-        # line_kerns = [self.norm_line_kernels[0][0:1]]
-        plane_kerns, line_kerns = [[None]], [[None]]
+        plane_coef_point = []
         for idx_plane in range(len(self.app_plane)):
-            # app_feature *= self.convolver.multi_size_plane(self.app_plane[idx_plane], coordinate_plane[[idx_plane]], size_weights, convs=plane_kerns)
-            app_feature.append(self.convolver.multi_size_plane(self.app_plane[idx_plane], coordinate_plane[[idx_plane]], size_weights, convs=plane_kerns))
-        app_feature = torch.cat(app_feature, dim=0)
-        return self.basis_mat(app_feature.T)
+            plane_coef_point.append(
+                    F.grid_sample(self.app_plane[idx_plane], coordinate_plane[[idx_plane]], mode=self.interp_mode,
+                        align_corners=self.align_corners).view(-1, *xyz_sampled.shape[:1]))
+        plane_coef_point = torch.cat(plane_coef_point, dim=0)
+        return self.basis_mat(plane_coef_point.T)
 
 
     @torch.no_grad()
-    def up_sampling_VM(self, plane_coef, res_target):
+    def up_sampling_VM(self, plane_coef, line_coef, res_target):
 
         for i in range(len(self.vecMode)):
-            vec_id = self.vecMode[i]
             mat_id_0, mat_id_1 = self.matMode[i]
             plane_coef[i] = torch.nn.Parameter(
-                F.interpolate(plane_coef[i].data, size=(res_target[mat_id_1], res_target[mat_id_0]), mode='bilinear',
-                              align_corners=True))
+                F.interpolate(plane_coef[i].data, size=(res_target[mat_id_1], res_target[mat_id_0]), mode=self.interp_mode,
+                              align_corners=self.align_corners))
 
-        return plane_coef
+        return plane_coef, line_coef
 
     @torch.no_grad()
     def upsample_volume_grid(self, res_target):
         density_target = [int(self.density_res_multi*g) for g in res_target]
-        self.app_plane = self.up_sampling_VM(self.app_plane, res_target)
-        self.density_plane = self.up_sampling_VM(self.density_plane, density_target)
+        self.app_plane = self.up_sampling_VM(self.app_plane, self.app_line, res_target)
+        self.density_plane = self.up_sampling_VM(self.density_plane, self.density_line, density_target)
 
         self.update_stepSize(res_target)
         print(f'upsampling to {res_target}. upsampling density to {density_target}')
 
     @torch.no_grad()
-    def shrink(self, new_aabb, apply_correction):
+    def shrink(self, new_aabb):
+        # the new_aabb is in normalized coordinates, from -1 to 1
         print("====> shrinking ...")
         xyz_min, xyz_max = new_aabb
+        # t_l, b_r = xyz_min * self.grid_size // 2, xyz_max * self.grid_size // 2 - 1
         t_l, b_r = (xyz_min - self.aabb[0]) / self.units, (xyz_max - self.aabb[0]) / self.units
         # print(new_aabb, self.aabb)
         # print(t_l, b_r,self.alphaMask.alpha_volume.shape)
-        dt_l, db_r = torch.round(t_l*self.density_res_multi).long(), torch.round(b_r*self.density_res_multi).long() + 1
-        t_l, b_r = torch.round(torch.round(t_l)).long(), torch.round(b_r).long() + 1
+        dt_l, db_r = torch.floor(t_l*self.density_res_multi).long(), torch.ceil(b_r*self.density_res_multi).long() + 1
+        t_l, b_r = torch.floor(t_l).long(), torch.ceil(b_r).long() + 1
         b_r = torch.stack([b_r, self.grid_size]).amin(0)
         db_r = torch.stack([db_r, (self.density_res_multi*self.grid_size).long()]).amin(0)
-        ic(db_r, dt_l, b_r, t_l, xyz_min, xyz_max, self.units, self.aabb)
+
+        # update aabb
+        l1 = t_l / self.grid_size
+        l2 = b_r / self.grid_size
+        adj_aabb = torch.stack([
+            l1 * self.aabb[1] + (1-l1) * self.aabb[0],
+            l2 * self.aabb[1] + (1-l2) * self.aabb[0],
+        ], dim=0)
+        ic(db_r, dt_l, b_r, t_l, xyz_min, xyz_max, self.units, self.aabb, adj_aabb, self.density_line[0].shape, self.grid_size)
+        self.aabb = adj_aabb
 
         for i in range(len(self.vecMode)):
             mode0 = self.vecMode[i]
@@ -184,15 +211,5 @@ class Triplanar(TensorBase):
             )
 
 
-        # if not torch.all(self.alphaMask.grid_size == self.grid_size):
-        if apply_correction:
-            t_l_r, b_r_r = t_l / (self.grid_size-1), (b_r-1) / (self.grid_size-1)
-            correct_aabb = torch.zeros_like(new_aabb)
-            correct_aabb[0] = (1-t_l_r)*self.aabb[0] + t_l_r*self.aabb[1]
-            correct_aabb[1] = (1-b_r_r)*self.aabb[0] + b_r_r*self.aabb[1]
-            print("aabb", new_aabb, "\ncorrect aabb", correct_aabb)
-            new_aabb = correct_aabb
-
         newSize = b_r - t_l
-        self.aabb = new_aabb
         self.update_stepSize((newSize[0], newSize[1], newSize[2]))

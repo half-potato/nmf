@@ -1,0 +1,8 @@
+_partial_: True
+_target_: fields.ball.Ball
+radius: 1.0
+lr: 1e-2
+lr_net: 1e-4
+activation: 'softplus'
+density_shift: 0
+distance_scale: 10

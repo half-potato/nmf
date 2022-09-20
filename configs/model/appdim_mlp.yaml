@@ -5,7 +5,7 @@ arch:
   alphaMask_thres: 0.0001
   rayMarch_weight_thres: 0.0001
   max_recurs: 2
-  max_brdf_rays: 50
+  max_brdf_rays: 200
   max_recur_rays: 3
   infinity_border: False
   appdim_noise_std: 0.0
@@ -16,12 +16,13 @@ arch:
   # world_bounces: 10000
   # world_bounces: 204800
   max_normal_similarity: 0.87
+  use_diffuse: True
   max_floater_loss: 1
   cold_start_bg_iters: 0
   selector:
     _target_: modules.pt_selectors.TopNWeight
     max_selected: 2500000
-    bounces_per_ray: 200
+    bounces_per_ray: 1000
     weight_thres: 1e-4
 
   sampler:
@@ -78,8 +79,9 @@ arch:
     # featureC: 128
     num_layers: 4
     feape: 0
-    dotpe: 0
-    featureC: 64
+    dotpe: 6
+    normalize: True
+    featureC: 128
     activation: 'softplus'
     # activation: 'sigmoid'
     # activation: 'sigmoid'
@@ -163,6 +165,7 @@ params:
   diffuse_lambda: 2e-4
   backwards_rays_lambda: 0.1
   # floater_lambda: 1e-4
+  brdf_lambda: 0
   floater_lambda: 0
   visibility_lambda: 20
   N_visibility_rays: 128
