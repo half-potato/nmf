@@ -45,7 +45,7 @@ class TensorNeRF(torch.nn.Module):
                  max_normal_similarity=1, infinity_border=False, min_refraction=1.1, enable_refraction=True,
                  alphaMask_thres=0.001, rayMarch_weight_thres=0.0001, detach_inter=False,
                  max_bounce_rays=4000, max_brdf_rays=3, max_recur_rays=5, bounce_min_weight=0.001, appdim_noise_std=0.0,
-                 world_bounces=0, selector=None, cold_start_bg_iters = 0, use_diffuse = True,
+                 world_bounces=0, selector=None, cold_start_bg_iters = 0, use_diffuse = True, attach_world_normal_iter = 0,
                  update_sampler_list=[5000], max_floater_loss=6, **kwargs):
         super(TensorNeRF, self).__init__()
         self.rf = rf(aabb=aabb)
@@ -77,6 +77,8 @@ class TensorNeRF(torch.nn.Module):
         self.rayMarch_weight_thres = rayMarch_weight_thres
         self.appdim_noise_std = appdim_noise_std
         self.update_sampler_list = update_sampler_list
+        self.detach_world_normal = False if attach_world_normal_iter <= 0 else True
+        self.attach_world_normal_iter = attach_world_normal_iter
 
         self.bounce_min_weight = bounce_min_weight
         self.min_refraction = min_refraction
@@ -211,6 +213,8 @@ class TensorNeRF(torch.nn.Module):
             self.sampler.update(self.rf, init=True)
         if iter > self.cold_start_bg_iters:
             self.detach_bg = False
+
+        self.detach_world_normal = iter < self.attach_world_normal_iter
         return require_reassignment
 
     def render_env_sparse(self, ray_origins, env_dirs, roughness: float):
@@ -768,7 +772,11 @@ class TensorNeRF(torch.nn.Module):
             floater_loss = distortion_loss(midpoint, full_weight, dt) if is_train else torch.tensor(0.0, device=device) 
             # floater_loss = torch.tensor(0.0, device=device) 
 
-            align_world_loss = (1-(p_world_normal * world_normal).sum(dim=-1).clamp(max=self.max_normal_similarity))
+            if self.detach_world_normal:
+                target = world_normal.detach()
+            else:
+                target = world_normal
+            align_world_loss = (1-(p_world_normal * target).sum(dim=-1).clamp(max=self.max_normal_similarity))
             # align_world_loss = torch.linalg.norm(p_world_normal - world_normal, dim=-1)
             normal_loss = (pweight * align_world_loss).sum() / B
 

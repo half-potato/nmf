@@ -14,7 +14,7 @@ import hydra
 from omegaconf import OmegaConf
 from pathlib import Path
 from loguru import logger
-
+import math
 
 # from torch.profiler import profile, record_function, ProfilerActivity
 
@@ -206,13 +206,27 @@ def reconstruction(args):
                 pbar.set_description(f'psnr={-10.0 * np.log(photo_loss) / np.log(10.0):.04f}')
         # tensorf.bg_module.save('test.png')
 
+    def density_inverse(x):
+        return math.log(math.exp(x) - 1)
+
     # TODO REMOVE
     if args.ckpt is None:
         # dparams = tensorf.parameters()
         # space_optim = torch.optim.Adam(tensorf.rf.dbasis_mat.parameters(), lr=0.5, betas=(0.9,0.99))
         if len(list(tensorf.rf.parameters())) > 0:
             space_optim = torch.optim.Adam(tensorf.parameters(), lr=0.005, betas=(0.9,0.99))
-            pbar = tqdm(range(1000))
+            pbar = tqdm(range(tensorf.rf.num_pretrain))
+            xyz = torch.rand(20000, 3, device=device)*2-1
+            sigma_feat = tensorf.rf.compute_densityfeature(xyz)
+            alpha = 1-torch.exp(-sigma_feat * 0.015 * tensorf.rf.distance_scale)
+            ic(alpha.mean(), sigma_feat.mean())
+
+            goal_sigma = -math.log(1-params.start_density) / (0.015 * tensorf.rf.distance_scale)
+            tensorf.rf.density_shift += -density_inverse(sigma_feat.mean().detach()) + density_inverse(goal_sigma)
+
+            sigma_feat = tensorf.rf.compute_densityfeature(xyz)
+            alpha = 1-torch.exp(-sigma_feat * 0.015 * tensorf.rf.distance_scale)
+            ic(alpha.mean(), sigma_feat.mean(), tensorf.rf.density_shift)
             for _ in pbar:
                 xyz = torch.rand(20000, 3, device=device)*2-1
                 sigma_feat = tensorf.rf.compute_densityfeature(xyz)
@@ -298,11 +312,12 @@ def reconstruction(args):
 
                 # loss
                 total_loss = loss + \
-                    params.normal_lambda*normal_loss + \
                     params.floater_lambda*floater_loss + \
                     params.backwards_rays_lambda*backwards_rays_loss + \
                     params.diffuse_lambda * diffuse_reg + \
                     params.brdf_lambda * brdf_loss
+                if iteration > 2000:
+                    total_loss += params.normal_lambda*normal_loss
                 # ic(total_loss, params.normal_lambda*normal_loss, params.floater_lambda*floater_loss, params.backwards_rays_lambda*backwards_rays_loss, params.diffuse_lambda*diffuse_reg)
 
                 if tensorf.visibility_module is not None:

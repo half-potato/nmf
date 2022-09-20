@@ -195,13 +195,6 @@ class Triplanar(TensorVoxelBase):
         self.aabb = adj_aabb
 
         for i in range(len(self.vecMode)):
-            mode0 = self.vecMode[i]
-            self.density_line[i] = torch.nn.Parameter(
-                self.density_line[i].data[...,dt_l[mode0]:db_r[mode0],:]
-            )
-            self.app_line[i] = torch.nn.Parameter(
-                self.app_line[i].data[...,t_l[mode0]:b_r[mode0],:]
-            )
             mode0, mode1 = self.matMode[i]
             self.density_plane[i] = torch.nn.Parameter(
                 self.density_plane[i].data[...,dt_l[mode1]:db_r[mode1],dt_l[mode0]:db_r[mode0]]

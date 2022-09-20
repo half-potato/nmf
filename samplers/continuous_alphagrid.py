@@ -247,7 +247,7 @@ class ContinuousAlphagrid(torch.nn.Module):
         coords, cas = self.xyz2coords(xyz_sampled[ray_valid][..., :3])
         # indices = raymarching.morton3D(coords).long() # [N]
         indices = morton3D(coords).long() # [N]
-        indices = indices.clip(min=0, max=self.density_bitfield.shape[0]*8) # [N]
+        indices = indices.clip(min=0, max=self.density_grid.shape[1]) # [N]
         alpha = self.density_grid[cas, indices]
         alpha_mask = alpha > self.active_density_thresh
 

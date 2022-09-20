@@ -64,7 +64,7 @@ class TensorBase(torch.nn.Module):
         elif self.activation == "relu_shift":
             return F.relu(density_features+self.density_shift)
         elif self.activation == "exp":
-            return torch.exp(density_features.clip(max=20))
+            return torch.exp(density_features.clip(max=20)+self.density_shift)
         elif self.activation == "identity":
             return density_features
 

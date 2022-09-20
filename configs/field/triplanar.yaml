@@ -13,9 +13,9 @@ smoothing: 0.05
 # activation: 'softplus'
 activation: 'exp'
 # activation: 'relu_shift'
-init_mode: rand
-# init_mode: trig
-density_shift: -10
+# init_mode: rand
+init_mode: trig
+density_shift: -0
 
 N_voxel_init: 2097156 # 128**3
 # N_voxel_init: 16777216 # 256**3
@@ -34,5 +34,5 @@ upsamp_list: [14000,16000,18000]
 # upsamp_list: [] # 4000,4000,5500,7000]
 lr: 1e-2
 lr_net: 1e-3
-num_pretrain: 500
+num_pretrain: 000
 
