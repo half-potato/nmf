@@ -16,6 +16,7 @@ activation: 'exp'
 init_mode: rand
 # init_mode: trig
 density_shift: -10
+interp_mode: bicubic
 
 N_voxel_init: 2097156 # 128**3
 # N_voxel_init: 16777216 # 256**3

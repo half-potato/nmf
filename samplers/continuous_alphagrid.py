@@ -96,7 +96,7 @@ class ContinuousAlphagrid(torch.nn.Module):
         self.update_freq = update_freq
         self.cascade = int(1 + math.ceil(math.log2(bound)))# - 1
         # TODO REMOVE: The higher cascades aren't working
-        self.cascade = 1
+        # self.cascade = 1
         ic(self.cascade, self.bound)
         self.grid_size = grid_size
         self.multiplier = int(multiplier)
@@ -116,9 +116,9 @@ class ContinuousAlphagrid(torch.nn.Module):
         # extra state for cuda raymarching
         # density grid
         density_grid = torch.zeros([self.cascade, self.grid_size ** 3]) # [CAS, H * H * H]
-        density_bitfield = torch.zeros(self.cascade * self.grid_size ** 3 // 8, dtype=torch.uint8) # [CAS * H * H * H // 8]
+        # density_bitfield = torch.zeros(self.cascade * self.grid_size ** 3 // 8, dtype=torch.uint8) # [CAS * H * H * H // 8]
         self.register_buffer('density_grid', density_grid)
-        self.register_buffer('density_bitfield', density_bitfield)
+        # self.register_buffer('density_bitfield', density_bitfield)
         self.mean_density = 0
         self.iter_density = 0
         # step counter
@@ -251,7 +251,7 @@ class ContinuousAlphagrid(torch.nn.Module):
         alpha = self.density_grid[cas, indices]
         alpha_mask = alpha > self.active_density_thresh
 
-        alpha_mask = (self.density_bitfield[indices // 8] & (1 << (indices % 8))) > 0
+        # alpha_mask = (self.density_bitfield[indices // 8] & (1 << (indices % 8))) > 0
 
         ray_invalid = ~ray_valid
         ray_invalid[ray_valid] |= (~alpha_mask)
@@ -500,7 +500,7 @@ class ContinuousAlphagrid(torch.nn.Module):
 
         # convert to bitfield
         self.active_density_thresh = min(self.mean_density, self.threshold)
-        self.density_bitfield = raymarching.packbits(self.density_grid, self.active_density_thresh, self.density_bitfield)
+        # self.density_bitfield = raymarching.packbits(self.density_grid, self.active_density_thresh, self.density_bitfield)
 
         ### update step counter
 

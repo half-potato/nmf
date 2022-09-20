@@ -16,13 +16,13 @@ def d_softplus(x, beta=1.0, shift=-10):
 
 
 class TensorVMSplit(TensorVoxelBase):
-    def __init__(self, aabb, init_mode='trig', *args, smoothing, **kargs):
+    def __init__(self, aabb, interp_mode, init_mode='trig', *args, smoothing, **kargs):
         super(TensorVMSplit, self).__init__(aabb, *args, **kargs)
 
         # num_levels x num_outputs
-        self.interp_mode = 'bilinear'
+        # self.interp_mode = 'bilinear'
         self.init_mode = init_mode
-        # self.interp_mode = 'bicubic'
+        self.interp_mode = interp_mode
         self.align_corners = True
 
         self.density_plane, self.density_line = self.init_one_svd(self.density_n_comp, [int(self.density_res_multi*g) for g in self.grid_size], 0.1, -0)

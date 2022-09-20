@@ -121,8 +121,8 @@ class TensorNeRF(torch.nn.Module):
         if isinstance(self.brdf, torch.nn.Module):
             grad_vars += [{'params': self.brdf.parameters(),
                            'lr': self.brdf.lr}]
-        # if isinstance(self.bg_module, torch.nn.Module):
-        #     grad_vars += self.bg_module.get_optparam_groups()
+        if isinstance(self.bg_module, torch.nn.Module):
+            grad_vars += self.bg_module.get_optparam_groups()
         return grad_vars
 
     def save(self, path, config):
