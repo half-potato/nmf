@@ -3,20 +3,19 @@ _target_: fields.tensoRF.TensorVMSplit
 distance_scale: 25
 density_n_comp: 16
 # density_n_comp: 24
-appearance_n_comp: 24
-app_dim: 24
+appearance_n_comp: 48
+app_dim: 27
 step_ratio: 0.5
 density_res_multi: 1
 contract_space: False
-smoothing: 1.5
+smoothing: 0.5
 activation: 'softplus_shift'
 # activation: 'softplus'
-# activation: 'exp'
 # activation: 'relu_shift'
-interp_mode: bilinear
 init_mode: rand
+interp_mode: bilinear
 # init_mode: trig
-density_shift: -0
+density_shift: -10
 
 N_voxel_init: 2097156 # 128**3
 # N_voxel_init: 16777216 # 256**3
@@ -35,4 +34,5 @@ upsamp_list: [2000,3000,4000,5500,7000]
 # upsamp_list: [] # 4000,4000,5500,7000]
 lr: 2e-2
 lr_net: 1e-3
-num_pretrain: 1000
+num_pretrain: 0
+

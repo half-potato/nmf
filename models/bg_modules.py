@@ -82,7 +82,7 @@ class CubeUnwrap(torch.nn.Module):
 
 class HierarchicalCubeMap(torch.nn.Module):
     def __init__(self, bg_resolution=512, num_levels=1, featureC=128, activation='identity', power=4,
-                 stds = [1, 2, 4, 8], betas=[0.9, 0.99], mipbias=+0.5, interp_pyramid=True, lr=0.15, mipbias_lr=1e-3, mipnoise=0.5, learnable_bias=True):
+                 stds = [1, 2, 4, 8], betas=[0.9, 0.99], mipbias=+0.5, init_val=-2, interp_pyramid=True, lr=0.15, mipbias_lr=1e-3, mipnoise=0.5, learnable_bias=True):
         super().__init__()
         self.num_levels = num_levels
         self.interp_pyramid = interp_pyramid
@@ -114,7 +114,7 @@ class HierarchicalCubeMap(torch.nn.Module):
         self.bg_mats = nn.ParameterList([
             # nn.Parameter(0.5 * torch.randn((1, 6, bg_resolution // self.power**i , bg_resolution // self.power**i, 3)) / (self.num_levels - i))
             # nn.Parameter(-0.5 * torch.ones((1, 6, bg_resolution // self.power**i , bg_resolution // self.power**i, 3)) / (self.num_levels - i))
-            nn.Parameter(0.1 * torch.ones((1, 6, bg_resolution // self.power**i , bg_resolution // self.power**i, 3)) / (self.num_levels - i))
+            nn.Parameter(init_val * torch.ones((1, 6, bg_resolution // self.power**i , bg_resolution // self.power**i, 3)) / (self.num_levels - i))
             for i in range(num_levels-1, -1, -1)])
         # self.activation_fn = torch.nn.Softplus(beta=3)
 
@@ -135,7 +135,7 @@ class HierarchicalCubeMap(torch.nn.Module):
         elif self.activation == 'clip':
             return x.clip(min=1e-3)
         else:
-            return torch.exp(x-2).clip(min=0.01, max=1000)
+            return torch.exp(x).clip(min=0.01, max=1000)
 
     def calc_weight(self, mip):
         # return 1/2**(self.num_levels-mip)

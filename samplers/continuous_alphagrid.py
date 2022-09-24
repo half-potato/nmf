@@ -2,7 +2,6 @@ import torch
 import math
 import raymarching_full as raymarching 
 import torch.nn.functional as F
-from numba import jit
 import numpy as np
 from icecream import ic
 import time
@@ -72,13 +71,16 @@ class ContinuousAlphagrid(torch.nn.Module):
                  aabb=None,
                  near_far=[0.2, 6],
                  threshold=0.002,
+                 shrink_threshold=None,
                  multiplier=1, 
                  sample_mode='multi_jitter',
                  test_sample_mode=None,
                  update_freq=16,
+                 disable_cascade=True,
                  max_samples=int(1.1e6),
                  dynamic_batchsize=False,
-                 shrink_freq=1000,
+                 conv=7,
+                 shrink_iters=[],
                  grid_size=128):
         super().__init__()
 
@@ -90,12 +92,17 @@ class ContinuousAlphagrid(torch.nn.Module):
         # distance of the candidate from the center. The resolution decreases by a factor of 2 for
         # each cascade.
 
+        self.conv = conv
+        self.shrink_threshold = shrink_threshold
         self.bound = bound if aabb is None else aabb.abs().max()
+        self.aabb = None
         self.dynamic_batchsize = dynamic_batchsize
         self.update_freq = update_freq
         self.cascade = int(1 + math.ceil(math.log2(bound)))# - 1
         # TODO REMOVE: The higher cascades aren't working
-        self.cascade = 1
+        self.disable_cascade = disable_cascade
+        if self.disable_cascade:
+            self.cascade = 1
         ic(self.cascade, self.bound)
         self.grid_size = grid_size
         self.multiplier = int(multiplier)
@@ -106,7 +113,7 @@ class ContinuousAlphagrid(torch.nn.Module):
         self.active_density_thresh = threshold
         self.max_samples = max_samples 
         self.stepsize = 0.003383
-        self.shrink_freq = shrink_freq
+        self.shrink_iters = shrink_iters
 
         self.sample_mode = sample_mode
         self.test_sample_mode = sample_mode if test_sample_mode is None else test_sample_mode
@@ -241,20 +248,17 @@ class ContinuousAlphagrid(torch.nn.Module):
         device = rays_chunk.device
         N, M = xyz_sampled.shape[:2]
         # sample alphas and cull samples from the ray
-        # alpha_mask = self.alphaMask.sample_alpha(
-        #     xyz_sampled[ray_valid], contract_space=self.contract_space)
-        coords, cas = self.xyz2coords(xyz_sampled[ray_valid][..., :3])
-        # indices = raymarching.morton3D(coords).long() # [N]
-        indices = morton3D(coords).long() # [N]
-        indices = indices.clip(min=0, max=self.density_bitfield.shape[0]*8) # [N]
-        alpha = self.density_grid[cas, indices]
-        alpha_mask = alpha > self.active_density_thresh
-
-        alpha_mask = (self.density_bitfield[indices // 8] & (1 << (indices % 8))) > 0
-
-        ray_invalid = ~ray_valid
-        ray_invalid[ray_valid] |= (~alpha_mask)
-        ray_valid = ~ray_invalid
+        # coords, cas = self.xyz2coords(xyz_sampled[ray_valid][..., :3])
+        # indices = morton3D(coords).long() # [N]
+        # indices = indices.clip(min=0, max=self.density_bitfield.shape[0]*8) # [N]
+        # alpha = self.density_grid[cas, indices]
+        # alpha_mask = alpha > self.active_density_thresh
+        #
+        # alpha_mask = (self.density_bitfield[indices // 8] & (1 << (indices % 8))) > 0
+        #
+        # ray_invalid = ~ray_valid
+        # ray_invalid[ray_valid] |= (~alpha_mask)
+        # ray_valid = ~ray_invalid
 
         dists = torch.cat((z_vals[:, 1:] - z_vals[:, :-1], torch.zeros_like(z_vals[:, :1])), dim=-1)
 
@@ -292,23 +296,27 @@ class ContinuousAlphagrid(torch.nn.Module):
         cas = self.xyz2cas(xyz)
         cas_xyzs = xyz
         bound = (2 ** cas).clip(max=self.bound)
+        if self.disable_cascade:
+            bound = self.bound
         half_grid_size = bound / self.grid_size
 
         o_xyzs = (cas_xyzs / (bound - half_grid_size)[..., None]).clip(min=-1, max=1)
         coords = (o_xyzs+1) / 2 * (self.grid_size - 1)
         return coords.long(), cas
 
-    def coords2xyz(self, coords, cas, randomize=True):
+    def coords2xyz(self, coords, cas, randomize=True, conv=1):
         xyzs = 2 * coords.float() / (self.grid_size - 1) - 1 # [N, 3] in [-1, 1]
 
         # cascading
         bound = min(2 ** cas, self.bound)
+        if self.disable_cascade:
+            bound = self.bound
         half_grid_size = bound / self.grid_size
         # scale to current cascade's resolution
         cas_xyzs = xyzs * (bound - half_grid_size)
         # add noise in [-hgs, hgs]
         if randomize:
-            cas_xyzs += (torch.rand_like(cas_xyzs) * 2 - 1) * half_grid_size
+            cas_xyzs += (torch.randn_like(cas_xyzs)) * half_grid_size * conv / 2
         return cas_xyzs
 
     @torch.no_grad()
@@ -382,15 +390,15 @@ class ContinuousAlphagrid(torch.nn.Module):
     def check_schedule(self, iteration, rf):
         if iteration % self.update_freq == 0:
             self.update(rf)
-        if self.shrink_freq > 0 and iteration >= self.shrink_freq and iteration % self.shrink_freq == 0:
+        if iteration in self.shrink_iters:
             new_aabb = self.get_bounds()
-            rf.shrink(new_aabb)
-            self.update(rf, init=True)
+            rf.shrink(new_aabb, self.grid_size)
+            # self.update(rf, init=True)
         return False
 
     def update(self, rf, decay=0.95, S=128, init=False):
-        self.aabb = rf.aabb
-        self.units = rf.units
+        # TODO REMOVE
+        self.aabb = rf.aabb# if self.aabb is None else self.aabb
         self.contract_space = rf.contract_space
         # reso_mask = reso_cur
         self.update_density(rf, decay, S=S)
@@ -402,8 +410,9 @@ class ContinuousAlphagrid(torch.nn.Module):
 
     def get_bounds(self):
         xyzs = []
+        thresh = self.active_density_thresh if self.shrink_threshold is None else self.shrink_threshold
         for cas in range(self.cascade):
-            active_grid = self.density_grid[cas] > self.active_density_thresh
+            active_grid = self.density_grid[cas] > thresh
             occ_indices = torch.nonzero(active_grid).squeeze(-1) # [Nz]
             occ_coords = morton3D_invert(occ_indices) # [N, 3]
             # convert coords to aabb
@@ -414,7 +423,7 @@ class ContinuousAlphagrid(torch.nn.Module):
             xyzs.min(dim=0).values,
             xyzs.max(dim=0).values,
         ])
-        ic(aabb)
+        # aabb = torch.tensor([[-0.6732, -1.1929, -0.4606], [0.6732,  1.1929,  1.0512]], device=xyzs.device)
         return aabb
 
     def sample_occupied(self, cas, N):
@@ -454,7 +463,7 @@ class ContinuousAlphagrid(torch.nn.Module):
 
                         # cascading
                         for cas in range(self.cascade):
-                            cas_xyzs = self.coords2xyz(coords, cas)
+                            cas_xyzs = self.coords2xyz(coords, cas, conv=self.conv)
                             # query density
                             cas_norm = rf.normalize_coord(cas_xyzs)
                             sigmas = rf.compute_densityfeature(cas_norm).reshape(-1)
@@ -481,7 +490,7 @@ class ContinuousAlphagrid(torch.nn.Module):
                 indices = torch.cat([indices, occ_indices], dim=0)
                 coords = torch.cat([coords, occ_coords], dim=0)
                 # same below
-                cas_xyzs = self.coords2xyz(coords, cas)
+                cas_xyzs = self.coords2xyz(coords, cas, conv=self.conv)
                 # query density
                 cas_norm = rf.normalize_coord(cas_xyzs)
                 sigmas = rf.compute_densityfeature(cas_norm).reshape(-1)

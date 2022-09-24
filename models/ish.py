@@ -113,6 +113,18 @@ class FullISH(torch.nn.Module):
         return (self.max_degree+1)**2
 
     def forward(self, vecs, roughness):
+        base = eval_sh_bases(self.max_degree, vecs)
+        return base
+
+class FullISHScaled(torch.nn.Module):
+    def __init__(self, max_degree=1):
+        super().__init__()
+        self.max_degree = max_degree
+
+    def dim(self):
+        return (self.max_degree+1)**2
+
+    def forward(self, vecs, roughness):
         kappa = 1/(roughness+1e-8)
         base = eval_sh_bases_scaled(self.max_degree, vecs, kappa)
         return base

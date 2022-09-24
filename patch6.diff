@@ -1,0 +1,55 @@
+diff --git a/configs/field/tensorf.yaml b/configs/field/tensorf.yaml
+index f1075eb..661ca58 100644
+--- a/configs/field/tensorf.yaml
++++ b/configs/field/tensorf.yaml
+@@ -1,26 +1,38 @@
+ _partial_: True
+ _target_: fields.tensoRF.TensorVMSplit
+ distance_scale: 25
+-density_n_comp: 24
+-appearance_n_comp: 48
+-app_dim: 48
++density_n_comp: 16
++# density_n_comp: 24
++appearance_n_comp: 24
++app_dim: 24
+ step_ratio: 0.5
+ density_res_multi: 1
+ contract_space: False
+-smoothing: 0.25
+-# activation: 'softplus_shift'
++smoothing: 1.5
++activation: 'softplus_shift'
+ # activation: 'softplus'
+-activation: 'exp'
++# activation: 'exp'
+ # activation: 'relu_shift'
+-density_shift: -10
++interp_mode: bilinear
++init_mode: rand
++# init_mode: trig
++density_shift: -0
+ 
+ N_voxel_init: 2097156 # 128**3
++# N_voxel_init: 16777216 # 256**3
+ # N_voxel_init: 134217728 # 512**3
+-# N_voxel_final: 27000000 # 300**3
+ # N_voxel_init: 27000000 # 300**3
+-N_voxel_final: 134217728 # 512**3
++N_voxel_final: 27000000 # 300**3
++# N_voxel_final: 134217728 # 512**3
+ # N_voxel_final: 1073741824 # 512**3
+-upsamp_list: [4000,4000,5500,7000]
+-lr: 1e-2
++# upsamp_list: [2000,3000,4000,5500,7000]
++# upsamp_list: [4000,5500,7000,8000,9000]
++# upsamp_list: [4000,5500,7000,8000,9000]
++# upsamp_list: [7000,8000,9000]
++# upsamp_list: [14000,16000,18000]
++upsamp_list: [2000,3000,4000,5500,7000]
++# upsamp_list: [4000,4000,5500,7000]
++# upsamp_list: [] # 4000,4000,5500,7000]
++lr: 2e-2
+ lr_net: 1e-3
+ num_pretrain: 1000
+

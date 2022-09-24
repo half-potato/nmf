@@ -7,7 +7,6 @@ import utils
 class TensorBase(torch.nn.Module):
     def __init__(self, aabb, density_shift, activation, lr, lr_net, contract_space=False, distance_scale=25, num_pretrain=0):
         super().__init__()
-        self.register_buffer('aabb', aabb)
         self.lr = lr
         self.lr_net = lr_net
         self.activation = activation
@@ -15,7 +14,11 @@ class TensorBase(torch.nn.Module):
         self.density_shift = density_shift
         self.contract_space = contract_space
         self.distance_scale = distance_scale
-        self.set_register('aabbSize', self.aabb[1] - self.aabb[0])
+        self.set_aabb(aabb)
+
+    def set_aabb(self, aabb):
+        self.set_register('aabb', aabb)
+        self.set_register('aabbSize', aabb[1] - aabb[0])
         self.set_register('invaabbSize', 2.0/self.aabbSize)
         self.set_register('aabbDiag', torch.sqrt(torch.sum(torch.square(self.aabbSize))))
 
@@ -95,8 +98,8 @@ class TensorVoxelBase(TensorBase):
     def update_stepSize(self, grid_size):
         grid_size = torch.LongTensor(grid_size)
         print("grid size", grid_size)
-        print("density grid size", [int(self.density_res_multi*g) for g in grid_size])
         print("aabb", self.aabb.view(-1))
+
         self.set_register('grid_size', grid_size)
         self.set_register('units', self.aabbSize.to(self.grid_size.device) / (self.grid_size-1))
         # min is more accurate than mean

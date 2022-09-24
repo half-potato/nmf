@@ -1,0 +1,89 @@
+diff --git a/models/brdf.py b/models/brdf.py
+index eb68040..a0902be 100644
+--- a/models/brdf.py
++++ b/models/brdf.py
+@@ -264,7 +264,7 @@ class PBR(torch.nn.Module):
+         return spec_color
+ 
+ class MLPBRDF(torch.nn.Module):
+-    def __init__(self, in_channels, v_encoder=None, n_encoder=None, l_encoder=None, feape=6, featureC=128, num_layers=2,
++    def __init__(self, in_channels, v_encoder=None, n_encoder=None, l_encoder=None, feape=6, featureC=128, num_layers=2, dotpe=0,
+                  mul_ggx=False, activation='sigmoid', use_roughness=False, lr=1e-4, detach_roughness=False, shift=0):
+         super().__init__()
+ 
+@@ -272,7 +272,8 @@ class MLPBRDF(torch.nn.Module):
+         self.use_roughness = use_roughness
+         self.detach_roughness = detach_roughness
+         self.mul_ggx = mul_ggx
+-        self.in_mlpC = 2*feape*in_channels + in_channels + (1 if use_roughness else 0) + 6
++        self.dotpe = dotpe
++        self.in_mlpC = 2*feape*in_channels + in_channels + (1 if use_roughness else 0) + 6 + 2*dotpe*6
+         # self.in_mlpC = 2*feape*in_channels + (1 if use_roughness else 0) + 6
+         self.v_encoder = v_encoder
+         self.n_encoder = n_encoder
+@@ -308,6 +309,10 @@ class MLPBRDF(torch.nn.Module):
+ 
+     def init_weights(self, m):
+         if isinstance(m, torch.nn.Linear):
++            # if m.weight.shape[0] <= 4:
++            #     torch.nn.init.constant_(m.weight, np.sqrt(2) / m.weight.shape[1])
++            # else:
++            #     torch.nn.init.xavier_uniform_(m.weight, gain=np.sqrt(2))
+             torch.nn.init.xavier_uniform_(m.weight, gain=np.sqrt(2))
+ 
+     def activation(self, x):
+@@ -315,13 +320,14 @@ class MLPBRDF(torch.nn.Module):
+         # ic(x, y)
+         # return y
+         col = torch.sigmoid(x[..., :3])
+-        brightness = torch.exp(x[..., 3:4]).clamp(max=1000)
++        brightness = torch.exp(x[..., 3:4].clip(min=-10, max=10))
+         return col * brightness
+         # return torch.sigmoid(x)
+         # return F.softplus(x+1.0)/2
+ 
+     def forward(self, incoming_light, V, L, N,
+-            features, roughness, matprop, mask, ray_mask):
++            features, roughness, matprop,
++            mask, ray_mask):
+         # V: (n, 3)-viewdirs, the outgoing light direction
+         # L: (n, m, 3) incoming light direction. bounce_rays
+         # N: (n, 1, 3) outward normal
+@@ -347,8 +353,11 @@ class MLPBRDF(torch.nn.Module):
+         indata = [LdotN, torch.sqrt((1-LdotN**2).clip(min=1e-8, max=1)),
+                   VdotN, torch.sqrt((1-LdotN**2).clip(min=1e-8, max=1)),
+                   NdotH, torch.sqrt((1-NdotH**2).clip(min=1e-8, max=1))]
+-        # indata = [safemath.arccos(LdotN.reshape(-1, 1)), safemath.arccos(VdotN.reshape(-1, 1)), safemath.arccos(NdotH.reshape(-1, 1))]
+         indata = [d.reshape(-1, 1) for d in indata]
++        if self.dotpe > 0:
++            dotvals = torch.cat(indata, dim=-1)
++            indata += [safemath.integrated_pos_enc((dotvals * torch.pi, 0.20*torch.ones_like(dotvals)), 0, self.dotpe)]
++        # indata = [safemath.arccos(LdotN.reshape(-1, 1)), safemath.arccos(VdotN.reshape(-1, 1)), safemath.arccos(NdotH.reshape(-1, 1))]
+         indata += [features]
+ 
+         # ic(indata)
+@@ -369,6 +378,10 @@ class MLPBRDF(torch.nn.Module):
+         if self.l_encoder is not None:
+             indata += [self.l_encoder(L, eroughness).reshape(B, -1), L]
+ 
++        # ic("H")
++        # for d in indata:
++        #     ic(d.shape)
++
+         mlp_in = torch.cat(indata, dim=-1)
+         raw_mlp_out = self.mlp(mlp_in)
+         mlp_out = self.activation(raw_mlp_out)
+@@ -377,7 +390,10 @@ class MLPBRDF(torch.nn.Module):
+         if self.mul_ggx:
+             D = ggx_dist(NdotH, roughness.reshape(-1, 1))
+             LdotN = LdotN*D
++        LdotN = LdotN.clip(min=0)
+ 
+-        spec_color = row_mask_sum(incoming_light * ref_weight * LdotN, ray_mask) / row_mask_sum(LdotN, ray_mask)
++        weight = ref_weight# * LdotN
++        spec_color = row_mask_sum(incoming_light * weight, ray_mask) / row_mask_sum(weight, ray_mask).clip(min=1e-8).mean(dim=-1, keepdim=True)
++        brdf_color = row_mask_sum(weight, ray_mask) / row_mask_sum(weight, ray_mask).clip(min=1e-8).mean(dim=-1, keepdim=True)
+ 
+-        return spec_color
++        return spec_color, brdf_color
+

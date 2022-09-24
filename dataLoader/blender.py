@@ -92,6 +92,7 @@ class BlenderDataset(Dataset):
         self.image_paths = []
         self.poses = []
         self.all_rays = []
+        self.all_norms = []
         self.all_rgbs = []
         self.all_masks = []
         self.all_depth = []
@@ -136,11 +137,14 @@ class BlenderDataset(Dataset):
             # img = img.clip(0, 1)
             self.all_rgbs += [img]
 
+            # self.all_norms += [self.get_normal(i).reshape(-1, 3)]
+
 
             self.all_rays += [rays]  # (h*w, 6)
 
 
         self.poses = torch.stack(self.poses)
+        # self.all_norms = torch.cat(self.all_norms)
         if not self.is_stack:
             self.all_rays = torch.cat(self.all_rays, 0)  # (len(self.meta['frames])*h*w, 3)
             self.all_rgbs = torch.cat(self.all_rgbs, 0)  # (len(self.meta['frames])*h*w, 3)

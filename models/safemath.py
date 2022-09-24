@@ -68,7 +68,7 @@ def integrated_pos_enc(x_coord, min_deg, max_deg, diag=True):
   if diag:
     x, x_cov_diag = x_coord
     device = x.device
-    scales = torch.tensor([2**i for i in range(min_deg, max_deg)], device=device)
+    scales = torch.tensor([2**(i-1) for i in range(min_deg, max_deg)], device=device)
     shape = list(x.shape[:-1]) + [-1]
     y = torch.reshape(x[..., None, :] * scales[:, None], shape)
     y_var = torch.reshape(x_cov_diag[..., None, :] * scales[:, None]**2, shape)

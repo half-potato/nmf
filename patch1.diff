@@ -1,0 +1,229 @@
+diff --git a/fields/tensoRF.py b/fields/tensoRF.py
+index b016388..6ccd992 100644
+--- a/fields/tensoRF.py
++++ b/fields/tensoRF.py
+@@ -5,6 +5,7 @@ from icecream import ic
+ from models.grid_sample_Cinf import grid_sample
+ import random
+ import math
++from models import safemath
+ 
+ # here is original grid sample derivative for testing
+ # def grid_sample(*args, smoothing, **kwargs):
+@@ -15,15 +16,16 @@ def d_softplus(x, beta=1.0, shift=-10):
+ 
+ 
+ class TensorVMSplit(TensorVoxelBase):
+-    def __init__(self, aabb, *args, smoothing, **kargs):
++    def __init__(self, aabb, interp_mode = 'bilinear', init_mode='trig', *args, smoothing, **kargs):
+         super(TensorVMSplit, self).__init__(aabb, *args, **kargs)
+ 
+         # num_levels x num_outputs
+-        # self.interp_mode = 'bilinear'
+-        self.interp_mode = 'bicubic'
++        self.interp_mode = interp_mode
++        self.init_mode = init_mode
++        # self.interp_mode = 'bicubic'
+         self.align_corners = True
+ 
+-        self.density_plane, self.density_line = self.init_one_svd(self.density_n_comp, [int(self.density_res_multi*g) for g in self.grid_size], 0.1, -0)
++        self.density_plane, self.density_line = self.init_one_svd(self.density_n_comp, self.grid_size, 0.1, -0)
+         self.app_plane, self.app_line = self.init_one_svd(self.app_n_comp, self.grid_size, 0.1, 0)
+         m = sum(self.app_n_comp)
+         self.basis_mat = torch.nn.Linear(m, self.app_dim, bias=False)
+@@ -42,39 +44,45 @@ class TensorVMSplit(TensorVoxelBase):
+             mat_id_0, mat_id_1 = self.matMode[i]
+             pos_vals = xy.reshape(1, 1, grid_size[mat_id_0], grid_size[mat_id_1])
+             # freqs = torch.arange(n_component[i]//2).reshape(1, -1, 1, 1)
+-            freqs = 2**torch.arange(n_component[i]//2-1).reshape(1, -1, 1, 1)
++            n_degs = n_component[i]//2
++            freqs = 2**torch.arange(n_degs-1).reshape(1, -1, 1, 1)
+             freqs = torch.cat([torch.zeros_like(freqs[:, 0:1]), freqs], dim=1)
+             line_pos_vals = torch.linspace(-1, 1, grid_size[vec_id]).reshape(1, 1, -1, 1)
+             scales = scale * 1/(freqs+1)
+             # scales[:, scales.shape[1]//2:] = 0
+-            plane_coef_v = torch.nn.Parameter(
+-                torch.cat([
+-                    scales * torch.sin(freqs * pos_vals * math.pi),
+-                    scales * torch.cos(freqs * pos_vals * math.pi),
+-                ], dim=1)
+-                # scale * torch.randn((1, n_component[i], grid_size[mat_id_1], grid_size[mat_id_0]))
+-                # scale * torch.rand((1, n_component[i], grid_size[mat_id_1], grid_size[mat_id_0])) + shift/sum(n_component)
+-            )
+-            line_coef_v = torch.nn.Parameter(
+-                torch.cat([
+-                    scales * torch.sin(freqs * line_pos_vals * math.pi),
+-                    scales * torch.cos(freqs * line_pos_vals * math.pi),
+-                ], dim=1)
+-                # scale * torch.randn((1, n_component[i], grid_size[vec_id], 1))
+-                # scale * torch.rand((1, n_component[i], grid_size[vec_id], 1))
+-            )
+-            plane_coef.append(plane_coef_v)
+-            line_coef.append(line_coef_v)
++            match self.init_mode:
++                case 'trig':
++                    plane_coef_v = torch.cat([
++                        scales * torch.sin(freqs * pos_vals * math.pi),
++                        scales * torch.cos(freqs * pos_vals * math.pi),
++                    ], dim=1)
++                    line_coef_v = torch.cat([
++                        scales * torch.sin(freqs * line_pos_vals * math.pi),
++                        scales * torch.cos(freqs * line_pos_vals * math.pi),
++                    ], dim=1)
++                case 'integrated':
++                    b = safemath.integrated_pos_enc((pos_vals.reshape(-1, 1)*torch.pi, torch.zeros_like(pos_vals).reshape(-1, 1)), 0, n_degs)
++                    b = b.T.reshape(1, b.shape[1], *pos_vals.shape[-2:])
++
++                    a = safemath.integrated_pos_enc((line_pos_vals.reshape(-1, 1)*torch.pi, torch.zeros_like(line_pos_vals).reshape(-1, 1)), 0, n_degs)
++                    a = a.T.reshape(1, a.shape[1], *line_pos_vals.shape[-2:])
++                    plane_coef_v = b
++                    line_coef_v = a
++                case 'rand':
++                    plane_coef_v = scale * torch.randn((1, n_component[i], grid_size[mat_id_1], grid_size[mat_id_0]))
++                    line_coef_v = scale * torch.randn((1, n_component[i], grid_size[vec_id], 1))
++            plane_coef.append(torch.nn.Parameter(plane_coef_v))
++            line_coef.append(torch.nn.Parameter(line_coef_v))
+ 
+         return torch.nn.ParameterList(plane_coef), torch.nn.ParameterList(line_coef)
+     
+     
+     def get_optparam_groups(self):
+         grad_vars = [
+-            {'params': self.density_line, 'lr': self.lr}, {'params': self.density_plane, 'lr': self.lr},
+-            {'params': self.app_line, 'lr': self.lr}, {'params': self.app_plane, 'lr': self.lr},
+-            {'params': self.basis_mat.parameters(), 'lr': self.lr_net},
+-            {'params': self.dbasis_mat.parameters(), 'lr': self.lr_net},
++            {'params': self.density_line, 'lr': self.lr, 'betas': [0.9, 0.999]}, {'params': self.density_plane, 'lr': self.lr, 'betas': [0.9, 0.999]},
++            {'params': self.app_line, 'lr': self.lr, 'betas': [0.9, 0.999]}, {'params': self.app_plane, 'lr': self.lr, 'betas': [0.9, 0.999]},
++            {'params': self.basis_mat.parameters(), 'lr': self.lr_net, 'betas': [0.9, 0.999]},
++            {'params': self.dbasis_mat.parameters(), 'lr': self.lr_net, 'betas': [0.9, 0.999]},
+         ]
+         return grad_vars
+ 
+@@ -136,6 +144,8 @@ class TensorVMSplit(TensorVoxelBase):
+         sigma_feature = torch.cat(sigma_feature, dim=0).T
+         # ic(sigma_feature[0], sigma_feature[0].sum())
+         sigma_feature = self.dbasis_mat(sigma_feature).squeeze(-1)
++        # ic(list(self.dbasis_mat.parameters()))
++        # sigma_feature = (sigma_feature).sum(dim=1).squeeze(-1)
+         # sigma_feature = sigma_feature.sum(dim=-1)
+         return self.feature2density(sigma_feature)
+ 
+@@ -145,7 +155,6 @@ class TensorVMSplit(TensorVoxelBase):
+         plane_coef_point,line_coef_point = [],[]
+         # plane_kerns = [self.norm_plane_kernels[0][0:1]]
+         # line_kerns = [self.norm_line_kernels[0][0:1]]
+-        plane_kerns, line_kerns = [[None]], [[None]]
+         for idx_plane in range(len(self.app_plane)):
+             plane_coef_point.append(
+                     F.grid_sample(self.app_plane[idx_plane], coordinate_plane[[idx_plane]], mode=self.interp_mode,
+@@ -173,55 +182,56 @@ class TensorVMSplit(TensorVoxelBase):
+ 
+     @torch.no_grad()
+     def upsample_volume_grid(self, res_target):
+-        density_target = [int(self.density_res_multi*g) for g in res_target]
+         self.app_plane, self.app_line = self.up_sampling_VM(self.app_plane, self.app_line, res_target)
+-        self.density_plane, self.density_line = self.up_sampling_VM(self.density_plane, self.density_line, density_target)
++        self.density_plane, self.density_line = self.up_sampling_VM(self.density_plane, self.density_line, res_target)
+ 
+         self.update_stepSize(res_target)
+-        print(f'upsampling to {res_target}. upsampling density to {density_target}')
++        print(f'upsampling to {res_target}. upsampling density to {res_target}')
+ 
+     @torch.no_grad()
+-    def shrink(self, new_aabb):
+-        # the new_aabb is in normalized coordinates, from -1 to 1
++    def shrink(self, new_aabb, mask_gridsize):
+         print("====> shrinking ...")
+         xyz_min, xyz_max = new_aabb
+-        # t_l, b_r = xyz_min * self.grid_size // 2, xyz_max * self.grid_size // 2 - 1
+         t_l, b_r = (xyz_min - self.aabb[0]) / self.units, (xyz_max - self.aabb[0]) / self.units
+         # print(new_aabb, self.aabb)
+-        # print(t_l, b_r,self.alphaMask.alpha_volume.shape)
+-        dt_l, db_r = torch.floor(t_l*self.density_res_multi).long(), torch.ceil(b_r*self.density_res_multi).long() + 1
+-        t_l, b_r = torch.floor(t_l).long(), torch.ceil(b_r).long() + 1
++        ic(t_l, b_r)
++        t_l, b_r = torch.round(torch.round(t_l)).long(), torch.round(b_r).long() + 1
+         b_r = torch.stack([b_r, self.grid_size]).amin(0)
+-        db_r = torch.stack([db_r, (self.density_res_multi*self.grid_size).long()]).amin(0)
+-
+-        # update aabb
+-        l1 = t_l / self.grid_size
+-        l2 = b_r / self.grid_size
+-        adj_aabb = torch.stack([
+-            l1 * self.aabb[1] + (1-l1) * self.aabb[0],
+-            l2 * self.aabb[1] + (1-l2) * self.aabb[0],
+-        ], dim=0)
+-        ic(db_r, dt_l, b_r, t_l, xyz_min, xyz_max, self.units, self.aabb, adj_aabb, self.density_line[0].shape, self.grid_size)
+-        self.aabb = adj_aabb
++        t_l = t_l.clip(min=0)
++        ic(t_l, b_r)
++
++        # if not torch.all(mask_gridsize == self.grid_size):
++        t_l_r, b_r_r = t_l / (self.grid_size-1), (b_r-1) / (self.grid_size-1)
++        correct_aabb = torch.zeros_like(new_aabb)
++        correct_aabb[0] = (1-t_l_r)*self.aabb[0] + t_l_r*self.aabb[1]
++        correct_aabb[1] = (1-b_r_r)*self.aabb[0] + b_r_r*self.aabb[1]
++        print("aabb", new_aabb, "\ncorrect aabb", correct_aabb)
++        new_aabb = correct_aabb
++        if torch.equal(new_aabb, self.aabb):
++            return
+ 
+         for i in range(len(self.vecMode)):
+             mode0 = self.vecMode[i]
+             self.density_line[i] = torch.nn.Parameter(
+-                self.density_line[i].data[...,dt_l[mode0]:db_r[mode0],:]
++                self.density_line[i].data[...,t_l[mode0]:b_r[mode0],:]
+             )
+             self.app_line[i] = torch.nn.Parameter(
+                 self.app_line[i].data[...,t_l[mode0]:b_r[mode0],:]
+             )
+             mode0, mode1 = self.matMode[i]
+             self.density_plane[i] = torch.nn.Parameter(
+-                self.density_plane[i].data[...,dt_l[mode1]:db_r[mode1],dt_l[mode0]:db_r[mode0]]
++                self.density_plane[i].data[...,t_l[mode1]:b_r[mode1],t_l[mode0]:b_r[mode0]]
+             )
+             self.app_plane[i] = torch.nn.Parameter(
+                 self.app_plane[i].data[...,t_l[mode1]:b_r[mode1],t_l[mode0]:b_r[mode0]]
+             )
++            # ic(self.density_plane[i].data.shape)
++            # ic(self.density_line[i].data.shape)
+ 
+ 
+         newSize = b_r - t_l
++        ic(newSize)
++        self.set_aabb(new_aabb)
+         self.update_stepSize((newSize[0], newSize[1], newSize[2]))
+
+
+diff --git a/models/bg_modules.py b/models/bg_modules.py
+index 115b62f..c341adb 100644
+--- a/models/bg_modules.py
++++ b/models/bg_modules.py
+@@ -82,7 +82,7 @@ class CubeUnwrap(torch.nn.Module):
+ 
+ class HierarchicalCubeMap(torch.nn.Module):
+     def __init__(self, bg_resolution=512, num_levels=1, featureC=128, activation='identity', power=4,
+-                 stds = [1, 2, 4, 8], betas=[0.9, 0.99], mipbias=+0.5, interp_pyramid=True, lr=0.15, mipbias_lr=1e-3, mipnoise=0.5, learnable_bias=True):
++                 stds = [1, 2, 4, 8], betas=[0.9, 0.99], mipbias=+0.5, init_val=-2, interp_pyramid=True, lr=0.15, mipbias_lr=1e-3, mipnoise=0.5, learnable_bias=True):
+         super().__init__()
+         self.num_levels = num_levels
+         self.interp_pyramid = interp_pyramid
+@@ -114,7 +114,7 @@ class HierarchicalCubeMap(torch.nn.Module):
+         self.bg_mats = nn.ParameterList([
+             # nn.Parameter(0.5 * torch.randn((1, 6, bg_resolution // self.power**i , bg_resolution // self.power**i, 3)) / (self.num_levels - i))
+             # nn.Parameter(-0.5 * torch.ones((1, 6, bg_resolution // self.power**i , bg_resolution // self.power**i, 3)) / (self.num_levels - i))
+-            nn.Parameter(0.1 * torch.ones((1, 6, bg_resolution // self.power**i , bg_resolution // self.power**i, 3)) / (self.num_levels - i))
++            nn.Parameter(init_val * torch.ones((1, 6, bg_resolution // self.power**i , bg_resolution // self.power**i, 3)) / (self.num_levels - i))
+             for i in range(num_levels-1, -1, -1)])
+         # self.activation_fn = torch.nn.Softplus(beta=3)
+ 
+@@ -135,7 +135,7 @@ class HierarchicalCubeMap(torch.nn.Module):
+         elif self.activation == 'clip':
+             return x.clip(min=1e-3)
+         else:
+-            return torch.exp(x-2).clip(min=0.01, max=1000)
++            return torch.exp(x).clip(min=0.01, max=1000)
+ 
+     def calc_weight(self, mip):
+         # return 1/2**(self.num_levels-mip)
