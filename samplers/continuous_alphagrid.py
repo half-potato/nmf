@@ -308,9 +308,10 @@ class ContinuousAlphagrid(torch.nn.Module):
         xyzs = 2 * coords.float() / (self.grid_size - 1) - 1 # [N, 3] in [-1, 1]
 
         # cascading
-        bound = min(2 ** cas, self.bound)
         if self.disable_cascade:
             bound = self.bound
+        else:
+            bound = min(2 ** cas, self.bound)
         half_grid_size = bound / self.grid_size
         # scale to current cascade's resolution
         cas_xyzs = xyzs * (bound - half_grid_size)

@@ -592,78 +592,77 @@ class TensorNeRF(torch.nn.Module):
                 # bounce mask says which of the sampled points has greater than 0 rays
                 # ray mask assumes that each of the bounce mask points has num_roughness_rays and masks out rays from each point according to the limit per a ray
 
-                if bounce_mask.any():
+                ray_xyz = xyz_sampled[full_bounce_mask[ray_valid]][..., :3].reshape(-1, 1, 3).expand(-1, num_roughness_rays, 3)
+                if bounce_mask.any() and ray_mask.any() and ray_xyz.shape[0] == ray_mask.shape[0]:
                     # decide how many bounces to calculate
                     brefdirs = refdirs[bounce_mask].reshape(-1, 1, 3)
                     # add noise to simulate roughness
                     outward = L[bounce_mask]
                     noise_rays, mipval = self.brdf_sampler.sample(num_roughness_rays, brefdirs, V[bounce_mask], outward, roughness[bounce_mask]**2, ray_mask)
                     bounce_rays = torch.cat([
-                        xyz_sampled[full_bounce_mask[ray_valid]][..., :3].reshape(-1, 1, 3).expand(-1, num_roughness_rays, 3)[ray_mask],
+                        ray_xyz[ray_mask],
                         noise_rays,
                         # rays_up[full_bounce_mask].reshape(-1, 1, 3).expand(noise_rays.shape)
                     ], dim=-1)
                     n = bounce_rays.shape[0]
                     D = bounce_rays.shape[-1]
-                    if n > 0:
+                    if recur <= 0 and self.world_bounces > 0:
+                        norm_ray_origins = self.rf.normalize_coord(bounce_rays[..., :3])
+                        # vis_mask takes in each outgoing ray and predicts whether it will terminate at the background
+                        vis_mask = self.visibility_module.mask(norm_ray_origins.reshape(-1, 3), bounce_rays[:, 3:6].reshape(-1, 3), self.world_bounces, full_bounce_mask, ray_mask, weight)
+                        # eps = 5e-3
+                        # vis_mask = ((bounce_rays[..., 0] < eps) & (bounce_rays[..., 1] > -eps)) & (bounce_rays.abs().min(dim=1).values < eps)
+                        incoming_light = torch.zeros((n, 3), device=device)
+                        # for high sigvis, this implies that the ray terminates and needs to be rendered fully
+                        debug[full_bounce_mask] += row_mask_sum(vis_mask.float().reshape(-1, 1), ray_mask).expand(-1, 3)
 
-                        if recur <= 0 and self.world_bounces > 0:
-                            norm_ray_origins = self.rf.normalize_coord(bounce_rays[..., :3])
-                            # vis_mask takes in each outgoing ray and predicts whether it will terminate at the background
-                            vis_mask = self.visibility_module.mask(norm_ray_origins.reshape(-1, 3), bounce_rays[:, 3:6].reshape(-1, 3), self.world_bounces, full_bounce_mask, ray_mask, weight)
-                            # eps = 5e-3
-                            # vis_mask = ((bounce_rays[..., 0] < eps) & (bounce_rays[..., 1] > -eps)) & (bounce_rays.abs().min(dim=1).values < eps)
-                            incoming_light = torch.zeros((n, 3), device=device)
-                            # for high sigvis, this implies that the ray terminates and needs to be rendered fully
-                            debug[full_bounce_mask] += row_mask_sum(vis_mask.float().reshape(-1, 1), ray_mask).expand(-1, 3)
-
-                            if vis_mask.sum() > 0:
-                                # ic(bounce_rays.reshape(-1, D)[vis_mask].shape, mipval.reshape(-1)[vis_mask].shape)
-                                # with torch.no_grad():
-                                incoming_data = self(bounce_rays.reshape(-1, D)[vis_mask], focal, recur=recur+1, white_bg=False,
-                                                     start_mipval=mipval.reshape(-1)[vis_mask], override_near=0.025, is_train=is_train,
-                                                     ndc_ray=ndc_ray, N_samples=N_samples, tonemap=False)
-                                # if not is_train:
-                                #     ic(incoming_data['depth_map'].max())
-                                incoming_light[vis_mask] = incoming_data['rgb_map']
-                                incoming_light[~vis_mask] = self.render_just_bg(bounce_rays.reshape(-1, D)[~vis_mask], mipval.reshape(-1)[~vis_mask])
-                            else:
-                                incoming_light = self.render_just_bg(bounce_rays.reshape(-1, D), mipval.reshape(-1))
+                        if vis_mask.sum() > 0:
+                            # ic(bounce_rays.reshape(-1, D)[vis_mask].shape, mipval.reshape(-1)[vis_mask].shape)
+                            # with torch.no_grad():
+                            incoming_data = self(bounce_rays.reshape(-1, D)[vis_mask], focal, recur=recur+1, white_bg=False,
+                                                 start_mipval=mipval.reshape(-1)[vis_mask], override_near=0.025, is_train=is_train,
+                                                 ndc_ray=ndc_ray, N_samples=N_samples, tonemap=False)
+                            # if not is_train:
+                            #     ic(incoming_data['depth_map'].max())
+                            incoming_light[vis_mask] = incoming_data['rgb_map']
+                            incoming_light[~vis_mask] = self.render_just_bg(bounce_rays.reshape(-1, D)[~vis_mask], mipval.reshape(-1)[~vis_mask])
                         else:
                             incoming_light = self.render_just_bg(bounce_rays.reshape(-1, D), mipval.reshape(-1))
+                    else:
+                        incoming_light = self.render_just_bg(bounce_rays.reshape(-1, D), mipval.reshape(-1))
 
-                        # self.brdf_sampler.update(bounce_rays[..., :3].reshape(-1, 3), mipval.reshape(-1), incoming_light.reshape(-1, 3))
-                        # miplevel = self.bg_module.sa2mip(bounce_rays[..., 3:6], mipval)
-                        # debug[full_bounce_mask][..., 0] += miplevel.mean(dim=1) / (self.bg_module.max_mip-1)
-                        
-                        tinted_ref_rgb, brdf_rgb = self.brdf(incoming_light,
-                                V[bounce_mask], bounce_rays[..., 3:6], outward.reshape(-1, 1, 3),
-                                app_features[bounce_mask], roughness[bounce_mask], matprop,
-                                bounce_mask, ray_mask)
-                        # ic(ray_mask.sum(dim=-1).float().mean(), ray_mask.shape)
-                        # s = incoming_light.max(dim=1).values
+                    # self.brdf_sampler.update(bounce_rays[..., :3].reshape(-1, 3), mipval.reshape(-1), incoming_light.reshape(-1, 3))
+                    # miplevel = self.bg_module.sa2mip(bounce_rays[..., 3:6], mipval)
+                    # debug[full_bounce_mask][..., 0] += miplevel.mean(dim=1) / (self.bg_module.max_mip-1)
+                    
+                    tinted_ref_rgb, brdf_rgb = self.brdf(incoming_light,
+                            V[bounce_mask], bounce_rays[..., 3:6], outward.reshape(-1, 1, 3),
+                            app_features[bounce_mask], roughness[bounce_mask], matprop,
+                            bounce_mask, ray_mask)
+                    # ic(ray_mask.sum(dim=-1).float().mean(), ray_mask.shape)
+                    # s = incoming_light.max(dim=1).values
 
-                        # if not is_train:
-                        #     plt.style.use('dark_background')
-                        #     plt.scatter(self.brdf_sampler.angs[:100, 0], self.brdf_sampler.angs[:100, 1], c=incoming_light.clip(0, 1).detach().cpu()[0])
-                        #     plt.show()
+                    # if not is_train:
+                    #     plt.style.use('dark_background')
+                    #     plt.scatter(self.brdf_sampler.angs[:100, 0], self.brdf_sampler.angs[:100, 1], c=incoming_light.clip(0, 1).detach().cpu()[0])
+                    #     plt.show()
 
-                        # s = incoming_light[:, 0]
-                        s = row_mask_sum(incoming_light.detach(), ray_mask) / (ray_mask.sum(dim=1)+1e-8)[..., None]
-                        # debug[full_bounce_mask] += s# / (s+1)
-                        # ic(tint.mean(dim=0), tinted_ref_rgb.mean(dim=0), incoming_light.mean(dim=0))
-                        # debug[full_bounce_mask] += tint[bounce_mask]
-                        # debug[full_bounce_mask] += 1
-                        # reflect_rgb[bounce_mask] = tint[bounce_mask] * tinted_ref_rgb
-                        reflect_rgb[bounce_mask] = tint[bounce_mask][..., 0:1] * tinted_ref_rgb
-                        # ic(tint.mean(dim=0), tinted_ref_rgb.mean(dim=0), s.mean(dim=0))
-                        # reflect_rgb[bounce_mask] = tint[bounce_mask] * s
-                        # reflect_rgb[bounce_mask] = tinted_ref_rgb
-                        # reflect_rgb[bounce_mask] = s
+                    # s = incoming_light[:, 0]
+                    s = row_mask_sum(incoming_light.detach(), ray_mask) / (ray_mask.sum(dim=1)+1e-8)[..., None]
+                    # debug[full_bounce_mask] += s# / (s+1)
+                    # ic(tint.mean(dim=0), tinted_ref_rgb.mean(dim=0), incoming_light.mean(dim=0))
+                    # debug[full_bounce_mask] += tint[bounce_mask]
+                    # debug[full_bounce_mask] += 1
+                    # reflect_rgb[bounce_mask] = tint[bounce_mask] * tinted_ref_rgb
+                    reflect_rgb[bounce_mask] = tint[bounce_mask][..., 0:1] * tinted_ref_rgb
+                    # ic(tint.mean(dim=0), tinted_ref_rgb.mean(dim=0), s.mean(dim=0))
+                    # reflect_rgb[bounce_mask] = tint[bounce_mask] * s
+                    # reflect_rgb[bounce_mask] = tinted_ref_rgb
+                    # reflect_rgb[bounce_mask] = s
 
-                        # m = full_bounce_mask.sum(dim=1) > 0
-                        # LOGGER.log_rays(rays_chunk[m].reshape(-1, D), recur, dict(depth_map=depth_map.detach()[m]))
-                        # LOGGER.log_rays(bounce_rays.reshape(-1, D), recur+1, reflect_data)
+                    # m = full_bounce_mask.sum(dim=1) > 0
+                    # LOGGER.log_rays(rays_chunk[m].reshape(-1, D), recur, dict(depth_map=depth_map.detach()[m]))
+                    # LOGGER.log_rays(bounce_rays.reshape(-1, D), recur+1, reflect_data)
                 if inv_full_bounce_mask.any():
                     if self.ref_module is not None:
                         # compute other reflections using ref module
@@ -736,7 +735,7 @@ class TensorNeRF(torch.nn.Module):
                 LOGGER.log_norms_n_rays(xyz_sampled[papp_mask], v_world_normal[papp_mask], weight[app_mask])
                 backwards_rays_loss = torch.matmul(viewdirs[ray_valid].reshape(-1, 1, 3).detach(), p_world_normal.reshape(-1, 3, 1)).reshape(pweight.shape).clamp(min=0)**2
                 pweight_d = pweight.detach()
-                debug[ray_valid] = backwards_rays_loss.reshape(-1, 1).expand(-1, 3)
+                # debug[ray_valid] = backwards_rays_loss.reshape(-1, 1).expand(-1, 3)
                 debug_map = (weight[..., None]*debug).sum(dim=1)
             output['depth_map'] = depth_map.detach().cpu()
             output['world_normal_map'] = world_normal_map.detach().cpu()

@@ -12,6 +12,7 @@ smoothing: 0.5
 activation: 'softplus_shift'
 # activation: 'softplus'
 # activation: 'relu_shift'
+dbasis: False
 init_mode: rand
 interp_mode: bilinear
 # init_mode: trig

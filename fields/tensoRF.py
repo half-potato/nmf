@@ -16,12 +16,13 @@ def d_softplus(x, beta=1.0, shift=-10):
 
 
 class TensorVMSplit(TensorVoxelBase):
-    def __init__(self, aabb, interp_mode = 'bilinear', init_mode='trig', *args, smoothing, **kargs):
+    def __init__(self, aabb, interp_mode = 'bilinear', dbasis=True, init_mode='trig', *args, smoothing, **kargs):
         super(TensorVMSplit, self).__init__(aabb, *args, **kargs)
 
         # num_levels x num_outputs
         self.interp_mode = interp_mode
         self.init_mode = init_mode
+        self.dbasis = dbasis
         # self.interp_mode = 'bicubic'
         self.align_corners = True
 
@@ -143,9 +144,10 @@ class TensorVMSplit(TensorVoxelBase):
         # return self.dbasis_mat(sigma_feature.reshape(-1, 1)).reshape(-1)
         sigma_feature = torch.cat(sigma_feature, dim=0).T
         # ic(sigma_feature[0], sigma_feature[0].sum())
-        sigma_feature = self.dbasis_mat(sigma_feature).squeeze(-1)
-        # ic(list(self.dbasis_mat.parameters()))
-        # sigma_feature = (sigma_feature).sum(dim=1).squeeze(-1)
+        if self.dbasis:
+            sigma_feature = self.dbasis_mat(sigma_feature).squeeze(-1)
+        else:
+            sigma_feature = (sigma_feature).sum(dim=1).squeeze(-1)
         # sigma_feature = sigma_feature.sum(dim=-1)
         return self.feature2density(sigma_feature)
 

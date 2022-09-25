@@ -11,7 +11,7 @@ class NaiveVisCache(torch.nn.Module):
         self.grid_size = grid_size
         self.bound = bound
         self.midpoint = 128
-        self.jump = 1
+        self.jump = 4
         cache = (self.midpoint) * torch.ones((self.grid_size, self.grid_size, self.grid_size, 6), dtype=torch.uint8)
         self.register_buffer('cache', cache)
 
