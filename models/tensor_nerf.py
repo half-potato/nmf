@@ -46,7 +46,7 @@ class TensorNeRF(torch.nn.Module):
                  max_normal_similarity=1, infinity_border=False, min_refraction=1.1, enable_refraction=True,
                  alphaMask_thres=0.001, rayMarch_weight_thres=0.0001, detach_inter=False, attach_normal_iter=0,
                  max_bounce_rays=4000, roughness_rays=3, bounce_min_weight=0.001, appdim_noise_std=0.0,
-                 world_bounces=0, selector=None, cold_start_bg_iters = 0, back_clip=0.2,
+                 world_bounces=0, selector=None, cold_start_bg_iters = 0, back_clip=0.2, max_recur_rays=5,
                  update_sampler_list=[5000], max_floater_loss=6, **kwargs):
         super(TensorNeRF, self).__init__()
         self.rf = rf(aabb=aabb)
@@ -69,6 +69,7 @@ class TensorNeRF(torch.nn.Module):
         else:
             self.tonemap = tonemap
 
+        self.max_recur_rays = max_recur_rays
         self.world_bounces = world_bounces
         self.back_clip = back_clip
         self.alphaMask = alphaMask
@@ -585,7 +586,7 @@ class TensorNeRF(torch.nn.Module):
                 reflect_rgb = tint * ref_col
                 debug[app_mask] += ref_col / (ref_col + 1)
             else:
-                num_roughness_rays = self.roughness_rays // 2 if recur > 0 else self.roughness_rays
+                num_roughness_rays = self.max_recur_rays if recur > 0 else self.roughness_rays
                 # compute which rays to reflect
                 bounce_mask, full_bounce_mask, inv_full_bounce_mask, ray_mask = self.selector(
                         app_mask, weight.detach(), VdotL, 1-roughness.detach(), num_roughness_rays)

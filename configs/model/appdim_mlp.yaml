@@ -6,14 +6,15 @@ arch:
   rayMarch_weight_thres: 0.0001
   max_recurs: 2
   roughness_rays: 200
+  max_recur_rays: 5
   infinity_border: False
   appdim_noise_std: 0.0
   world_bounces: 0
   # world_bounces: 2048000
   max_normal_similarity: 1 #0.87
-  cold_start_bg_iters: 000
-  attach_normal_iter: 0000
-  back_clip: 0.0
+  cold_start_bg_iters: 0
+  attach_normal_iter: 0
+  back_clip: 0.3
 
   detach_inter: False
   selector:
