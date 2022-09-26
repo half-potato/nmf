@@ -131,7 +131,6 @@ class TensorVMSplit(TensorVoxelBase):
         # return torch.where(mask1 & ~mask2, 99999999.0, 0.0)
 
         coordinate_plane, coordinate_line = self.coordinates(xyz_sampled)
-        sigma_feature = torch.zeros((xyz_sampled.shape[0],), device=xyz_sampled.device)
         sigma_feature = []
 
         for idx_plane in range(len(self.density_plane)):
@@ -142,30 +141,31 @@ class TensorVMSplit(TensorVoxelBase):
             sigma_feature.append(plane_coef_point * line_coef_point)
 
         # return self.dbasis_mat(sigma_feature.reshape(-1, 1)).reshape(-1)
-        sigma_feature = torch.cat(sigma_feature, dim=0).T
         # ic(sigma_feature[0], sigma_feature[0].sum())
         if self.dbasis:
+            sigma_feature = torch.cat(sigma_feature, dim=0).T
             sigma_feature = self.dbasis_mat(sigma_feature).squeeze(-1)
         else:
-            sigma_feature = (sigma_feature).sum(dim=1).squeeze(-1)
+            sigma_feature = sum(sigma_feature).sum(dim=0)
         # sigma_feature = sigma_feature.sum(dim=-1)
         return self.feature2density(sigma_feature)
 
 
     def compute_appfeature(self, xyz_sampled):
         coordinate_plane, coordinate_line = self.coordinates(xyz_sampled)
-        plane_coef_point,line_coef_point = [],[]
+        coefs = []
         # plane_kerns = [self.norm_plane_kernels[0][0:1]]
         # line_kerns = [self.norm_line_kernels[0][0:1]]
         for idx_plane in range(len(self.app_plane)):
-            plane_coef_point.append(
-                    F.grid_sample(self.app_plane[idx_plane], coordinate_plane[[idx_plane]], mode=self.interp_mode,
-                        align_corners=self.align_corners).view(-1, *xyz_sampled.shape[:1]))
-            line_coef_point.append(
-                    F.grid_sample(self.app_line[idx_plane], coordinate_line[[idx_plane]], mode=self.interp_mode,
-                        align_corners=self.align_corners).view(-1, *xyz_sampled.shape[:1]))
-        plane_coef_point, line_coef_point = torch.cat(plane_coef_point, dim=0), torch.cat(line_coef_point, dim=0)
-        return self.basis_mat((plane_coef_point * line_coef_point).T)
+            pc = F.grid_sample(self.app_plane[idx_plane], coordinate_plane[[idx_plane]], mode=self.interp_mode,
+                        align_corners=self.align_corners).view(-1, *xyz_sampled.shape[:1])
+            lc = F.grid_sample(self.app_line[idx_plane], coordinate_line[[idx_plane]], mode=self.interp_mode,
+                        align_corners=self.align_corners).view(-1, *xyz_sampled.shape[:1])
+            coefs.append(pc * lc)
+        coefs = torch.cat(coefs, dim=0).T
+        return self.basis_mat(coefs)
+        # plane_coef_point, line_coef_point = torch.cat(plane_coef_point, dim=0), torch.cat(line_coef_point, dim=0)
+        # return self.basis_mat((plane_coef_point * line_coef_point).T)
 
 
     @torch.no_grad()

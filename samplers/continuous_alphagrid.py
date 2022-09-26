@@ -388,10 +388,10 @@ class ContinuousAlphagrid(torch.nn.Module):
         self.density_grid[count == 0] = -1
         print(f'[mark untrained grid] {(count == 0).sum()} from {self.grid_size ** 3 * self.cascade}')
 
-    def check_schedule(self, iteration, rf):
+    def check_schedule(self, iteration, batch_mul, rf):
         if iteration % self.update_freq == 0:
             self.update(rf)
-        if iteration in self.shrink_iters:
+        if iteration in [i*batch_mul for i in self.shrink_iters]:
             new_aabb = self.get_bounds()
             rf.shrink(new_aabb, self.grid_size)
             # self.update(rf, init=True)

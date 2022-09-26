@@ -163,6 +163,7 @@ def reconstruction(args):
     else:
         mask = None
     trainingSampler = SimpleSampler(allrays.shape[0], params.batch_size)
+    batch_mul = 4096 // params.batch_size
 
 
     ortho_reg_weight = params.ortho_weight
@@ -256,13 +257,13 @@ def reconstruction(args):
     # with torch.autograd.detect_anomaly():
         for iteration in pbar:
 
-            if iteration < 50:
-                ray_idx, rgb_idx = trainingSampler.nextids(batch=params.batch_size//8)
-            elif iteration < 500:
-                ray_idx, rgb_idx = trainingSampler.nextids(batch=params.batch_size//4)
-            else:
-                ray_idx, rgb_idx = trainingSampler.nextids()
-            # ray_idx, rgb_idx = trainingSampler.nextids()
+            # if iteration < 50:
+            #     ray_idx, rgb_idx = trainingSampler.nextids(batch=params.batch_size//8)
+            # elif iteration < 500:
+            #     ray_idx, rgb_idx = trainingSampler.nextids(batch=params.batch_size//4)
+            # else:
+            #     ray_idx, rgb_idx = trainingSampler.nextids()
+            ray_idx, rgb_idx = trainingSampler.nextids()
 
             # patches = allrgbs[ray_idx].reshape(-1, args.bundle_size, args.bundle_size, 3)
             # plt.imshow(patches[0])
@@ -279,7 +280,7 @@ def reconstruction(args):
             with torch.cuda.amp.autocast(enabled=args.fp16):
             # if True:
                 data = renderer(rays_train, tensorf,
-                        keys = ['rgb_map', 'floater_loss', 'normal_loss', 'backwards_rays_loss', 'diffuse_reg', 'bounce_count', 'color_count', 'roughness', 'whole_valid', 'normal_map'],
+                        keys = ['rgb_map', 'floater_loss', 'normal_loss', 'backwards_rays_loss', 'diffuse_reg', 'roughness', 'whole_valid'] #, 'normal_map'],
                         focal=focal, output_alpha=alpha_train, chunk=params.batch_size, white_bg = white_bg, is_train=True, ndc_ray=ndc_ray)
 
                 # loss = torch.mean((rgb_map[:, 1, 1] - rgb_train[:, 1, 1]) ** 2)
@@ -316,13 +317,13 @@ def reconstruction(args):
 
                 if tensorf.visibility_module is not None:
                     pass
-                    if iteration % 1 == 0 and iteration > 400:
-                        # if iteration < 100 or iteration % 1000 == 0:
-                        if iteration % 500 == 0 and iteration < 5000:
-                            tensorf.init_vis_module()
-                            torch.cuda.empty_cache()
-                        else:
-                            tensorf.compute_visibility_loss(params.N_visibility_rays)
+                    # if iteration % 1 == 0 and iteration > 250:
+                    #     # if iteration < 100 or iteration % 1000 == 0:
+                    #     if iteration % 250 == 0 and iteration < 2000:
+                    #         tensorf.init_vis_module()
+                    #         torch.cuda.empty_cache()
+                    #     else:
+                    #         tensorf.compute_visibility_loss(params.N_visibility_rays)
 
                 if ortho_reg_weight > 0:
                     loss_reg = tensorf.rf.vector_comp_diffs()
@@ -361,8 +362,6 @@ def reconstruction(args):
             summary_writer.add_scalar('train/floater_loss', floater_loss.detach().item(), global_step=iteration)
             summary_writer.add_scalar('train/normal_loss', normal_loss.detach().item(), global_step=iteration)
             summary_writer.add_scalar('train/diffuse_loss', diffuse_reg.detach().item(), global_step=iteration)
-            summary_writer.add_scalar('train/color_count', data['color_count'].sum(), global_step=iteration)
-            summary_writer.add_scalar('train/bounce_count', data['bounce_count'], global_step=iteration)
 
             summary_writer.add_scalar('train/lr', list(optimizer.param_groups)[0]['lr'], global_step=iteration)
 
@@ -394,7 +393,7 @@ def reconstruction(args):
                 if args.save_often:
                     tensorf.save(f'{logfolder}/{args.expname}_{iteration:06d}.th', args.model.arch)
 
-            if tensorf.check_schedule(iteration):
+            if tensorf.check_schedule(iteration, batch_mul):
                 grad_vars = tensorf.get_optparam_groups()
                 optimizer, scheduler = init_optimizer(grad_vars)
                 # new_grad_vars = tensorf.get_optparam_groups()

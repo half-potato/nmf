@@ -108,9 +108,10 @@ class TensorVoxelBase(TensorBase):
         print("sampling step size: ", self.stepSize)
         print("sampling number: ", self.nSamples)
 
-    def check_schedule(self, iter):
-        if iter in self.upsamp_list:
-            i = self.upsamp_list.index(iter)
+    def check_schedule(self, iter, batch_mul):
+        upsamp_list = [i*batch_mul for i in self.upsamp_list]
+        if iter in upsamp_list:
+            i = upsamp_list.index(iter)
             n_voxels = self.N_voxel_list[i]
             reso_cur = utils.N_to_reso(n_voxels, self.aabb)
             # nSamples = min(args.nSamples, cal_n_samples(reso_cur,args.step_ratio/tensorf.rf.density_res_multi))

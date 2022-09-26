@@ -204,10 +204,10 @@ class TensorNeRF(torch.nn.Module):
         xyz = samps[inds[ind]]
         return xyz
 
-    def check_schedule(self, iter):
+    def check_schedule(self, iter, batch_mul):
         require_reassignment = False
-        require_reassignment |= self.sampler.check_schedule(iter, self.rf)
-        require_reassignment |= self.rf.check_schedule(iter)
+        require_reassignment |= self.sampler.check_schedule(iter, batch_mul, self.rf)
+        require_reassignment |= self.rf.check_schedule(iter, batch_mul)
         if require_reassignment:
             self.sampler.update(self.rf, init=True)
         if iter > self.cold_start_bg_iters:
@@ -610,7 +610,10 @@ class TensorNeRF(torch.nn.Module):
                     if recur <= 0 and self.world_bounces > 0:
                         norm_ray_origins = self.rf.normalize_coord(bounce_rays[..., :3])
                         # vis_mask takes in each outgoing ray and predicts whether it will terminate at the background
-                        vis_mask = self.visibility_module.mask(norm_ray_origins.reshape(-1, 3), bounce_rays[:, 3:6].reshape(-1, 3), self.world_bounces, full_bounce_mask, ray_mask, weight)
+                        if self.visibility_module is not None and self.visibility_module.is_initialized():
+                            vis_mask = self.visibility_module.mask(norm_ray_origins.reshape(-1, 3), bounce_rays[:, 3:6].reshape(-1, 3), self.world_bounces, full_bounce_mask, ray_mask, weight)
+                        else:
+                            vis_mask = torch.ones_like(bounce_rays[..., 0], dtype=bool)
                         # eps = 5e-3
                         # vis_mask = ((bounce_rays[..., 0] < eps) & (bounce_rays[..., 1] > -eps)) & (bounce_rays.abs().min(dim=1).values < eps)
                         incoming_light = torch.zeros((n, 3), device=device)
@@ -621,11 +624,12 @@ class TensorNeRF(torch.nn.Module):
                             # ic(bounce_rays.reshape(-1, D)[vis_mask].shape, mipval.reshape(-1)[vis_mask].shape)
                             # with torch.no_grad():
                             incoming_data = self(bounce_rays.reshape(-1, D)[vis_mask], focal, recur=recur+1, white_bg=False,
-                                                 start_mipval=mipval.reshape(-1)[vis_mask], override_near=0.025, is_train=is_train,
-                                                 ndc_ray=ndc_ray, N_samples=N_samples, tonemap=False)
+                                                 start_mipval=mipval.reshape(-1)[vis_mask], override_near=self.rf.stepSize*2, is_train=is_train,
+                                                 ndc_ray=False, N_samples=N_samples, tonemap=False)
                             # if not is_train:
                             #     ic(incoming_data['depth_map'].max())
                             incoming_light[vis_mask] = incoming_data['rgb_map']
+                            # if is_train:
                             incoming_light[~vis_mask] = self.render_just_bg(bounce_rays.reshape(-1, D)[~vis_mask], mipval.reshape(-1)[~vis_mask])
                         else:
                             incoming_light = self.render_just_bg(bounce_rays.reshape(-1, D), mipval.reshape(-1))
@@ -754,7 +758,7 @@ class TensorNeRF(torch.nn.Module):
                 tint_map = torch.zeros(rgb_map.shape)
                 diffuse_map = torch.zeros(rgb_map.shape)
                 roughness_map = torch.zeros((rgb_map.shape[0], 1))
-            if app_mask.any() and self.brdf is not None and bounce_mask.any() and n > 0:
+            if app_mask.any() and self.brdf is not None and bounce_mask.any() and ray_mask.any():
                 s = row_mask_sum(incoming_light.detach(), ray_mask) / (ray_mask.sum(dim=1)+1e-8)[..., None]
                 # s = tinted_ref_rgb
                 # s = brdf_rgb
@@ -768,7 +772,7 @@ class TensorNeRF(torch.nn.Module):
             output['spec_map'] = spec_map
             output['brdf_map'] = brdf_map
             output['roughness_map'] = roughness_map
-        else:
+        elif recur == 0:
             # viewdirs point inward. -viewdirs aligns with p_world_normal. So we want it below 0
             backwards_rays_loss = (torch.matmul(viewdirs[ray_valid].reshape(-1, 1, 3).detach(), p_world_normal.reshape(-1, 3, 1)).reshape(pweight.shape).clamp(min=self.back_clip) - self.back_clip)**2
             pweight_d = pweight
