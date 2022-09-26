@@ -703,7 +703,7 @@ class TensorNeRF(torch.nn.Module):
         # (N, bundle_size, bundle_size)
         acc_map = torch.sum(weight, 1)
         rgb_map = torch.sum(weight[..., None] * rgb, -2)
-        v_world_normal_map = row_mask_sum(p_world_normal*pweight[..., None], ray_valid)
+        # v_world_normal_map = row_mask_sum(p_world_normal*pweight[..., None], ray_valid)
         # v_world_normal_map = acc_map[..., None] * v_world_normal_map + (1 - acc_map[..., None])
         if not is_train:
             with torch.no_grad():
@@ -722,6 +722,8 @@ class TensorNeRF(torch.nn.Module):
 
                 world_normal_map = row_mask_sum(world_normal*pweight[..., None], ray_valid)
                 world_normal_map = acc_map[..., None] * world_normal_map + (1 - acc_map[..., None])
+                v_world_normal_map = row_mask_sum(p_world_normal*pweight[..., None], ray_valid)
+                v_world_normal_map = acc_map[..., None] * v_world_normal_map + (1 - acc_map[..., None])
 
                 if weight.shape[1] > 0:
                     inds = ((weight).max(dim=1).indices).clip(min=0)
@@ -744,6 +746,7 @@ class TensorNeRF(torch.nn.Module):
                 debug_map = (weight[..., None]*debug).sum(dim=1)
             output['depth_map'] = depth_map.detach().cpu()
             output['world_normal_map'] = world_normal_map.detach().cpu()
+            output['normal_map'] = v_world_normal_map.detach().cpu()
             output['termination_xyz'] = termination_xyz
             output['debug_map'] = debug_map.detach().cpu()
             output['surf_width'] = surface_width
@@ -834,7 +837,6 @@ class TensorNeRF(torch.nn.Module):
             recur=recur,
             acc_map=acc_map.detach().cpu(),
             roughness=roughness.mean(),
-            normal_map = v_world_normal_map,
 
             color_count=app_mask.detach().sum(),
             bounce_count=bounce_count,

@@ -233,7 +233,7 @@ def reconstruction(args):
     tensorf.sampler.update(tensorf.rf, init=True)
 
 
-    pbar = tqdm(range(params.n_iters), miniters=args.progress_refresh_rate, file=sys.stdout)
+    pbar = tqdm(range(params.n_iters * batch_mul), miniters=args.progress_refresh_rate, file=sys.stdout)
     old_decay = False
     def init_optimizer(grad_vars):
         # optimizer = torch.optim.Adam(grad_vars, betas=(0.9, 0.999), weight_decay=0, eps=1e-6)
@@ -257,12 +257,12 @@ def reconstruction(args):
     # with torch.autograd.detect_anomaly():
         for iteration in pbar:
 
-            # if iteration < 50:
-            #     ray_idx, rgb_idx = trainingSampler.nextids(batch=params.batch_size//8)
-            # elif iteration < 500:
-            #     ray_idx, rgb_idx = trainingSampler.nextids(batch=params.batch_size//4)
-            # else:
-            #     ray_idx, rgb_idx = trainingSampler.nextids()
+            if iteration < 50:
+                ray_idx, rgb_idx = trainingSampler.nextids(batch=params.batch_size//8)
+            elif iteration < 250:
+                ray_idx, rgb_idx = trainingSampler.nextids(batch=params.batch_size//4)
+            else:
+                ray_idx, rgb_idx = trainingSampler.nextids()
             ray_idx, rgb_idx = trainingSampler.nextids()
 
             # patches = allrgbs[ray_idx].reshape(-1, args.bundle_size, args.bundle_size, 3)
@@ -280,7 +280,7 @@ def reconstruction(args):
             with torch.cuda.amp.autocast(enabled=args.fp16):
             # if True:
                 data = renderer(rays_train, tensorf,
-                        keys = ['rgb_map', 'floater_loss', 'normal_loss', 'backwards_rays_loss', 'diffuse_reg', 'roughness', 'whole_valid'] #, 'normal_map'],
+                        keys = ['rgb_map', 'floater_loss', 'normal_loss', 'backwards_rays_loss', 'diffuse_reg', 'roughness', 'whole_valid'],#, 'normal_map'],
                         focal=focal, output_alpha=alpha_train, chunk=params.batch_size, white_bg = white_bg, is_train=True, ndc_ray=ndc_ray)
 
                 # loss = torch.mean((rgb_map[:, 1, 1] - rgb_train[:, 1, 1]) ** 2)

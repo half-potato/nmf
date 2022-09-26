@@ -128,11 +128,11 @@ arch:
     num_layers: 3
     # allocation: 3
 
-  visibility_module:
-    _partial_: True
-    _target_: modules.naive_vis_cache.NaiveVisCache
-    grid_size: 128
-    required_count: 100
+  # visibility_module:
+  #   _partial_: True
+  #   _target_: modules.naive_vis_cache.NaiveVisCache
+  #   grid_size: 128
+  #   required_count: 100
     # lr: 1e-3
     # view_encoder:
     #   _target_: models.ish.ListISH
