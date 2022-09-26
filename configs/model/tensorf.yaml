@@ -7,7 +7,7 @@ arch:
   attach_normal_iter: 000
   nEnvSamples: 0
   appdim_noise_std: 0
-  max_recurs: 0
+  max_recurs: -1
   infinity_border: False
   back_clip: 0.3
 

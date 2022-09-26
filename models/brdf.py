@@ -300,7 +300,7 @@ class MLPBRDF(torch.nn.Module):
                         # torch.nn.BatchNorm1d(featureC)
                     ] for _ in range(num_layers-2)], []),
                 torch.nn.ReLU(inplace=True),
-                torch.nn.Linear(featureC, 4),
+                torch.nn.Linear(featureC, 5),
             )
             torch.nn.init.constant_(self.mlp[-1].bias, shift)
             # self.mlp.apply(self.init_weights)
@@ -385,7 +385,8 @@ class MLPBRDF(torch.nn.Module):
 
         mlp_in = torch.cat(indata, dim=-1)
         raw_mlp_out = self.mlp(mlp_in)
-        mlp_out = self.activation(raw_mlp_out)
+        mlp_out = self.activation(raw_mlp_out[..., :4])
+        k_s = torch.sigmoid(raw_mlp_out[..., 4:5])
         ref_weight = mlp_out[..., :3]
 
         if self.mul_ggx:
@@ -393,8 +394,13 @@ class MLPBRDF(torch.nn.Module):
             LdotN = LdotN*D
         LdotN = LdotN.clip(min=0)
 
-        weight = ref_weight# * LdotN
-        spec_color = row_mask_sum(incoming_light * weight, ray_mask) / row_mask_sum(weight, ray_mask).clip(min=1e-8).mean(dim=-1, keepdim=True)
-        brdf_color = row_mask_sum(weight, ray_mask) / row_mask_sum(weight, ray_mask).clip(min=1e-8).mean(dim=-1, keepdim=True)
+        diffuse = matprop['diffuse'][mask].reshape(-1, 1, 3).expand(n, m, 3)[ray_mask]
 
-        return spec_color, brdf_color
+        weight = ref_weight# * LdotN
+        norm = row_mask_sum(weight, ray_mask).clip(min=1e-8).mean(dim=-1, keepdim=True)
+        spec_color = row_mask_sum(incoming_light * weight * k_s, ray_mask) / norm
+        diffuse_color = row_mask_sum((1-k_s) * diffuse, ray_mask) / (ray_mask.sum(dim=1)+1e-8)[..., None]
+        with torch.no_grad():
+            brdf_color = row_mask_sum(weight * k_s, ray_mask) / norm + diffuse_color
+
+        return spec_color + diffuse_color, brdf_color
