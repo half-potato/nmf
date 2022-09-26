@@ -624,7 +624,7 @@ class TensorNeRF(torch.nn.Module):
                             # ic(bounce_rays.reshape(-1, D)[vis_mask].shape, mipval.reshape(-1)[vis_mask].shape)
                             # with torch.no_grad():
                             incoming_data = self(bounce_rays.reshape(-1, D)[vis_mask], focal, recur=recur+1, white_bg=False,
-                                                 start_mipval=mipval.reshape(-1)[vis_mask], override_near=self.rf.stepSize*2, is_train=is_train,
+                                                 start_mipval=mipval.reshape(-1)[vis_mask], override_near=self.rf.stepSize*5, is_train=is_train,
                                                  ndc_ray=False, N_samples=N_samples, tonemap=False)
                             # if not is_train:
                             #     ic(incoming_data['depth_map'].max())

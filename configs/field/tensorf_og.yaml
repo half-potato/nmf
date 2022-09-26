@@ -13,7 +13,7 @@ activation: 'softplus_shift'
 # activation: 'softplus'
 # activation: 'relu_shift'
 dbasis: False
-init_mode: rand
+init_mode: randplane
 interp_mode: bilinear
 # init_mode: trig
 density_shift: -10

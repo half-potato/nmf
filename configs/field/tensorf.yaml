@@ -8,13 +8,13 @@ app_dim: 24
 step_ratio: 0.5
 density_res_multi: 1
 contract_space: False
-smoothing: 1.5
+smoothing: 0.5
 activation: 'softplus_shift'
 # activation: 'softplus'
 # activation: 'exp'
 # activation: 'relu_shift'
 interp_mode: bilinear
-init_mode: rand
+init_mode: randplane
 # init_mode: trig
 density_shift: -0
 

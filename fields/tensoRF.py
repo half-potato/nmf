@@ -72,6 +72,9 @@ class TensorVMSplit(TensorVoxelBase):
                 case 'rand':
                     plane_coef_v = scale * torch.randn((1, n_component[i], grid_size[mat_id_1], grid_size[mat_id_0]))
                     line_coef_v = scale * torch.randn((1, n_component[i], grid_size[vec_id], 1))
+                case 'randplane':
+                    plane_coef_v = scale * torch.randn((1, n_component[i], grid_size[mat_id_1], grid_size[mat_id_0]))
+                    line_coef_v = scale * torch.ones((1, n_component[i], grid_size[vec_id], 1))
             plane_coef.append(torch.nn.Parameter(plane_coef_v))
             line_coef.append(torch.nn.Parameter(line_coef_v))
 

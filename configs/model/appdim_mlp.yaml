@@ -6,7 +6,7 @@ arch:
   rayMarch_weight_thres: 0.0001
   max_recurs: 2
   roughness_rays: 200
-  max_recur_rays: 2
+  max_recur_rays: 5
   infinity_border: False
   appdim_noise_std: 0.0
   world_bounces: 0
