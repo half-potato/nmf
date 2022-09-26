@@ -5,7 +5,7 @@ arch:
   alphaMask_thres: 0.0001
   rayMarch_weight_thres: 0.0001
   max_recurs: 2
-  roughness_rays: 200
+  roughness_rays: 50
   max_recur_rays: 5
   infinity_border: False
   appdim_noise_std: 0.0
@@ -20,7 +20,7 @@ arch:
   selector:
     _target_: modules.pt_selectors.TopNWeight
     max_selected: 1500000
-    bounces_per_ray: 400
+    bounces_per_ray: 100
     weight_thres: 1e-3
 
   tonemap:

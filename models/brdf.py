@@ -401,6 +401,6 @@ class MLPBRDF(torch.nn.Module):
         spec_color = row_mask_sum(incoming_light * weight * k_s, ray_mask) / norm
         diffuse_color = row_mask_sum((1-k_s) * diffuse, ray_mask) / (ray_mask.sum(dim=1)+1e-8)[..., None]
         with torch.no_grad():
-            brdf_color = row_mask_sum(weight * k_s, ray_mask) / norm + diffuse_color
+            brdf_color = row_mask_sum(weight * k_s, ray_mask) / norm# + diffuse_color
 
         return spec_color + diffuse_color, brdf_color

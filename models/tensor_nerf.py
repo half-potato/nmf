@@ -661,6 +661,7 @@ class TensorNeRF(torch.nn.Module):
                     # reflect_rgb[bounce_mask] = tint[bounce_mask] * tinted_ref_rgb
                     # reflect_rgb[bounce_mask] = tint[bounce_mask][..., 0:1] * tinted_ref_rgb
                     reflect_rgb[bounce_mask] = tinted_ref_rgb
+                    reflect_rgb[~bounce_mask] = tint[~bounce_mask][..., 0:1] * diffuse[~bounce_mask]
                     rgb[app_mask] = (reflect_rgb).clip(0, 1)
                     # ic(tint.mean(dim=0), tinted_ref_rgb.mean(dim=0), s.mean(dim=0))
                     # reflect_rgb[bounce_mask] = tint[bounce_mask] * s
