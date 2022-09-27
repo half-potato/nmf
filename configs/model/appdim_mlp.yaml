@@ -4,7 +4,7 @@ arch:
 
   alphaMask_thres: 0.0001
   rayMarch_weight_thres: 0.0001
-  max_recurs: 2
+  max_recurs: 1
   roughness_rays: 50
   max_recur_rays: 5
   infinity_border: False

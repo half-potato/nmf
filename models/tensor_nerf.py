@@ -491,6 +491,9 @@ class TensorNeRF(torch.nn.Module):
         # weight: [N_rays, N_samples]
         alpha, weight, bg_weight = raw2alpha(sigma, dists * self.rf.distance_scale)
 
+        if recur > 0:
+            weight = weight.detach()
+
         # app stands for appearance
         pweight = weight[ray_valid]
         app_mask = (weight > self.rayMarch_weight_thres)
@@ -503,6 +506,7 @@ class TensorNeRF(torch.nn.Module):
         bounce_count = 0
 
         rgb = torch.zeros((*full_shape[:2], 3), device=device, dtype=weight.dtype)
+        bounce_mask = torch.zeros((1), dtype=bool)
 
         if app_mask.any():
             #  Compute normals for app mask
@@ -607,7 +611,7 @@ class TensorNeRF(torch.nn.Module):
                     ], dim=-1)
                     n = bounce_rays.shape[0]
                     D = bounce_rays.shape[-1]
-                    if recur <= 0 and self.world_bounces > 0:
+                    if recur < self.max_recurs and self.world_bounces > 0:
                         norm_ray_origins = self.rf.normalize_coord(bounce_rays[..., :3])
                         # vis_mask takes in each outgoing ray and predicts whether it will terminate at the background
                         if self.visibility_module is not None and self.visibility_module.is_initialized():
@@ -661,8 +665,9 @@ class TensorNeRF(torch.nn.Module):
                     # reflect_rgb[bounce_mask] = tint[bounce_mask] * tinted_ref_rgb
                     # reflect_rgb[bounce_mask] = tint[bounce_mask][..., 0:1] * tinted_ref_rgb
                     reflect_rgb[bounce_mask] = tinted_ref_rgb
-                    reflect_rgb[~bounce_mask] = tint[~bounce_mask][..., 0:1] * diffuse[~bounce_mask]
-                    rgb[app_mask] = (reflect_rgb).clip(0, 1)
+                    # reflect_rgb[~bounce_mask] = tint[~bounce_mask][..., 0:1] * diffuse[~bounce_mask]
+                    reflect_rgb[~bounce_mask] = diffuse[~bounce_mask]
+                    rgb[app_mask] = reflect_rgb.clip(0, 1)
                     # ic(tint.mean(dim=0), tinted_ref_rgb.mean(dim=0), s.mean(dim=0))
                     # reflect_rgb[bounce_mask] = tint[bounce_mask] * s
                     # reflect_rgb[bounce_mask] = tinted_ref_rgb

@@ -100,8 +100,6 @@ def reconstruction(args):
     # init log file
     os.makedirs(logfolder, exist_ok=True)
     os.makedirs(f'{logfolder}/imgs_vis', exist_ok=True)
-    os.makedirs(f'{logfolder}/imgs_rgba', exist_ok=True)
-    os.makedirs(f'{logfolder}/rgba', exist_ok=True)
     OmegaConf.save(config=args, f=f'{logfolder}/config.yaml')
     summary_writer = SummaryWriter(logfolder)
 
