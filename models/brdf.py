@@ -386,7 +386,9 @@ class MLPBRDF(torch.nn.Module):
         mlp_in = torch.cat(indata, dim=-1)
         raw_mlp_out = self.mlp(mlp_in)
         mlp_out = self.activation(raw_mlp_out[..., :4])
-        k_s = torch.sigmoid(raw_mlp_out[..., 4:5])
+        # f0 = torch.sigmoid(raw_mlp_out[..., 4:5] + 1)
+        f0 = matprop['f0'][mask].reshape(-1, 1, 1).expand(n, m, 1)[ray_mask]
+        k_s = schlick(f0, N_mask.double(), half.double()).float().clip(0, 1)
         ref_weight = mlp_out[..., :3]
 
         if self.mul_ggx:
