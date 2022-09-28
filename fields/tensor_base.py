@@ -76,7 +76,7 @@ class TensorBase(torch.nn.Module):
 class TensorVoxelBase(TensorBase):
     def __init__(self, aabb, density_n_comp, appearance_n_comp, step_ratio, 
                  app_dim, density_res_multi,
-                 N_voxel_init, N_voxel_final, upsamp_list, **kwargs):
+                 N_voxel_init, N_voxel_final, upsamp_list, grid_size=None, **kwargs):
         super().__init__(aabb, **kwargs)
         self.separate_appgrid = True
         self.dtype = torch.half
@@ -91,7 +91,7 @@ class TensorVoxelBase(TensorBase):
         self.matMode = [[0,1], [0,2], [1,2]]
         self.vecMode =  [2, 1, 0]
         self.comp_w = [1,1,1]
-        grid_size = torch.tensor(utils.N_to_reso(N_voxel_init, self.aabb))
+        grid_size = torch.tensor(utils.N_to_reso(N_voxel_init, self.aabb)) if grid_size is None else grid_size
 
         self.update_stepSize(grid_size)
 

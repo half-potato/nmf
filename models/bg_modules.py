@@ -96,7 +96,7 @@ class HierarchicalCubeMap(torch.nn.Module):
         self.mipnoise = mipnoise
         self.betas = betas
         self.max_mip = start_mip
-        self.register_parameter('brightness', torch.nn.Parameter(torch.tensor(1.0, dtype=float)))
+        self.register_parameter('brightness', torch.nn.Parameter(torch.tensor(0.0, dtype=float)))
         if learnable_bias:
             self.register_parameter('mipbias', torch.nn.Parameter(torch.tensor(mipbias, dtype=float)))
         else:
@@ -254,7 +254,7 @@ class HierarchicalCubeMap(torch.nn.Module):
             # embs.append(emb / 2**(i) * weight.reshape(-1, 1))
             if mip >= max_level:
                 break
-        img = self.activation_fn(self.brightness + sumemb)
+        img = self.activation_fn(self.brightness.clip(min=-1, max=2) + sumemb)
         # if miplevel.max() >= self.num_levels-1 and len(self.stds) > 0:
         #     mask = miplevel.reshape(-1) >= self.num_levels-1
         #     blur_img = 0

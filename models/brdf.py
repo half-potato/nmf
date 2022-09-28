@@ -60,12 +60,13 @@ class NormalSampler:
         return noise_rays
 
 class GGXSampler(torch.nn.Module):
-    def __init__(self, num_samples) -> None:
+    def __init__(self, num_samples, min_roughness) -> None:
         super().__init__()
         self.sampler = torch.quasirandom.SobolEngine(dimension=2, scramble=True)
         self.num_samples = num_samples
         angs = self.sampler.draw(num_samples)
         self.register_buffer('angs', angs)
+        self.min_roughness = min_roughness
         # plt.scatter(self.angs[:, 0], self.angs[:, 1])
         # plt.show()
 
@@ -104,7 +105,8 @@ class GGXSampler(torch.nn.Module):
         # ic(1, V_l.min(dim=0), V_l.max(dim=0))
         V_l = torch.matmul(row_world_basis, viewdir.unsqueeze(-1)).squeeze(-1)
         # ic(2, V_l.min(dim=0), V_l.max(dim=0))
-        V_stretch = normalize(torch.stack([roughness*V_l[..., 0], roughness*V_l[..., 1], V_l[..., 2]], dim=-1)).unsqueeze(1)
+        rough_clip = roughness.clip(min=self.min_roughness)
+        V_stretch = normalize(torch.stack([rough_clip*V_l[..., 0], rough_clip*V_l[..., 1], V_l[..., 2]], dim=-1)).unsqueeze(1)
         T1 = torch.where(V_stretch[..., 2:3] < 0.999, normalize(torch.linalg.cross(V_stretch, z_up.unsqueeze(1), dim=-1)), x_up.unsqueeze(1))
         T2 = normalize(torch.linalg.cross(T1, V_stretch, dim=-1))
         z = V_stretch[..., 2].reshape(-1, 1)
@@ -117,7 +119,8 @@ class GGXSampler(torch.nn.Module):
 
         # stretch and mask stuff to reduce memory
         a_mask = a.expand(u1.shape)[ray_mask]
-        r_mask = roughness.reshape(-1, 1).expand(u1.shape)[ray_mask]
+        r_mask_u = roughness.reshape(-1, 1).expand(u1.shape)[ray_mask]
+        r_mask = r_mask_u.clip(min=self.min_roughness)
         z_mask = z.expand(u1.shape)[ray_mask]
         u1_mask = u1[ray_mask]
         u2_mask = u2[ray_mask]
@@ -159,18 +162,8 @@ class GGXSampler(torch.nn.Module):
         # pdf = D * HdotV / NdotV / roughness.reshape(-1, 1)
         # pdf = NdotH / 4 / HdotV
         # pdf = D# / NdotH
-        mipval = -math.log(num_samples) - lpdf
-        # ic(phi.max(), phi.min(), a.min(), a.max(), mipval.min(), mipval.max(), roughness.min(), roughness.max())
-        # ic(roughness.grad, lpdf.grad)
-        # if phi.grad is not None:
-        #     ic(phi.grad.max(), phi.grad.min(), a.grad.min(), a.grad.max(), mipval.grad.min(), mipval.grad.max(), roughness.grad.min(), roughness.grad.max())
-        # mipval = 1 / (num_samples * pdf + 1e-6)
-        # px.scatter(x=NdotH.detach().cpu().flatten()[:1000], y=mipval.detach().cpu().flatten()[:1000]).show()
-        # ic(mipval)
-        # assert(False)
-        # ic(D.mean(), mipval.mean(), pdf.mean())
-        # ic(mipval.mean(dim=1).squeeze(), roughness)
-        # ic(mipval[0, 0], D[0, 0], NdotH[0, 0], HdotV[0, 0])
+        indiv_num_samples = ray_mask.sum(dim=1, keepdim=True).clip(min=1).expand(-1, num_samples)[ray_mask]
+        mipval = -torch.log(indiv_num_samples) - lpdf
 
         return L, mipval, H_l, diff_vec
 
@@ -267,7 +260,7 @@ class PBR(torch.nn.Module):
 
 class MLPBRDF(torch.nn.Module):
     def __init__(self, in_channels, h_encoder=None, d_encoder=None, v_encoder=None, n_encoder=None, l_encoder=None, feape=6, featureC=128, num_layers=2, dotpe=0,
-                 mul_ggx=False, activation='sigmoid', use_roughness=False, lr=1e-4, detach_roughness=False, shift=0):
+                 mul_ggx=False, mix_diffuse=False, activation='sigmoid', use_roughness=False, lr=1e-4, detach_roughness=False, shift=0):
         super().__init__()
 
         self.in_channels = in_channels
@@ -284,6 +277,7 @@ class MLPBRDF(torch.nn.Module):
         self.l_encoder = l_encoder
         self.h_encoder = h_encoder
         self.d_encoder = d_encoder
+        self.mix_diffuse = mix_diffuse
         self.lr = lr
         if h_encoder is not None:
             self.in_mlpC += self.h_encoder.dim() + 3
@@ -309,7 +303,7 @@ class MLPBRDF(torch.nn.Module):
                         # torch.nn.BatchNorm1d(featureC)
                     ] for _ in range(num_layers-2)], []),
                 torch.nn.ReLU(inplace=True),
-                torch.nn.Linear(featureC, 5),
+                torch.nn.Linear(featureC, 4),
             )
             torch.nn.init.constant_(self.mlp[-1].bias, shift)
             # self.mlp.apply(self.init_weights)
@@ -330,10 +324,26 @@ class MLPBRDF(torch.nn.Module):
         # ic(x, y)
         # return y
         col = torch.sigmoid(x[..., :3])
-        brightness = torch.exp(x[..., 3:4].clip(min=-10, max=10))
+        brightness = torch.exp(x[..., 3:4].clip(min=-10, max=10)-1)
         return col * brightness
         # return torch.sigmoid(x)
         # return F.softplus(x+1.0)/2
+
+    # def save(self, features, path, res=50):
+    #     device = features.device
+    #     ele_grid, azi_grid = torch.meshgrid(
+    #         torch.linspace(-np.pi/2, np.pi/2, res, dtype=torch.float32),
+    #         torch.linspace(-np.pi, np.pi, 2*res, dtype=torch.float32), indexing='ij')
+    #     # each col of x ranges from -pi/2 to pi/2
+    #     # each row of y ranges from -pi to pi
+    #     ang_vecs = torch.stack([
+    #         torch.cos(ele_grid) * torch.cos(azi_grid),
+    #         torch.cos(ele_grid) * torch.sin(azi_grid),
+    #         -torch.sin(ele_grid),
+    #     ], dim=-1).to(device)
+    #     static_vecs = torch.zeros_like(ang_vecs)
+    #     self()
+        
 
     def forward(self, incoming_light, V, L, N, half_vec, diff_vec,
             features, roughness, matprop,
@@ -401,9 +411,8 @@ class MLPBRDF(torch.nn.Module):
         mlp_in = torch.cat(indata, dim=-1)
         raw_mlp_out = self.mlp(mlp_in)
         mlp_out = self.activation(raw_mlp_out[..., :4])
-        k_s = torch.sigmoid(raw_mlp_out[..., 4:5]).clip(min=0.01)
-        # f0 = matprop['f0'][mask].reshape(-1, 1, 1).expand(n, m, 1)[ray_mask]
-        # k_s = schlick(f0, N_mask.double(), half.double()).float().clip(0, 1)
+        # k_s = torch.sigmoid(raw_mlp_out[..., 4:5]-1).clip(min=0.01)
+        # ic(f0.mean())
         ref_weight = mlp_out[..., :3]
 
         if self.mul_ggx:
@@ -411,22 +420,26 @@ class MLPBRDF(torch.nn.Module):
             LdotN = LdotN*D
         LdotN = LdotN.clip(min=0)
 
-        diffuse = matprop['diffuse'][mask].reshape(-1, 1, 3).expand(n, m, 3)[ray_mask]
+        weight = ref_weight
 
-        weight = ref_weight# * LdotN
+        # plot it
+        # splat_weight = torch.zeros((*ray_mask.shape, 3), dtype=weight.dtype, device=weight.device)
+        # splat_L = torch.zeros((*ray_mask.shape, 3), dtype=weight.dtype, device=weight.device)
+        # splat_weight[ray_mask] = weight
+        # splat_L[ray_mask] = L
+        # ind = ray_mask.sum(dim=1).argmax()
+        # w = splat_weight[ind].detach().cpu()
+        # ls = splat_L[ind].detach().cpu()
+        # px.scatter_3d(x=ls[:, 0], y=ls[:, 1], z=ls[:, 2], color=w.mean(dim=-1)).show()
+        # assert(False)
+
         norm = row_mask_sum(weight, ray_mask).clip(min=1e-8).mean(dim=-1, keepdim=True)
-        spec_color = row_mask_sum(incoming_light * weight * k_s, ray_mask) / norm
-        diffuse_color = row_mask_sum((1-k_s) * diffuse, ray_mask) / (ray_mask.sum(dim=1)+1e-8)[..., None]
+        spec_color = row_mask_sum(incoming_light * weight, ray_mask) / norm
+        # diffuse_color = row_mask_sum((1-k_s) * diffuse, ray_mask) / (ray_mask.sum(dim=1)+1e-8)[..., None]
         with torch.no_grad():
-            brdf_color = row_mask_sum(weight * k_s, ray_mask) / norm# + diffuse_color
+            splat_weight = torch.zeros((*ray_mask.shape, 3), dtype=weight.dtype, device=weight.device)
+            splat_weight[ray_mask] = weight
+            brdf_color = splat_weight[:, 0] / norm
+            # brdf_color = row_mask_sum(weight, ray_mask) / norm
 
-        return spec_color + diffuse_color, brdf_color
-        # weight = ref_weight
-        # norm = row_mask_sum(weight, ray_mask).clip(min=1e-8).mean(dim=-1, keepdim=True)
-        # spec_color = row_mask_sum(incoming_light * weight, ray_mask) / norm
-        # # diffuse_color = row_mask_sum((1-k_s) * diffuse, ray_mask) / (ray_mask.sum(dim=1)+1e-8)[..., None]
-        # diffuse_color = matprop['diffuse'][mask]
-        # with torch.no_grad():
-        #     brdf_color = row_mask_sum(weight * k_s, ray_mask) / norm# + diffuse_color
-        #
-        # return matprop['tint'][mask] * spec_color + diffuse_color, brdf_color
+        return matprop['tint'][mask][..., 0:1] * spec_color, brdf_color
