@@ -8,7 +8,7 @@ arch:
   roughness_rays: 50
   max_recur_rays: 5
   infinity_border: False
-  appdim_noise_std: 0.0
+  appdim_noise_std: 0.1
   world_bounces: 0
   # world_bounces: 2048000
   max_normal_similarity: 1 #0.87
@@ -20,7 +20,7 @@ arch:
   selector:
     _target_: modules.pt_selectors.TopNWeight
     max_selected: 1500000
-    bounces_per_ray: 100
+    bounces_per_ray: 50
     weight_thres: 1e-3
 
   tonemap:
@@ -73,12 +73,26 @@ arch:
     # num_layers: 4
     # feape: 0
     # featureC: 128
-    num_layers: 4
     feape: 0
-    # dotpe: 0
-    # featureC: 64
-    dotpe: 6
+    dotpe: -1
+    h_encoder:
+      _target_: models.render_modules.PE
+      max_degree: 2
+    d_encoder:
+      _target_: models.render_modules.PE
+      max_degree: 2
+    # h_encoder:
+    #   _target_: models.ish.ListISH
+    #   degs: [0,1,2,4]
+    # d_encoder:
+    #   _target_: models.ish.ListISH
+    #   degs: [0,1,2,4]
     featureC: 128
+    num_layers: 4
+
+    # num_layers: 4
+    # dotpe: 6
+    # featureC: 128
     activation: 'softplus'
     # activation: 'sigmoid'
     # activation: 'sigmoid'
@@ -97,6 +111,7 @@ arch:
     stds: []
     lr: 0.1
     init_val: -2
+    brightness_lr: 0.1
     betas: [0.9, 0.999]
     mipbias_lr: 1e-4
     mipnoise: 0.5
@@ -149,7 +164,7 @@ params:
 
   TV_weight_density: 0.0
   TV_weight_app: 0.0
-  normal_lambda: 3e-2
+  normal_lambda: 2e-2
   diffuse_lambda: 0 #2e-4
   backwards_rays_lambda: 0.1
   floater_lambda: 1e-3

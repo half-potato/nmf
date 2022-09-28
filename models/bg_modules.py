@@ -81,7 +81,7 @@ class CubeUnwrap(torch.nn.Module):
 
 
 class HierarchicalCubeMap(torch.nn.Module):
-    def __init__(self, bg_resolution=512, num_levels=1, featureC=128, activation='identity', power=4,
+    def __init__(self, bg_resolution=512, num_levels=1, featureC=128, activation='identity', power=4, brightness_lr=0.01,
                  stds = [1, 2, 4, 8], betas=[0.9, 0.99], mipbias=+0.5, init_val=-2, interp_pyramid=True, lr=0.15, mipbias_lr=1e-3, mipnoise=0.5, learnable_bias=True):
         super().__init__()
         self.num_levels = num_levels
@@ -96,10 +96,12 @@ class HierarchicalCubeMap(torch.nn.Module):
         self.mipnoise = mipnoise
         self.betas = betas
         self.max_mip = start_mip
+        self.register_parameter('brightness', torch.nn.Parameter(torch.tensor(1.0, dtype=float)))
         if learnable_bias:
             self.register_parameter('mipbias', torch.nn.Parameter(torch.tensor(mipbias, dtype=float)))
         else:
             self.mipbias = mipbias
+        self.brightness_lr = brightness_lr
 
         self.stds = stds
         ic(self.stds)
@@ -123,6 +125,9 @@ class HierarchicalCubeMap(torch.nn.Module):
             {'params': self.bg_mats,
              'betas': self.betas,
              'lr': self.lr,
+             'name': 'bg'},
+            {'params': self.brightness,
+             'lr': self.brightness_lr,
              'name': 'bg'},
             {'params': [self.mipbias],
              'lr': self.mipbias_lr,
@@ -195,7 +200,7 @@ class HierarchicalCubeMap(torch.nn.Module):
             # bg_mat = bg_mat * self.calc_weight(mip)
             # bg_mats += bg_mat
             # bg_mats = bg_mat
-            im = self.activation_fn(bg_mat)
+            im = self.activation_fn(self.brightness + bg_mat)
             if tonemap is not None:
                 im = tonemap(im)
             im = im.clamp(0, 1)
@@ -249,7 +254,7 @@ class HierarchicalCubeMap(torch.nn.Module):
             # embs.append(emb / 2**(i) * weight.reshape(-1, 1))
             if mip >= max_level:
                 break
-        img = self.activation_fn(sumemb)
+        img = self.activation_fn(self.brightness + sumemb)
         # if miplevel.max() >= self.num_levels-1 and len(self.stds) > 0:
         #     mask = miplevel.reshape(-1) >= self.num_levels-1
         #     blur_img = 0

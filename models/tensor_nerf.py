@@ -470,7 +470,7 @@ class TensorNeRF(torch.nn.Module):
 
         all_app_features = None
         if FIXED_SPHERE:
-            sigma[ray_valid] = torch.where(torch.linalg.norm(xyz_sampled, dim=-1) < 1.0, 99999999.0, 0.0)
+            sigma[ray_valid] = torch.where(torch.linalg.norm(xyz_sampled, dim=-1) < 0.44, 99999999.0, 0.0)
         elif FIXED_RETRO:
             mask1 = torch.linalg.norm(xyz_sampled, dim=-1, ord=torch.inf) < 0.613
             mask2 = (xyz_sampled[..., 0] < 0) & (xyz_sampled[..., 1] > 0)
@@ -529,7 +529,7 @@ class TensorNeRF(torch.nn.Module):
 
             # get base color of the point
             diffuse, tint, matprop = self.diffuse_module(
-                app_xyz, viewdirs[app_mask], noise_app_features)
+                app_xyz, viewdirs[app_mask], app_features)
 
             # ic(diffuse.mean(dim=0))
             app_features = app_features[..., self.diffuse_module.allocation:]
@@ -603,7 +603,7 @@ class TensorNeRF(torch.nn.Module):
                     brefdirs = refdirs[bounce_mask].reshape(-1, 1, 3)
                     # add noise to simulate roughness
                     outward = L[bounce_mask]
-                    noise_rays, mipval = self.brdf_sampler.sample(num_roughness_rays, brefdirs, V[bounce_mask], outward, roughness[bounce_mask]**2, ray_mask)
+                    noise_rays, mipval, halfvec, diffvec = self.brdf_sampler.sample(num_roughness_rays, brefdirs, V[bounce_mask], outward, roughness[bounce_mask]**2, ray_mask)
                     bounce_rays = torch.cat([
                         ray_xyz[ray_mask],
                         noise_rays,
@@ -645,8 +645,8 @@ class TensorNeRF(torch.nn.Module):
                     # debug[full_bounce_mask][..., 0] += miplevel.mean(dim=1) / (self.bg_module.max_mip-1)
                     
                     tinted_ref_rgb, brdf_rgb = self.brdf(incoming_light,
-                            V[bounce_mask], bounce_rays[..., 3:6], outward.reshape(-1, 1, 3),
-                            app_features[bounce_mask], roughness[bounce_mask], matprop,
+                            V[bounce_mask], bounce_rays[..., 3:6], outward.reshape(-1, 1, 3), halfvec, diffvec,
+                            noise_app_features[bounce_mask], roughness[bounce_mask], matprop,
                             bounce_mask, ray_mask)
                     # ic(ray_mask.sum(dim=-1).float().mean(), ray_mask.shape)
                     # s = incoming_light.max(dim=1).values
@@ -792,7 +792,7 @@ class TensorNeRF(torch.nn.Module):
             # floater_loss = torch.tensor(0.0, device=device) 
 
             # target = world_normal if self.attach_normal else world_normal.detach()
-            align_world_loss = (1-(p_world_normal * world_normal).sum(dim=-1).clamp(max=self.max_normal_similarity))
+            align_world_loss = (1-(p_world_normal * world_normal).sum(dim=-1).clamp(max=self.max_normal_similarity)).clip(min=1e-4)**0.5
             # align_world_loss = torch.linalg.norm(p_world_normal - world_normal, dim=-1)
             normal_loss = (pweight * align_world_loss).sum() / B
 

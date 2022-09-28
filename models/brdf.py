@@ -139,6 +139,7 @@ class GGXSampler(torch.nn.Module):
         V = viewdir.unsqueeze(1).expand(-1, num_samples, 3)[ray_mask]
         N = normal.reshape(-1, 1, 3).expand(-1, num_samples, 3)[ray_mask]
         L = (2.0 * (V * H).sum(dim=-1, keepdim=True) * H - V)
+        diff_vec = torch.matmul(row_world_basis_mask.permute(0, 2, 1), L.unsqueeze(-1)).squeeze(-1)
 
         # calculate mipval, which will be used to calculate the mip level
         # half is considered to be the microfacet normal
@@ -171,7 +172,7 @@ class GGXSampler(torch.nn.Module):
         # ic(mipval.mean(dim=1).squeeze(), roughness)
         # ic(mipval[0, 0], D[0, 0], NdotH[0, 0], HdotV[0, 0])
 
-        return L, mipval
+        return L, mipval, H_l, diff_vec
 
 class Phong(torch.nn.Module):
     def __init__(self, in_channels):
@@ -265,7 +266,7 @@ class PBR(torch.nn.Module):
 
 
 class MLPBRDF(torch.nn.Module):
-    def __init__(self, in_channels, v_encoder=None, n_encoder=None, l_encoder=None, feape=6, featureC=128, num_layers=2, dotpe=0,
+    def __init__(self, in_channels, h_encoder=None, d_encoder=None, v_encoder=None, n_encoder=None, l_encoder=None, feape=6, featureC=128, num_layers=2, dotpe=0,
                  mul_ggx=False, activation='sigmoid', use_roughness=False, lr=1e-4, detach_roughness=False, shift=0):
         super().__init__()
 
@@ -274,12 +275,20 @@ class MLPBRDF(torch.nn.Module):
         self.detach_roughness = detach_roughness
         self.mul_ggx = mul_ggx
         self.dotpe = dotpe
-        self.in_mlpC = 2*feape*in_channels + in_channels + (1 if use_roughness else 0) + 6 + 2*dotpe*6
+        self.in_mlpC = 2*feape*in_channels + in_channels + (1 if use_roughness else 0)
+        if dotpe >= 0:
+            self.in_mlpC += 6 + 2*dotpe*6
         # self.in_mlpC = 2*feape*in_channels + (1 if use_roughness else 0) + 6
         self.v_encoder = v_encoder
         self.n_encoder = n_encoder
         self.l_encoder = l_encoder
+        self.h_encoder = h_encoder
+        self.d_encoder = d_encoder
         self.lr = lr
+        if h_encoder is not None:
+            self.in_mlpC += self.h_encoder.dim() + 3
+        if d_encoder is not None:
+            self.in_mlpC += self.d_encoder.dim() + 3
         if v_encoder is not None:
             self.in_mlpC += self.v_encoder.dim() + 3
         if n_encoder is not None:
@@ -326,7 +335,7 @@ class MLPBRDF(torch.nn.Module):
         # return torch.sigmoid(x)
         # return F.softplus(x+1.0)/2
 
-    def forward(self, incoming_light, V, L, N,
+    def forward(self, incoming_light, V, L, N, half_vec, diff_vec,
             features, roughness, matprop,
             mask, ray_mask):
         # V: (n, 3)-viewdirs, the outgoing light direction
@@ -350,14 +359,16 @@ class MLPBRDF(torch.nn.Module):
         VdotN = (V_mask * N_mask).sum(dim=-1, keepdim=True).clip(min=1e-8)
         NdotH = ((half * N_mask).sum(dim=-1, keepdim=True)+1e-3).clip(min=1e-20, max=1)
 
-        # indata = [LdotN.reshape(-1, 1), VdotN.reshape(-1, 1), NdotH.reshape(-1, 1)]
-        indata = [LdotN, torch.sqrt((1-LdotN**2).clip(min=1e-8, max=1)),
-                  VdotN, torch.sqrt((1-LdotN**2).clip(min=1e-8, max=1)),
-                  NdotH, torch.sqrt((1-NdotH**2).clip(min=1e-8, max=1))]
-        indata = [d.reshape(-1, 1) for d in indata]
-        if self.dotpe > 0:
-            dotvals = torch.cat(indata, dim=-1)
-            indata += [safemath.integrated_pos_enc((dotvals * torch.pi, 0.20*torch.ones_like(dotvals)), 0, self.dotpe)]
+        if self.dotpe >= 0:
+            indata = [LdotN, torch.sqrt((1-LdotN**2).clip(min=1e-8, max=1)),
+                      VdotN, torch.sqrt((1-LdotN**2).clip(min=1e-8, max=1)),
+                      NdotH, torch.sqrt((1-NdotH**2).clip(min=1e-8, max=1))]
+            indata = [d.reshape(-1, 1) for d in indata]
+            if self.dotpe > 0:
+                dotvals = torch.cat(indata, dim=-1)
+                indata += [safemath.integrated_pos_enc((dotvals * torch.pi, 0.20*torch.ones_like(dotvals)), 0, self.dotpe)]
+        else:
+            indata = []
         # indata = [safemath.arccos(LdotN.reshape(-1, 1)), safemath.arccos(VdotN.reshape(-1, 1)), safemath.arccos(NdotH.reshape(-1, 1))]
         indata += [features]
 
@@ -369,7 +380,11 @@ class MLPBRDF(torch.nn.Module):
             indata.append(eroughness)
 
         L = L.reshape(-1, 3)
-        B = V.shape[0]
+        B = V_mask.shape[0]
+        if self.h_encoder is not None:
+            indata += [self.h_encoder(half_vec, eroughness).reshape(B, -1), half_vec]
+        if self.d_encoder is not None:
+            indata += [self.d_encoder(diff_vec, eroughness).reshape(B, -1), diff_vec]
         if self.feape > 0:
             indata += [positional_encoding(features, self.feape)]
         if self.v_encoder is not None:
@@ -386,7 +401,7 @@ class MLPBRDF(torch.nn.Module):
         mlp_in = torch.cat(indata, dim=-1)
         raw_mlp_out = self.mlp(mlp_in)
         mlp_out = self.activation(raw_mlp_out[..., :4])
-        k_s = torch.sigmoid(raw_mlp_out[..., 4:5])
+        k_s = torch.sigmoid(raw_mlp_out[..., 4:5]).clip(min=0.01)
         # f0 = matprop['f0'][mask].reshape(-1, 1, 1).expand(n, m, 1)[ray_mask]
         # k_s = schlick(f0, N_mask.double(), half.double()).float().clip(0, 1)
         ref_weight = mlp_out[..., :3]
@@ -406,3 +421,12 @@ class MLPBRDF(torch.nn.Module):
             brdf_color = row_mask_sum(weight * k_s, ray_mask) / norm# + diffuse_color
 
         return spec_color + diffuse_color, brdf_color
+        # weight = ref_weight
+        # norm = row_mask_sum(weight, ray_mask).clip(min=1e-8).mean(dim=-1, keepdim=True)
+        # spec_color = row_mask_sum(incoming_light * weight, ray_mask) / norm
+        # # diffuse_color = row_mask_sum((1-k_s) * diffuse, ray_mask) / (ray_mask.sum(dim=1)+1e-8)[..., None]
+        # diffuse_color = matprop['diffuse'][mask]
+        # with torch.no_grad():
+        #     brdf_color = row_mask_sum(weight * k_s, ray_mask) / norm# + diffuse_color
+        #
+        # return matprop['tint'][mask] * spec_color + diffuse_color, brdf_color
