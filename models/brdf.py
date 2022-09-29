@@ -420,7 +420,7 @@ class MLPBRDF(torch.nn.Module):
             LdotN = LdotN*D
         LdotN = LdotN.clip(min=0)
 
-        weight = ref_weight
+        weight = ref_weight * LdotN.detach()
 
         # plot it
         # splat_weight = torch.zeros((*ray_mask.shape, 3), dtype=weight.dtype, device=weight.device)

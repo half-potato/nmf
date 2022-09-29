@@ -42,7 +42,7 @@ class TensorNeRF(torch.nn.Module):
     def __init__(self, rf, aabb, near_far,
                  diffuse_module, sampler, brdf_sampler=None, brdf=None, tonemap=None, normal_module=None, ref_module=None, bg_module=None,
                  visibility_module=None, grid_size=None,
-                 alphaMask=None, specularity_threshold=0.005, max_recurs=0,
+                 alphaMask=None, specularity_threshold=0.005, max_recurs=0, use_diffuse=True,
                  max_normal_similarity=1, infinity_border=False, min_refraction=1.1, enable_refraction=True,
                  alphaMask_thres=0.001, rayMarch_weight_thres=0.0001, detach_inter=False, attach_normal_iter=0,
                  max_bounce_rays=4000, roughness_rays=3, bounce_min_weight=0.001, appdim_noise_std=0.0,
@@ -79,6 +79,7 @@ class TensorNeRF(torch.nn.Module):
         self.rayMarch_weight_thres = rayMarch_weight_thres
         self.appdim_noise_std = appdim_noise_std
         self.update_sampler_list = update_sampler_list
+        self.use_diffuse = use_diffuse
 
         self.bounce_min_weight = bounce_min_weight
         self.min_refraction = min_refraction
@@ -658,7 +659,10 @@ class TensorNeRF(torch.nn.Module):
                     # s = row_mask_sum(incoming_light.detach(), ray_mask) / (ray_mask.sum(dim=1)+1e-8)[..., None]
                     # debug[full_bounce_mask] += s# / (s+1)
                     reflect_rgb[bounce_mask] = tinted_ref_rgb
-                    rgb[app_mask] = (reflect_rgb + diffuse).clip(0, 1)
+                    if self.use_diffuse:
+                        rgb[app_mask] = (reflect_rgb + diffuse).clip(0, 1)
+                    else:
+                        rgb[app_mask] = (reflect_rgb).clip(0, 1)
                     # reflect_rgb[~bounce_mask] = diffuse[~bounce_mask]
                     # rgb[app_mask] = (reflect_rgb).clip(0, 1)
 
@@ -767,7 +771,7 @@ class TensorNeRF(torch.nn.Module):
             backwards_rays_loss = (torch.matmul(viewdirs[ray_valid].reshape(-1, 1, 3).detach(), p_world_normal.reshape(-1, 3, 1)).reshape(pweight.shape).clamp(min=self.back_clip) - self.back_clip)**2
             pweight_d = pweight
             debug[ray_valid] = backwards_rays_loss.reshape(-1, 1).expand(-1, 3)
-            backwards_rays_loss = (pweight_d * backwards_rays_loss).sum() / pweight_d.sum().clip(min=1e-5)
+            backwards_rays_loss = (pweight * backwards_rays_loss).sum() / pweight.sum().clip(min=1e-5)
 
             midpoint = torch.cat([
                 z_vals,
@@ -785,8 +789,8 @@ class TensorNeRF(torch.nn.Module):
             # floater_loss = torch.tensor(0.0, device=device) 
 
             # target = world_normal if self.attach_normal else world_normal.detach()
-            # align_world_loss = (1-(p_world_normal * world_normal).sum(dim=-1).clamp(max=self.max_normal_similarity)).clip(min=1e-4)#**0.5
-            align_world_loss = torch.linalg.norm(p_world_normal - world_normal, dim=-1)
+            align_world_loss = 2*(1-(p_world_normal * world_normal).sum(dim=-1))#**0.5
+            # align_world_loss = torch.linalg.norm(p_world_normal - world_normal, dim=-1)**2
             normal_loss = (pweight * align_world_loss).sum() / B
 
             # output['diffuse_reg'] = (roughness-0.5).clip(min=0).mean() + tint.clip(min=1e-3).mean()

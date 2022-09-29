@@ -261,7 +261,7 @@ def reconstruction(args):
                 ray_idx, rgb_idx = trainingSampler.nextids(batch=params.batch_size//4)
             else:
                 ray_idx, rgb_idx = trainingSampler.nextids()
-            ray_idx, rgb_idx = trainingSampler.nextids()
+            # ray_idx, rgb_idx = trainingSampler.nextids()
 
             # patches = allrgbs[ray_idx].reshape(-1, args.bundle_size, args.bundle_size, 3)
             # plt.imshow(patches[0])

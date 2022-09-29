@@ -8,6 +8,7 @@ arch:
   roughness_rays: 50
   max_recur_rays: 5
   infinity_border: False
+  use_diffuse: True
   appdim_noise_std: 0.0
   world_bounces: 0
   # world_bounces: 2048000
@@ -58,7 +59,7 @@ arch:
   brdf_sampler:
     _target_: models.brdf.GGXSampler
     _partial_: True
-    min_roughness: 0.01
+    min_roughness: 0.00
 
   brdf:
     _target_: models.brdf.MLPBRDF
@@ -101,7 +102,7 @@ arch:
     mix_diffuse: False
     use_roughness: true
     detach_roughness: false
-    lr: 1e-5
+    lr: 1e-3
 
   bg_module:
     _target_: models.bg_modules.HierarchicalCubeMap
@@ -111,7 +112,7 @@ arch:
     activation: 'exp'
     power: 2
     stds: []
-    lr: 0.1
+    lr: 0.4
     init_val: -1
     brightness_lr: 0.01
     betas: [0.9, 0.999]
@@ -166,7 +167,7 @@ params:
 
   TV_weight_density: 0.0
   TV_weight_app: 0.0
-  normal_lambda: 3e-3
+  normal_lambda: 1e-2
   diffuse_lambda: 0 #2e-4
   backwards_rays_lambda: 0.1
   floater_lambda: 1e-3
