@@ -116,7 +116,7 @@ class GridSampler2D(torch.autograd.Function):
                 dy_filter = (f_blur[None, :] * f_edge[:, None]).reshape(1, 1, l, l)
                 dx_filter = dy_filter.permute(0, 1, 3, 2)
 
-                smooth_kern = gkern(2*int(ctx.smoothing)+1, std=ctx.smoothing+1e-8, device=grad_output.device)
+                smooth_kern = gkern(2*int(ctx.smoothing+0.5)+1, std=ctx.smoothing+1e-8, device=grad_output.device)
                 smooth_kern /= smooth_kern.sum()
                 sm_dx_filter = combine_kernels2d(smooth_kern, dx_filter)
                 sm_dy_filter = combine_kernels2d(smooth_kern, dy_filter)

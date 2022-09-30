@@ -105,22 +105,9 @@ class HierarchicalCubeMap(torch.nn.Module):
             self.mipbias = mipbias
         self.brightness_lr = brightness_lr
 
-        self.stds = stds
-        ic(self.stds)
-        if len(self.stds) > 0:
-            self.stds.sort(reverse=True)
-            s = max(self.stds)*4-1
-            blur_kernel = create_blur_pyramid(s, self.stds)
-            ic(blur_kernel.shape)
-            self.register_buffer('blur_kernel', blur_kernel)
-            self.max_mip += math.log(2*max(self.stds)) / math.log(self.power)
-
         self.bg_mats = nn.ParameterList([
-            # nn.Parameter(0.5 * torch.randn((1, 6, bg_resolution // self.power**i , bg_resolution // self.power**i, 3)) / (self.num_levels - i))
-            # nn.Parameter(-0.5 * torch.ones((1, 6, bg_resolution // self.power**i , bg_resolution // self.power**i, 3)) / (self.num_levels - i))
             nn.Parameter(init_val * torch.ones((1, 6, bg_resolution // self.power**i , bg_resolution // self.power**i, 3)) / (self.num_levels - i))
             for i in range(num_levels-1, -1, -1)])
-        # self.activation_fn = torch.nn.Softplus(beta=3)
 
     def get_optparam_groups(self):
         return [
@@ -133,6 +120,7 @@ class HierarchicalCubeMap(torch.nn.Module):
              'name': 'bg'},
             {'params': self.mul,
              'lr': self.mul_lr,
+             'betas': [0.9, 0.999],
              'name': 'bg'},
             {'params': [self.mipbias],
              'lr': self.mipbias_lr,
@@ -148,10 +136,7 @@ class HierarchicalCubeMap(torch.nn.Module):
             return torch.exp(x).clip(min=0.01, max=1000)
 
     def calc_weight(self, mip):
-        # return 1/2**(self.num_levels-mip)
-        return 1#/(self.num_levels-mip)
-        # return 1
-        # return 1/(self.num_levels-mip)**2
+        return 1
 
     def calc_mip(self, i):
         return self.num_levels - 1 - i
@@ -159,26 +144,6 @@ class HierarchicalCubeMap(torch.nn.Module):
     @property
     def bg_resolution(self):
         return self.bg_mats[-1].shape[2]
-
-    def create_pyramid(self):
-        start_mip = self.calc_mip(0)
-        weight = self.calc_weight(start_mip)
-        if self.interp_pyramid:
-            bg_mat = 0
-            bg_resolution = self.bg_mats[0].shape[2]
-            # for i, mat in enumerate(self.bg_mats[:2]):
-            for i, mat in enumerate(self.bg_mats):
-                interp = F.interpolate(mat.squeeze(0).permute(0, 3, 1, 2), size=(bg_resolution, bg_resolution), mode='bilinear', align_corners=self.align_corners) / (i+2)
-                bg_mat += interp
-        else:
-            bg_mat = self.bg_mats[0].squeeze(0).permute(0, 3, 1, 2) * weight
-        bg_mat = self.activation_fn(bg_mat)
-        convmats = cubemap_convolve(bg_mat, self.blur_kernel)
-        # convmats = self.activation_fn(convmats)
-        for i, s in enumerate(self.stds):
-            mat = convmats[:, 3*i:3*i+3].permute(0, 2, 3, 1).unsqueeze(0)
-            mip = start_mip + math.log(2*s) / math.log(self.power)
-            yield mat, mip
 
     def get_cubemap_faces(self):
         bg_mats = [[] for _ in range(6)]
@@ -199,13 +164,7 @@ class HierarchicalCubeMap(torch.nn.Module):
         for i in range(self.num_levels):
             bg_mat = torch.cat([sum(bg_mats[j][:i+1]) for j in range(6)], dim=3)
             mip = self.calc_mip(i)
-        # for bg_mat, mip in self.iter_levels():
-        #     bg_mat = torch.cat(bg_mat.data.unbind(1), dim=2).permute(0, 3, 1, 2)
-            # bg_mat = F.interpolate(bg_mat, size=(self.bg_resolution, self.bg_resolution*6), mode='bilinear', align_corners=self.align_corners)
-            # bg_mat = bg_mat * self.calc_weight(mip)
-            # bg_mats += bg_mat
-            # bg_mats = bg_mat
-            im = self.activation_fn(self.brightness + self.mul*bg_mat)
+            im = self.activation_fn(self.brightness.clip(min=-1, max=2) + self.mul*bg_mat)
             if tonemap is not None:
                 im = tonemap(im)
             im = im.clamp(0, 1)
@@ -229,7 +188,6 @@ class HierarchicalCubeMap(torch.nn.Module):
         num_pixels = self.bg_mats[-1].numel() // 3
         # saTexel = distortion / num_pixels
         miplevel = ((saSample - torch.log(saTexel)) / math.log(self.power))/2 + self.mipbias + self.mipnoise * torch.rand_like(saSample)
-        # miplevel = miplevel.clip(0, self.max_mip-1)
         return miplevel.clip(0)
         
     def forward(self, viewdirs, saSample, max_level=None):
@@ -238,7 +196,6 @@ class HierarchicalCubeMap(torch.nn.Module):
         max_level = self.num_levels if max_level is None else max_level
         V = viewdirs.reshape(1, -1, 1, 3).contiguous()
         miplevel = self.sa2mip(viewdirs, saSample)
-        # ic(miplevel.mean())
 
         sumemb = 0
         for bg_mat, mip in self.iter_levels():
@@ -251,195 +208,11 @@ class HierarchicalCubeMap(torch.nn.Module):
             emb = emb.reshape(-1, 3)
             # offset = bg_mat.mean()
 
-            # weight = (mip - miplevel + 1).clip(0, 1).reshape(-1, 1)
-            # # embs.append(emb / 2**i * mask.reshape(-1, 1))
-            # # embs.append(emb / (i+1) * weight + (1-weight) * offset)
-            # sumemb += emb * self.calc_weight(mip) * weight
             sumemb += emb
-            # embs.append(emb / 2**(i) * weight.reshape(-1, 1))
             if mip >= max_level:
                 break
         img = self.activation_fn(self.brightness.clip(min=-1, max=2) + self.mul*sumemb)
-        # if miplevel.max() >= self.num_levels-1 and len(self.stds) > 0:
-        #     mask = miplevel.reshape(-1) >= self.num_levels-1
-        #     blur_img = 0
-        #     weights = 0
-        #     for bg_mat, mip in self.create_pyramid():
-        #         weight = 1 - (mip - miplevel.reshape(-1, 1)[mask]).abs().clip(0, 1)
-        #         # ic(torch.cat([weight, miplevel.reshape(-1, 1)[mask]], dim=1), mip)
-        #         emb = nvdr.texture(bg_mat.contiguous(), V[:, mask].contiguous(), boundary_mode='cube')
-        #         emb = emb.reshape(-1, 3)
-        #         blur_img += emb * weight
-        #         weights += weight
-        #     img[mask] = blur_img / (weights+1e-8)
+        # ic(img.mean(), self.brightness, self.mul)
 
         return img
-
-class HierarchicalBG(torch.nn.Module):
-    def __init__(self, bg_rank, unwrap_fn, bg_resolution=512, num_levels=2, featureC=128, activation='identity', num_layers=2, power=2, mipbias=0):
-        super().__init__()
-        self.num_levels = num_levels
-        self.power = power
-        self.mipbias = mipbias
-        self.bg_mats = nn.ParameterList([
-            # nn.Parameter(0.5 * torch.randn((1, 3, bg_resolution // self.power**i * unwrap_fn.H_mul, bg_resolution // self.power**i * unwrap_fn.W_mul)))
-            nn.Parameter(0.5 * torch.rand((1, 3, bg_resolution // self.power**i * unwrap_fn.H_mul, bg_resolution // self.power**i * unwrap_fn.W_mul)))# / (self.num_levels-i) )
-            # nn.Parameter(0.1 * torch.ones((1, 6, bg_resolution // self.power**i , bg_resolution // self.power**i, 3)))
-            for i in range(num_levels-1, -1, -1)])
-
-        self.unwrap_fn = unwrap_fn
-        self.bg_rank = bg_rank
-        if num_layers == 0 and bg_rank == 3:
-            self.bg_net = torch.nn.Identity()
-        else:
-            self.bg_net = nn.Sequential(
-                nn.Linear(bg_rank, featureC, bias=False),
-                *sum([[
-                        torch.nn.ReLU(inplace=True),
-                        torch.nn.Linear(featureC, featureC, bias=False)
-                    ] for _ in range(num_layers-2)], []),
-                torch.nn.ReLU(inplace=True),
-                nn.Linear(featureC, 3, bias=False),
-            )
-        self.align_corners = True
-        self.smoothing = 1
-        start_mip = self.num_levels - 1
-        self.max_mip = start_mip
-
-    def iter_levels(self):
-        for i, bg_mat in enumerate(self.bg_mats):
-            yield bg_mat, self.calc_mip(i)
-
-    def activation_fn(self, x):
-        # return F.softplus(x-10, beta=0.2)
-        return F.softplus(x+0.5, beta=6)
-        # return F.relu(x+0.5)
-
-    def calc_weight(self, mip):
-        # return 1/2**(self.num_levels-mip)
-        # return 1/(self.num_levels-mip)
-        return 1
-        # return 1/(self.num_levels-mip)**2
-
-    def calc_mip(self, i):
-        return self.num_levels - 1 - i
-
-    @property
-    def bg_resolution(self):
-        return self.bg_mats[-1].shape[2]
-
-    @torch.no_grad()
-    def save(self, path, prefix='', tonemap=None):
-        bg_mats = 0
-        bg_resolution = self.bg_mats[-1].shape[2] // self.unwrap_fn.H_mul
-        for bg_mat, mip in self.iter_levels():
-            bg_mat = F.interpolate(bg_mat.data, size=(bg_resolution*self.unwrap_fn.H_mul, bg_resolution*self.unwrap_fn.W_mul), mode='bilinear', align_corners=self.align_corners)
-            bg_mat = bg_mat * self.calc_weight(mip)
-            bg_mats += bg_mat
-            # bg_mats = bg_mat
-            im = self.activation_fn(bg_mats)
-            if tonemap is not None:
-                im = tonemap(im)
-            else:
-                im = im.clamp(0, 1)
-            im = (255*im).short().permute(0, 2, 3, 1).squeeze(0)
-            im = im.cpu().numpy()
-            im = cv2.cvtColor(im.astype(np.uint8), cv2.COLOR_RGB2BGR)
-            cv2.imwrite(str(path / f'{prefix}pano{mip}.png'), im)
-
-    def sa2mip(self, u, saSample):
-        h, w = self.bg_mats[-1].shape[-2], self.bg_mats[-1].shape[-3]
-        saTexel = 4 * math.pi / (6*h*w) * 4
-        # TODO calculate distortion of cube map for saTexel
-        # distortion = self.unwrap_fn.calc_distortion(u)
-        saTexel = self.unwrap_fn.calc_distortion(u) / h / w
-        # saTexel is the ratio to the solid angle subtended by one pixel of the 0th mipmap level
-        num_pixels = self.bg_mats[-1].numel() // 3
-        # saTexel = distortion / num_pixels
-        miplevel = ((saSample - torch.log(saTexel)) / math.log(self.power))/2 + self.mipbias
-        miplevel = miplevel.clip(0, self.max_mip-1)
-        return miplevel
-
-    @torch.no_grad()
-    def upsample(self, bg_resolution):
-        return
-        
-    def forward(self, viewdirs, saSample, max_level=None):
-        B = viewdirs.shape[0]
-        x = self.unwrap_fn(viewdirs)
-        res = self.bg_mats[-1].shape[-2]
-        max_level = self.num_levels if max_level is None else max_level
-        miplevel = self.sa2mip(viewdirs, saSample)
-
-        sumemb = 0
-        for bg_mat, mip in self.iter_levels():
-            # emb = F.grid_sample(smooth_mat.permute(1, 0, 2, 3), x, mode='bilinear', align_corners=self.align_corners)
-            emb = F.grid_sample(bg_mat, x, mode='bilinear', align_corners=self.align_corners)
-            emb = emb.reshape(self.bg_rank, -1).T
-            # offset = bg_mat.mean()
-
-            weight = (mip - miplevel + 1).clip(0, 1).reshape(-1, 1)
-            # embs.append(emb / 2**i * mask.reshape(-1, 1))
-            # embs.append(emb / (i+1) * weight + (1-weight) * offset)
-            sumemb += emb * self.calc_weight(mip) * weight
-            # embs.append(emb / 2**(i) * weight.reshape(-1, 1))
-            if mip >= max_level:
-                break
-        img = self.activation_fn(sumemb)
-        return img
-
-
-class BackgroundRender(torch.nn.Module):
-    def __init__(self, bg_rank, unwrap_fn, bg_resolution=512, view_encoder=None, featureC=128, num_layers=2):
-        super().__init__()
-        self.bg_mat = nn.Parameter(0.1 * torch.randn((1, bg_rank, bg_resolution*unwrap_fn.H_mul, bg_resolution*unwrap_fn.W_mul))) # [1, R, H, W]
-        self.bg_resolution = bg_resolution
-        self.view_encoder = view_encoder
-        self.unwrap_fn = unwrap_fn
-        self.bg_rank = bg_rank
-        d = self.view_encoder.dim() if self.view_encoder is not None else 0
-        if num_layers == 0 and bg_rank == 3:
-            self.bg_net = nn.Identity()
-        else:
-            self.bg_net = nn.Sequential(
-                nn.Linear(bg_rank+d, featureC, bias=False),
-                *sum([[
-                        torch.nn.ReLU(inplace=True),
-                        torch.nn.Linear(featureC, featureC, bias=False)
-                    ] for _ in range(num_layers-2)], []),
-                torch.nn.ReLU(inplace=True),
-                nn.Linear(featureC, 3, bias=False),
-                nn.Softplus()
-            )
-        self.align_corners = False
-
-    @torch.no_grad()
-    def save(self, path):
-        im = (255*self.bg_net(self.bg_mat).clamp(0, 1)).short().permute(0, 2, 3, 1).squeeze(0)
-        im = im.cpu().numpy()
-        im = im[::-1].astype(np.uint8)
-        im = cv2.cvtColor(im, cv2.COLOR_RGB2BGR)
-        cv2.imwrite(path, im)
-
-    @torch.no_grad()
-    def upsample(self, bg_resolution):
-        self.bg_resolution = bg_resolution
-        self.bg_mat = torch.nn.Parameter(
-            F.interpolate(self.bg_mat.data, size=(bg_resolution*self.unwrap_fn.H_mul, bg_resolution*self.unwrap_fn.W_mul), mode='bilinear', align_corners=self.align_corners)
-        )
-        
-    def forward(self, viewdirs, roughness):
-        B = viewdirs.shape[0]
-        x = self.unwrap_fn(viewdirs)
-
-        # col = ((x[..., 0]/2 +0.5)* self.bg_mat.shape[3]).long()
-        # row = ((x[..., 1]/2 +0.5)* self.bg_mat.shape[2]).long()
-        # ic(self.bg_mat[:, :, row, col])
-        emb = F.grid_sample(self.bg_mat, x, mode='bilinear', align_corners=self.align_corners)
-        emb = emb.reshape(self.bg_rank, -1).T
-        # return torch.sigmoid(emb)
-        if self.view_encoder is not None:
-            shemb = self.view_encoder(viewdirs, torch.tensor(20.0, device=viewdirs.device)).reshape(B, -1)
-            emb = torch.cat([emb, shemb], dim=1)
-        return self.bg_net(emb)
 

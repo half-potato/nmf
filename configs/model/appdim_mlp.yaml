@@ -102,7 +102,7 @@ arch:
     mix_diffuse: False
     use_roughness: true
     detach_roughness: false
-    lr: 1e-3
+    lr: 1e-5
 
   bg_module:
     _target_: models.bg_modules.HierarchicalCubeMap
@@ -112,9 +112,10 @@ arch:
     activation: 'exp'
     power: 2
     stds: []
-    lr: 0.4
+    lr: 0.1
     init_val: -1
-    brightness_lr: 0.01
+    mul_lr: 0.05
+    brightness_lr: 0.000
     betas: [0.9, 0.999]
     mipbias_lr: 1e-4
     mipnoise: 0.5
@@ -167,9 +168,9 @@ params:
 
   TV_weight_density: 0.0
   TV_weight_app: 0.0
-  normal_lambda: 1e-2
-  diffuse_lambda: 0 #2e-4
-  backwards_rays_lambda: 0.1
+  normal_lambda: 3e-3
+  diffuse_lambda: 0
+  backwards_rays_lambda: 0.2
   floater_lambda: 1e-3
   visibility_lambda: 0
   # floater_lambda: 0.00001
