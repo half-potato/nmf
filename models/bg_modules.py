@@ -81,7 +81,7 @@ class CubeUnwrap(torch.nn.Module):
 
 
 class HierarchicalCubeMap(torch.nn.Module):
-    def __init__(self, bg_resolution=512, num_levels=1, featureC=128, activation='identity', power=4, brightness_lr=0.01, mul_lr=0.01,
+    def __init__(self, bg_resolution=512, num_levels=1, featureC=128, activation='identity', power=4, brightness_lr=0.01, mul_lr=0.01, mul_betas=[0.9, 0.999],
                  stds = [1, 2, 4, 8], betas=[0.9, 0.99], mipbias=+0.5, init_val=-2, interp_pyramid=True, lr=0.15, mipbias_lr=1e-3, mipnoise=0.5, learnable_bias=True):
         super().__init__()
         self.num_levels = num_levels
@@ -93,12 +93,14 @@ class HierarchicalCubeMap(torch.nn.Module):
         self.mipbias_lr = mipbias_lr
         self.lr = lr
         self.mul_lr = mul_lr
+        self.mul_betas = mul_betas
         start_mip = self.num_levels - 1
         self.mipnoise = mipnoise
         self.betas = betas
         self.max_mip = start_mip
         self.register_parameter('brightness', torch.nn.Parameter(torch.tensor(0.0, dtype=float)))
         self.register_parameter('mul', torch.nn.Parameter(torch.tensor(1.0, dtype=float)))
+        self.register_parameter('mul2', torch.nn.Parameter(torch.tensor(1.0, dtype=float)))
         if learnable_bias:
             self.register_parameter('mipbias', torch.nn.Parameter(torch.tensor(mipbias, dtype=float)))
         else:
@@ -118,9 +120,13 @@ class HierarchicalCubeMap(torch.nn.Module):
             {'params': self.brightness,
              'lr': self.brightness_lr,
              'name': 'bg'},
+            {'params': self.mul2,
+             'lr': self.mul_lr,
+             'betas': self.mul_betas,
+             'name': 'bg'},
             {'params': self.mul,
              'lr': self.mul_lr,
-             'betas': [0.9, 0.999],
+             'betas': self.mul_betas,
              'name': 'bg'},
             {'params': [self.mipbias],
              'lr': self.mipbias_lr,
@@ -128,6 +134,7 @@ class HierarchicalCubeMap(torch.nn.Module):
         ]
 
     def activation_fn(self, x):
+        x = self.brightness.clip(min=-1, max=2) + self.mul*x
         if self.activation == 'softplus':
             return F.softplus(x, beta=6)
         elif self.activation == 'clip':
@@ -164,7 +171,7 @@ class HierarchicalCubeMap(torch.nn.Module):
         for i in range(self.num_levels):
             bg_mat = torch.cat([sum(bg_mats[j][:i+1]) for j in range(6)], dim=3)
             mip = self.calc_mip(i)
-            im = self.activation_fn(self.brightness.clip(min=-1, max=2) + self.mul*bg_mat)
+            im = self.activation_fn(bg_mat)
             if tonemap is not None:
                 im = tonemap(im)
             im = im.clamp(0, 1)
@@ -211,7 +218,7 @@ class HierarchicalCubeMap(torch.nn.Module):
             sumemb += emb
             if mip >= max_level:
                 break
-        img = self.activation_fn(self.brightness.clip(min=-1, max=2) + self.mul*sumemb)
+        img = self.activation_fn(sumemb)
         # ic(img.mean(), self.brightness, self.mul)
 
         return img

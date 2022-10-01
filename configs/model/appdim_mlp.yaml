@@ -13,7 +13,7 @@ arch:
   world_bounces: 0
   # world_bounces: 2048000
   max_normal_similarity: 1 #0.87
-  cold_start_bg_iters: 0
+  cold_start_bg_iters: 500
   attach_normal_iter: 0
   back_clip: 0.3
 
@@ -112,11 +112,12 @@ arch:
     activation: 'exp'
     power: 2
     stds: []
-    lr: 0.1
+    lr: 0.4
     init_val: -1
-    mul_lr: 0.05
-    brightness_lr: 0.000
-    betas: [0.9, 0.999]
+    mul_lr: 0.1
+    brightness_lr: 0.005
+    betas: [0.9, 0.99]
+    mul_betas: [0.9, 0.999]
     mipbias_lr: 1e-4
     mipnoise: 0.5
 

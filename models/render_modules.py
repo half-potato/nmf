@@ -420,7 +420,7 @@ class MLPDiffuse(torch.nn.Module):
         ambient = torch.sigmoid(mlp_out[..., 6:7]-2)
         roughness = torch.sigmoid(mlp_out[..., 7:8]).clip(min=1e-2)
         # ic(mlp_out[..., 0:6])
-        tint = torch.sigmoid((mlp_out[..., 3:4]-2).clip(min=-10, max=10))
+        tint = torch.sigmoid((mlp_out[..., 3:4]-1).clip(min=-10, max=10))
         # ic(tint.mean())
         f0 = torch.sigmoid((mlp_out[..., 4:5]+1).clip(min=-10, max=10))
         # diffuse = rgb[..., :3]
