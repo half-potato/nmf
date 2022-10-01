@@ -115,9 +115,9 @@ arch:
     lr: 0.4
     init_val: -1
     mul_lr: 0.1
-    brightness_lr: 0.005
-    betas: [0.9, 0.99]
-    mul_betas: [0.9, 0.999]
+    brightness_lr: 0.01
+    betas: [0.9, 0.999]
+    mul_betas: [0.9, 0.99]
     mipbias_lr: 1e-4
     mipnoise: 0.5
 
@@ -134,6 +134,7 @@ arch:
     featureC: 128
     num_layers: 3
     lr: 1e-4
+    tint_offset: -1
     # allocation: 7
 
   normal_module:
