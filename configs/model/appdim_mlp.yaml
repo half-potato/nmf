@@ -10,8 +10,8 @@ arch:
   infinity_border: False
   use_diffuse: True
   appdim_noise_std: 0.0
-  world_bounces: 0
-  # world_bounces: 2048000
+  # world_bounces: 0
+  world_bounces: 2048000
   max_normal_similarity: 1 #0.87
   cold_start_bg_iters: 500
   attach_normal_iter: 0

@@ -219,7 +219,6 @@ class HierarchicalCubeMap(torch.nn.Module):
             if mip >= max_level:
                 break
         img = self.activation_fn(sumemb)
-        # ic(img.mean(), self.brightness, self.mul)
 
         return img
 

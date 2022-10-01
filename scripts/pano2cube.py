@@ -8,7 +8,12 @@ import torch.nn.functional as F
 import matplotlib.pyplot as plt
 from pathlib import Path
 from models.cubemap_conv import cubemap_convolve, create_blur_pyramid
-import cv2
+import argparse
+
+parser = argparse.ArgumentParser()
+parser.add_argument('input', type=str)
+parser.add_argument('--output', type=Path, default=Path('log/mats360_bg.th'))
+args = parser.parse_args()
 
 batch_size = 4096*50
 device = torch.device('cuda')
@@ -26,8 +31,8 @@ bg_module = bg_modules.HierarchicalCubeMap(bg_resolution=2048, num_levels=1, fea
 # bg_module = render_modules.MLPRender_FP(0, None, ish.ListISH([0,1,2,4,8,16]), -1, 256, 6)
 ic(bg_module)
 bg_module = bg_module.to(device)
-pano = imageio.imread("ninomaru_teien_4k.exr")
-optim = torch.optim.Adam(bg_module.parameters(), lr=0.111)
+pano = imageio.imread(args.input)
+optim = torch.optim.Adam(bg_module.get_optparam_groups(), lr=0.001)
 # optim = torch.optim.Adam(bg_module.parameters(), lr=1.0)
 # optim = torch.optim.SGD(bg_module.parameters(), lr=0.5, momentum=0.99, weight_decay=0)
 # optim = torch.optim.Adam(bg_module.parameters(), lr=0.001)
@@ -92,13 +97,14 @@ for i in iter:
     ], dim=1)
     samp_vecs = vecs
     roughness = r_v*torch.ones(theta.shape[0], device=device)
-    r_v *= 0.99
+    # r_v *= 0.99
     output = bg_module(samp_vecs, torch.log(roughness))
     # viewdotnorm = torch.ones_like(theta).reshape(-1, 1)
     # roughness = 0.01*torch.ones_like(theta).reshape(-1, 1)
     # output = bg_module(pts=torch.zeros_like(vecs), viewdirs=None, features=None, refdirs=samp_vecs, roughness=roughness, viewdotnorm=viewdotnorm)
 
     # loss = torch.sqrt((output - samp)**2+1e-8).mean()
+    # ic(samp.mean(), output.mean(), output.max(), samp.max())
     loss = loss_fn(output, samp)
     photo_loss = torch.sqrt((output.clip(0, 1) - samp.clip(0, 1))**2+1e-8).mean()
     loss.backward()
@@ -110,7 +116,7 @@ for i in iter:
 
 # bg_module.reinit_mip_levels()
 
-torch.save(bg_module.state_dict(), 'log/mats360_bg.th')
+torch.save(bg_module.state_dict(), args.output)
 bg_module.save(Path('log/cubed'), tonemap=tm)
 bg_resolution = bg_module.bg_mats[-1].shape[2]
 # save

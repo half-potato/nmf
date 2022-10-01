@@ -37,12 +37,12 @@ class TensorVMSplit(TensorVoxelBase):
     def init_one_svd(self, n_component, grid_size, scale, shift):
         plane_coef, line_coef = [], []
 
-        xyg = torch.meshgrid(torch.linspace(-1, 1, grid_size[0]), torch.linspace(-1, 1, grid_size[1]), indexing='ij')
-        xy = xyg[0] + xyg[1]
 
         for i in range(len(self.vecMode)):
             vec_id = self.vecMode[i]
             mat_id_0, mat_id_1 = self.matMode[i]
+            xyg = torch.meshgrid(torch.linspace(-1, 1, grid_size[mat_id_0]), torch.linspace(-1, 1, grid_size[mat_id_1]), indexing='ij')
+            xy = xyg[0] + xyg[1]
             pos_vals = xy.reshape(1, 1, grid_size[mat_id_0], grid_size[mat_id_1])
             # freqs = torch.arange(n_component[i]//2).reshape(1, -1, 1, 1)
             n_degs = n_component[i]//2

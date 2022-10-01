@@ -31,4 +31,4 @@ lr_upsample_reset: 1
 fp16: false
 n_bg_iters: 1000
 save_often: false
-fixed_bg: False
+fixed_bg: NULL

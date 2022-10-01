@@ -54,7 +54,15 @@ def render_test(args):
     ndc_ray = args.dataset.ndc_ray
 
     ckpt = torch.load(args.ckpt)
-    tensorf = TensorNeRF.load(ckpt, args.model.arch, near_far=test_dataset.near_far, strict=False).to(device)
+    tensorf = TensorNeRF.load(ckpt, args.model.arch, near_far=test_dataset.near_far, strict=False)
+
+    if args.fixed_bg is not None:
+        bg_sd = torch.load(args.fixed_bg)
+        from models import bg_modules
+        bg_module = bg_modules.HierarchicalCubeMap(bg_resolution=2048, num_levels=1, featureC=128, activation='softplus', power=2, lr=1e-2)
+        bg_module.load_state_dict(bg_sd, strict=False)
+        tensorf.bg_module = bg_module
+    tensorf = tensorf.to(device)
     tensorf.sampler.update(tensorf.rf, init=True)
 
     logfolder = os.path.dirname(args.ckpt)
@@ -123,8 +131,8 @@ def reconstruction(args):
         # tensorf.rf.update_stepSize(grid_size)
 
     # TODO REMOVE
-    if args.fixed_bg:
-        bg_sd = torch.load('log/mats360_bg.th')
+    if args.fixed_bg is not None:
+        bg_sd = torch.load(args.fixed_bg)
         from models import bg_modules
         bg_module = bg_modules.HierarchicalCubeMap(bg_resolution=2048, num_levels=1, featureC=128, activation='softplus', power=2, lr=1e-2)
         bg_module.load_state_dict(bg_sd, strict=False)

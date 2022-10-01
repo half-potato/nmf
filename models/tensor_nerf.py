@@ -146,6 +146,7 @@ class TensorNeRF(torch.nn.Module):
     def load(ckpt, config=None, near_far=None, **kwargs):
         config = ckpt['config'] if config is None else config
         aabb = ckpt['state_dict']['rf.aabb']
+        del ckpt['state_dict']['brdf_sampler.angs']
         near_far = near_far if near_far is not None else [1, 6]
         if 'rf.grid_size' in ckpt['state_dict']:
             grid_size = list(ckpt['state_dict']['rf.grid_size'])
@@ -578,7 +579,7 @@ class TensorNeRF(torch.nn.Module):
 
             reflect_rgb = torch.zeros_like(diffuse)
             roughness = matprop['roughness'].squeeze(-1)
-            # roughness = 1e-2*torch.ones_like(roughness)
+            # roughness = 1e-3*torch.ones_like(roughness)
             # roughness = torch.where((xyz_sampled[..., 0].abs() < 0.15) | (xyz_sampled[..., 1].abs() < 0.15), 0.30, 0.15)[papp_mask]
             if recur >= self.max_recurs and self.ref_module is None:
                 rgb[app_mask] = diffuse.clip(0, 1)
@@ -753,8 +754,8 @@ class TensorNeRF(torch.nn.Module):
                 diffuse_map = torch.zeros(rgb_map.shape)
                 roughness_map = torch.zeros((rgb_map.shape[0], 1))
             if app_mask.any() and self.brdf is not None and bounce_mask.any() and ray_mask.any():
-                # s = row_mask_sum(incoming_light.detach(), ray_mask) / (ray_mask.sum(dim=1)+1e-8)[..., None]
-                s = tinted_ref_rgb
+                s = row_mask_sum(incoming_light.detach(), ray_mask) / (ray_mask.sum(dim=1)+1e-8)[..., None]
+                # s = tinted_ref_rgb
                 # s = brdf_rgb
                 spec_map = row_mask_sum(s*weight[full_bounce_mask][..., None], full_bounce_mask).cpu()
                 brdf_map = row_mask_sum(brdf_rgb*weight[full_bounce_mask][..., None], full_bounce_mask).cpu()

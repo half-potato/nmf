@@ -340,7 +340,6 @@ def evaluation_path(test_dataset,tensorf, c2ws, renderer, *args, device='cuda', 
     def iterator():
         for idx, c2w in tqdm(enumerate(c2ws)):
 
-
             c2w = torch.FloatTensor(c2w)
             rays_o, rays_d = get_rays(test_dataset.directions, c2w)  # both (h*w, 3)
             if ndc_ray:
