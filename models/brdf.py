@@ -122,7 +122,7 @@ class GGXSampler(torch.nn.Module):
         a_mask = a.expand(u1.shape)[ray_mask]
 
         r_mask_u = torch.min(r1_c, r2_c).reshape(-1, 1).expand(u1.shape)[ray_mask]
-        r_mask = r_mask_u.clip(min=self.min_roughness)
+        r_mask = (r_mask_u**2).clip(min=self.min_roughness)
 
         r_mask_u1 = r1_c.reshape(-1, 1).expand(u1.shape)[ray_mask]
         r_mask1 = r_mask_u1.clip(min=self.min_roughness)

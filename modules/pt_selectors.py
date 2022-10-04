@@ -22,7 +22,7 @@ class Selector:
         # mweight[inv_full_bounce_mask] = 0
         # ic(mweight.sum(dim=1, keepdim=True))
         n_weight = weight / mweight.sum(dim=1, keepdim=True).clip(min=0.1)
-        pt_limit = n_weight[app_mask] * self.bounces_per_ray + 0.5
+        pt_limit = n_weight * self.bounces_per_ray + 0.5
         # ic((n_weight * self.bounces_per_ray+0.5).int().sum(dim=1))
         # ic(weight.sum(dim=1))
         # ic(n_weight.sum(dim=1))
@@ -31,7 +31,19 @@ class Selector:
         # ic((n_weight * self.bounces_per_ray+1.0).int().sum(dim=1))
         # ic((n_weight * self.bounces_per_ray).sum(dim=1))
         # (B, N)
-        ray_mask = torch.arange(num_roughness_rays, device=device).reshape(1, -1) < pt_limit.reshape(-1, 1)-1
+
+        # full_bounce_mask = torch.zeros_like(app_mask)
+        # ainds, ajinds = torch.where(app_mask)
+        # full_bounce_mask[ainds[bounce_mask], ajinds[bounce_mask]] = 1
+
+        ray_mask = torch.arange(num_roughness_rays, device=device).reshape(1, -1) < pt_limit[app_mask].reshape(-1, 1)-1
+        # ic(1, ray_mask.sum())
+        # num_missing = (self.bounces_per_ray - pt_limit.int().sum(dim=1, keepdim=True))
+        # b = num_missing - torch.rand_like(weight) * app_mask.sum(dim=1, keepdim=True)
+        # pt_limit[full_bounce_mask] += (b < 0)[full_bounce_mask]
+        # ray_mask = torch.arange(num_roughness_rays, device=device).reshape(1, -1) < pt_limit[app_mask].reshape(-1, 1)-1
+        # ic(2, ray_mask.sum())
+
         bounce_mask &= ray_mask.sum(dim=-1) > 0
         ray_mask = ray_mask[bounce_mask]
 

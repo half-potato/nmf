@@ -263,12 +263,13 @@ def reconstruction(args):
     # with torch.autograd.detect_anomaly():
         for iteration in pbar:
 
-            if iteration < 50:
+            if iteration < 250:
                 ray_idx, rgb_idx = trainingSampler.nextids(batch=params.batch_size//8)
-            elif iteration < 250:
+            elif iteration < 500:
                 ray_idx, rgb_idx = trainingSampler.nextids(batch=params.batch_size//4)
             else:
                 ray_idx, rgb_idx = trainingSampler.nextids()
+
             # ray_idx, rgb_idx = trainingSampler.nextids()
 
             # patches = allrgbs[ray_idx].reshape(-1, args.bundle_size, args.bundle_size, 3)

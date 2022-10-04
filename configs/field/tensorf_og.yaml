@@ -3,7 +3,8 @@ _target_: fields.tensoRF.TensorVMSplit
 distance_scale: 25
 density_n_comp: 16
 # density_n_comp: 24
-appearance_n_comp: 48
+# appearance_n_comp: 48
+appearance_n_comp: 16
 app_dim: 27
 step_ratio: 0.5
 density_res_multi: 1

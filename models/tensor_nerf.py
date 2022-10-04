@@ -606,7 +606,7 @@ class TensorNeRF(torch.nn.Module):
                     noise_rays, mipval, halfvec, diffvec = self.brdf_sampler.sample(
                             num_roughness_rays,
                             brefdirs, V[bounce_mask], outward,
-                            matprop['r1'][bounce_mask]**2, matprop['r2'][bounce_mask]**2, ray_mask)
+                            matprop['r1'][bounce_mask], matprop['r2'][bounce_mask], ray_mask)
                     bounce_rays = torch.cat([
                         ray_xyz[ray_mask],
                         noise_rays,

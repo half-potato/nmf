@@ -1,4 +1,4 @@
-scenedir: nerf_synthetic/mic
+scenedir: nerf_synthetic/drums
 dataset_name: blender
 downsample_train: 1
 downsample_test: 1
