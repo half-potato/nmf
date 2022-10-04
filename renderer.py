@@ -278,8 +278,8 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
             imageio.imwrite(f'{savePath}/world_normal/{prtx}{idx:03d}.png', vis_world_normal_map)
             imageio.imwrite(f'{savePath}/err/{prtx}{idx:03d}.png', err_map)
             imageio.imwrite(f'{savePath}/surf_width/{prtx}{idx:03d}.png', data.surf_width.numpy().astype(np.uint8))
-            debug = 255*data.debug_map.clamp(0, 1)
-            # debug = data.debug_map
+            # debug = 255*data.debug_map.clamp(0, 1)
+            debug = data.debug_map
             imageio.imwrite(f'{savePath}/debug/{prtx}{idx:03d}.png', (debug.numpy()).astype(np.uint8))
             if tensorf.ref_module is not None:
                 imageio.imwrite(f'{savePath}/envmaps/{prtx}ref_map_{idx:03d}.png', env_map)

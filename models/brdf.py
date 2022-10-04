@@ -82,10 +82,10 @@ class GGXSampler(torch.nn.Module):
     def update(self, *args, **kwargs):
         pass
 
-    def sample(self, num_samples, refdirs, viewdir, normal, roughness, ray_mask):
+    def sample(self, num_samples, refdirs, viewdir, normal, r1, r2, ray_mask):
         # viewdir: (B, 3)
         # normal: (B, 3)
-        # roughness: B
+        # r1, r2: B roughness values for anisotropic roughness
         device = normal.device
         B = normal.shape[0]
 
@@ -105,8 +105,9 @@ class GGXSampler(torch.nn.Module):
         # ic(1, V_l.min(dim=0), V_l.max(dim=0))
         V_l = torch.matmul(row_world_basis, viewdir.unsqueeze(-1)).squeeze(-1)
         # ic(2, V_l.min(dim=0), V_l.max(dim=0))
-        rough_clip = roughness.clip(min=self.min_roughness)
-        V_stretch = normalize(torch.stack([rough_clip*V_l[..., 0], rough_clip*V_l[..., 1], V_l[..., 2]], dim=-1)).unsqueeze(1)
+        r1_c = r1.clip(min=self.min_roughness).squeeze(-1)
+        r2_c = r2.clip(min=self.min_roughness).squeeze(-1)
+        V_stretch = normalize(torch.stack([r1_c*V_l[..., 0], r2_c*V_l[..., 1], V_l[..., 2]], dim=-1)).unsqueeze(1)
         T1 = torch.where(V_stretch[..., 2:3] < 0.999, normalize(torch.linalg.cross(V_stretch, z_up.unsqueeze(1), dim=-1)), x_up.unsqueeze(1))
         T2 = normalize(torch.linalg.cross(T1, V_stretch, dim=-1))
         z = V_stretch[..., 2].reshape(-1, 1)
@@ -119,8 +120,15 @@ class GGXSampler(torch.nn.Module):
 
         # stretch and mask stuff to reduce memory
         a_mask = a.expand(u1.shape)[ray_mask]
-        r_mask_u = roughness.reshape(-1, 1).expand(u1.shape)[ray_mask]
+
+        r_mask_u = torch.min(r1_c, r2_c).reshape(-1, 1).expand(u1.shape)[ray_mask]
         r_mask = r_mask_u.clip(min=self.min_roughness)
+
+        r_mask_u1 = r1_c.reshape(-1, 1).expand(u1.shape)[ray_mask]
+        r_mask1 = r_mask_u1.clip(min=self.min_roughness)
+        r_mask_u2 = r2_c.reshape(-1, 1).expand(u1.shape)[ray_mask]
+        r_mask2 = r_mask_u2.clip(min=self.min_roughness)
+
         z_mask = z.expand(u1.shape)[ray_mask]
         u1_mask = u1[ray_mask]
         u2_mask = u2[ray_mask]
@@ -135,7 +143,7 @@ class GGXSampler(torch.nn.Module):
         P2 = (r*safemath.safe_sin(phi)*torch.where(u2_mask < a_mask, torch.tensor(1.0, device=device), z_mask)).unsqueeze(-1)
         # ic((1-a).min(), a.min(), a.max(), phi.min(), phi.max(), (1-a).max())
         N_stretch = P1*T1_mask + P2*T2_mask + (1 - P1*P1 - P2*P2).clip(min=0).sqrt() * V_stretch_mask
-        H_l = normalize(torch.stack([r_mask*N_stretch[..., 0], r_mask*N_stretch[..., 1], N_stretch[..., 2].clip(min=0)], dim=-1))
+        H_l = normalize(torch.stack([r_mask1*N_stretch[..., 0], r_mask2*N_stretch[..., 1], N_stretch[..., 2].clip(min=0)], dim=-1))
         H = torch.matmul(row_world_basis_mask, H_l.unsqueeze(-1)).squeeze(-1)
         # H = torch.einsum('bni,bij->bnj', H_l, row_world_basis)
 

@@ -2,8 +2,7 @@ arch:
   _target_: models.tensor_nerf.TensorNeRF
   _partial_: True
 
-  alphaMask_thres: 0.0001
-  rayMarch_weight_thres: 0.0001
+  rayMarch_weight_thres: 1e-4
   max_recurs: 1
   roughness_rays: 50
   max_recur_rays: 5
@@ -15,12 +14,12 @@ arch:
   max_normal_similarity: 1 #0.87
   cold_start_bg_iters: 500
   attach_normal_iter: 0
-  back_clip: 0.3
+  back_clip: 0.0
 
   detach_inter: False
   selector:
     _target_: modules.pt_selectors.TopNWeight
-    max_selected: 1500000
+    max_selected: 15000000
     bounces_per_ray: 50
     weight_thres: 1e-3
 
@@ -38,7 +37,7 @@ arch:
     sample_mode: multi_jitter
     # sample_mode: single_jitter
     test_sample_mode: midpoint
-    threshold: 0.00005
+    threshold: 5e-5
     grid_size: 128
     bound: 1.5
 

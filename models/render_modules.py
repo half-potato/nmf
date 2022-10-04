@@ -366,7 +366,7 @@ class MLPDiffuse(torch.nn.Module):
                         # torch.nn.BatchNorm1d(featureC)
                     ] for _ in range(num_layers-2)], []),
                 torch.nn.ReLU(inplace=True),
-                torch.nn.Linear(featureC, 8),
+                torch.nn.Linear(featureC, 9),
             )
             torch.nn.init.constant_(self.mlp[-1].bias, 0)
             # self.mlp.apply(self.init_weights)
@@ -419,7 +419,8 @@ class MLPDiffuse(torch.nn.Module):
         """
 
         ambient = torch.sigmoid(mlp_out[..., 6:7]-2)
-        roughness = torch.sigmoid(mlp_out[..., 7:8]).clip(min=1e-2)
+        r1 = torch.sigmoid(mlp_out[..., 7:8]).clip(min=1e-2)
+        r2 = torch.sigmoid(mlp_out[..., 8:9]).clip(min=1e-2)
         # ic(mlp_out[..., 0:6])
         tint = torch.sigmoid((mlp_out[..., 3:4]-self.tint_offset).clip(min=-10, max=10))
         # ic(tint.mean())
@@ -436,7 +437,8 @@ class MLPDiffuse(torch.nn.Module):
             ambient = ambient,
             # albedo=albedo,
             diffuse = diffuse,
-            roughness = roughness,
+            r1 = r1,
+            r2 = r2,
             f0 = f0,
             tint=tint,
         )

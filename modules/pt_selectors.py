@@ -8,18 +8,31 @@ class Selector:
         self.weight_thres = weight_thres
         self.bounces_per_ray = bounces_per_ray
 
-    def __call__(self, app_mask, weight, VdotL, val, num_roughness_rays):
+    def __call__(self, app_mask, weight, VdotN, val, num_roughness_rays):
         # app_mask: (B, N) with M true elements
         # weight: (B, N)
         # val: (M)
         # bounce_mask: (M)
-        bounce_mask = self._forward(app_mask, weight, VdotL, val)
+        bounce_mask = self._forward(app_mask, weight, VdotN, val)
         device = weight.device
 
-        pt_limit = weight[app_mask] * self.bounces_per_ray
+        mweight = weight.clone()
+        # mweight[~app_mask] = 0
+        mweight[weight < self.val_thres] = 0
+        # mweight[inv_full_bounce_mask] = 0
+        # ic(mweight.sum(dim=1, keepdim=True))
+        n_weight = weight / mweight.sum(dim=1, keepdim=True).clip(min=0.1)
+        pt_limit = n_weight[app_mask] * self.bounces_per_ray + 0.5
+        # ic((n_weight * self.bounces_per_ray+0.5).int().sum(dim=1))
+        # ic(weight.sum(dim=1))
+        # ic(n_weight.sum(dim=1))
+        # ic((n_weight * app_mask).sum(dim=1))
+        # ic((app_mask).sum(dim=1))
+        # ic((n_weight * self.bounces_per_ray+1.0).int().sum(dim=1))
+        # ic((n_weight * self.bounces_per_ray).sum(dim=1))
         # (B, N)
         ray_mask = torch.arange(num_roughness_rays, device=device).reshape(1, -1) < pt_limit.reshape(-1, 1)-1
-        # bounce_mask &= ray_mask.sum(dim=-1) > 0
+        bounce_mask &= ray_mask.sum(dim=-1) > 0
         ray_mask = ray_mask[bounce_mask]
 
         # derived masks
@@ -33,7 +46,7 @@ class Selector:
         return bounce_mask, full_bounce_mask, inv_full_bounce_mask, ray_mask
 
 class TopNCombined(Selector):
-    def _forward(self, app_mask, weight, VdotL, prob):
+    def _forward(self, app_mask, weight, VdotN, prob):
         # N: int max number of selected
         # t: threshold
 
@@ -50,21 +63,21 @@ class TopNCombined(Selector):
         return bounce_mask
 
 class TopNWeight(Selector):
-    def _forward(self, app_mask, weight, VdotL, prob):
+    def _forward(self, app_mask, weight, VdotN, prob):
         pweight = weight[app_mask]
-        nmask = (VdotL.reshape(pweight.shape)) > 0
+        nmask = (VdotN.reshape(pweight.shape)) > -0.0
         bounce_mask = (pweight > self.weight_thres) & nmask
-        if bounce_mask.sum() > self.max_selected:
-            sweight, _ = torch.sort(-pweight[nmask].flatten())
-            t = -sweight[self.max_selected]
-            bounce_mask = pweight * nmask > t
+        # if bounce_mask.sum() > self.max_selected:
+        #     ic("HI")
+        #     sweight, _ = torch.sort(-pweight[nmask].flatten())
+        #     t = -sweight[self.max_selected]
+        #     bounce_mask = pweight * nmask > t
         return bounce_mask
 
 class TopNRoughness(Selector):
-    def _forward(self, app_mask, weight, VdotL, prob):
+    def _forward(self, app_mask, weight, VdotN, prob):
         bounce_mask = prob > self.val_thres
         if bounce_mask.sum() > self.max_selected:
-            ic("HI")
             sprob, _ = torch.sort(-prob.flatten())
             t = -sprob[self.max_selected]
             bounce_mask = prob > t
@@ -76,7 +89,7 @@ class Surface(Selector):
         self.eps = eps
         self.bounces_per_ray = bounces_per_ray
 
-    def _forward(self, app_mask, weight, VdotL, prob):
+    def _forward(self, app_mask, weight, VdotN, prob):
         thres = torch.max(weight, dim=1, keepdim=True).values - self.eps
         ssort, _ = torch.sort(-weight.flatten())
         t = -ssort[self.max_selected]
