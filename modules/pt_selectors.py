@@ -2,11 +2,12 @@ import torch
 from icecream import ic
 
 class Selector:
-    def __init__(self, bounces_per_ray, max_selected=99999999, val_thres=0, weight_thres=0, **kwargs):
+    def __init__(self, percent_bright, bounces_per_ray=10, max_selected=99999999, val_thres=0, weight_thres=0, **kwargs):
         self.max_selected = max_selected
         self.val_thres = val_thres
         self.weight_thres = weight_thres
         self.bounces_per_ray = bounces_per_ray
+        self.percent_bright = percent_bright
 
     def __call__(self, app_mask, weight, VdotN, val, num_roughness_rays):
         # app_mask: (B, N) with M true elements
@@ -16,6 +17,10 @@ class Selector:
         bounce_mask = self._forward(app_mask, weight, VdotN, val)
         device = weight.device
 
+        full_bounce_mask = torch.zeros_like(app_mask)
+        ainds, ajinds = torch.where(app_mask)
+        full_bounce_mask[ainds[bounce_mask], ajinds[bounce_mask]] = 1
+
         mweight = weight.clone()
         # mweight[~app_mask] = 0
         mweight[weight < self.val_thres] = 0
@@ -23,39 +28,28 @@ class Selector:
         # ic(mweight.sum(dim=1, keepdim=True))
         n_weight = weight / mweight.sum(dim=1, keepdim=True).clip(min=0.1)
         pt_limit = n_weight * self.bounces_per_ray + 0.5
-        # ic((n_weight * self.bounces_per_ray+0.5).int().sum(dim=1))
-        # ic(weight.sum(dim=1))
-        # ic(n_weight.sum(dim=1))
-        # ic((n_weight * app_mask).sum(dim=1))
-        # ic((app_mask).sum(dim=1))
-        # ic((n_weight * self.bounces_per_ray+1.0).int().sum(dim=1))
-        # ic((n_weight * self.bounces_per_ray).sum(dim=1))
-        # (B, N)
-
-        # full_bounce_mask = torch.zeros_like(app_mask)
-        # ainds, ajinds = torch.where(app_mask)
-        # full_bounce_mask[ainds[bounce_mask], ajinds[bounce_mask]] = 1
-
-        ray_mask = torch.arange(num_roughness_rays, device=device).reshape(1, -1) < pt_limit[app_mask].reshape(-1, 1)-1
-        # ic(1, ray_mask.sum())
         # num_missing = (self.bounces_per_ray - pt_limit.int().sum(dim=1, keepdim=True))
         # b = num_missing - torch.rand_like(weight) * app_mask.sum(dim=1, keepdim=True)
         # pt_limit[full_bounce_mask] += (b < 0)[full_bounce_mask]
+
+        ray_mask = torch.arange(num_roughness_rays, device=device).reshape(1, -1) < pt_limit[app_mask].reshape(-1, 1).floor()
+        bright_limit = pt_limit[app_mask].reshape(-1, 1)*(1-self.percent_bright)
+        main_ray_mask = torch.arange(num_roughness_rays, device=device).reshape(1, -1) < bright_limit.floor()
+        bright_mask = ray_mask & ~main_ray_mask
+        # ic(1, ray_mask.sum())
         # ray_mask = torch.arange(num_roughness_rays, device=device).reshape(1, -1) < pt_limit[app_mask].reshape(-1, 1)-1
         # ic(2, ray_mask.sum())
 
         bounce_mask &= ray_mask.sum(dim=-1) > 0
         ray_mask = ray_mask[bounce_mask]
+        bright_mask = bright_mask[bounce_mask]
 
         # derived masks
         full_bounce_mask = torch.zeros_like(app_mask)
-        inv_full_bounce_mask = torch.zeros_like(app_mask)
-        # combine the two masks because double masking causes issues
         ainds, ajinds = torch.where(app_mask)
         full_bounce_mask[ainds[bounce_mask], ajinds[bounce_mask]] = 1
-        inv_full_bounce_mask[ainds[~bounce_mask], ajinds[~bounce_mask]] = 1
 
-        return bounce_mask, full_bounce_mask, inv_full_bounce_mask, ray_mask
+        return bounce_mask, full_bounce_mask, ray_mask, bright_mask
 
 class TopNCombined(Selector):
     def _forward(self, app_mask, weight, VdotN, prob):

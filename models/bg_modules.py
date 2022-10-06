@@ -11,6 +11,8 @@ import math
 import nvdiffrast.torch as nvdr
 from .cubemap_conv import cubemap_convolve, create_blur_pyramid
 import matplotlib.pyplot as plt
+from mutils import unravel_index
+from pathlib import Path
 
 
 class DualParaboloidUnwrap(torch.nn.Module):
@@ -107,8 +109,9 @@ class HierarchicalCubeMap(torch.nn.Module):
             self.mipbias = mipbias
         self.brightness_lr = brightness_lr
 
+        data = init_val * torch.ones((1, 6, bg_resolution, bg_resolution, 3))
         self.bg_mats = nn.ParameterList([
-            nn.Parameter(init_val * torch.ones((1, 6, bg_resolution // self.power**i , bg_resolution // self.power**i, 3)) / (self.num_levels - i))
+            nn.Parameter(data)
             for i in range(num_levels-1, -1, -1)])
 
     def get_optparam_groups(self):
@@ -151,6 +154,24 @@ class HierarchicalCubeMap(torch.nn.Module):
     @property
     def bg_resolution(self):
         return self.bg_mats[-1].shape[2]
+
+    def mean_color(self):
+        return self.activation_fn(self.bg_mats[0]).reshape(-1, 3).mean(dim=0)
+
+    def get_bright_spots(self, scale, n):
+        brightness = self.bg_mats[0].max(dim=-1, keepdim=True).values.squeeze(0)
+        # 6 h w 1
+        res = self.bg_resolution // scale
+        bmat = F.interpolate(brightness.permute(0, 3, 1, 2), size=(res, res), mode='bilinear', align_corners=self.align_corners)
+        inds = torch.argsort(bmat.flatten())
+        coords = unravel_index(inds[-n:], bmat.shape)
+        face_inds = coords[:, 0]
+        # xy = (coords[:, 2:4]) / res * 2 - 1
+        # ic(coords)
+        xy = coords[:, 2:4]
+        # ic(bmat.flatten()[inds])
+        # ic(self.activation_fn(bmat.flatten()[inds[-n:]]))
+        return face_inds, xy, scale / self.bg_resolution
 
     def get_cubemap_faces(self):
         bg_mats = [[] for _ in range(6)]
@@ -203,6 +224,7 @@ class HierarchicalCubeMap(torch.nn.Module):
         max_level = self.num_levels if max_level is None else max_level
         V = viewdirs.reshape(1, -1, 1, 3).contiguous()
         miplevel = self.sa2mip(viewdirs, saSample)
+        # ic(viewdirs, miplevel)
 
         sumemb = 0
         for bg_mat, mip in self.iter_levels():

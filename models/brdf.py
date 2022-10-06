@@ -121,9 +121,6 @@ class GGXSampler(torch.nn.Module):
         # stretch and mask stuff to reduce memory
         a_mask = a.expand(u1.shape)[ray_mask]
 
-        r_mask_u = torch.min(r1_c, r2_c).reshape(-1, 1).expand(u1.shape)[ray_mask]
-        r_mask = (r_mask_u**2).clip(min=self.min_roughness)
-
         r_mask_u1 = r1_c.reshape(-1, 1).expand(u1.shape)[ray_mask]
         r_mask1 = r_mask_u1.clip(min=self.min_roughness)
         r_mask_u2 = r2_c.reshape(-1, 1).expand(u1.shape)[ray_mask]
@@ -148,9 +145,8 @@ class GGXSampler(torch.nn.Module):
         # H = torch.einsum('bni,bij->bnj', H_l, row_world_basis)
 
         V = viewdir.unsqueeze(1).expand(-1, num_samples, 3)[ray_mask]
-        N = normal.reshape(-1, 1, 3).expand(-1, num_samples, 3)[ray_mask]
+        # N = normal.reshape(-1, 1, 3).expand(-1, num_samples, 3)[ray_mask]
         L = (2.0 * (V * H).sum(dim=-1, keepdim=True) * H - V)
-        diff_vec = torch.matmul(row_world_basis_mask.permute(0, 2, 1), L.unsqueeze(-1)).squeeze(-1)
 
         # calculate mipval, which will be used to calculate the mip level
         # half is considered to be the microfacet normal
@@ -158,22 +154,26 @@ class GGXSampler(torch.nn.Module):
 
         # H = normalize(L + viewdir.reshape(-1, 1, 3))
 
-        NdotH = ((H * N).sum(dim=-1)+1e-3).clip(min=1e-8, max=1)
-        HdotV = (H * V).sum(dim=-1).abs()
-        NdotV = (N * V).sum(dim=-1).abs().clip(min=1e-8, max=1)
-        D = ggx_dist(NdotH, r_mask.clip(min=1e-3))
-        # ic(NdotH.shape, NdotH, D, D.mean())
-        # px.scatter(x=NdotH[0].detach().cpu().flatten(), y=D[0].detach().cpu().flatten()).show()
-        # assert(False)
-        # ic(NdotH.mean())
-        lpdf = torch.log(D.clip(min=1e-5)) + torch.log(HdotV.clip(min=1e-5)) - torch.log(NdotV) - torch.log(r_mask.clip(min=1e-5))
-        # pdf = D * HdotV / NdotV / roughness.reshape(-1, 1)
-        # pdf = NdotH / 4 / HdotV
-        # pdf = D# / NdotH
-        indiv_num_samples = ray_mask.sum(dim=1, keepdim=True).clip(min=1).expand(-1, num_samples)[ray_mask]
-        mipval = -torch.log(indiv_num_samples) - lpdf
 
-        return L, mipval, H_l, diff_vec
+        return L, row_world_basis_mask
+
+def calculate_mipval(H, V, N, ray_mask, roughness):
+    num_samples = ray_mask.shape[1]
+    NdotH = ((H * N).sum(dim=-1)+1e-3).clip(min=1e-8, max=1)
+    HdotV = (H * V).sum(dim=-1).abs()
+    NdotV = (N * V).sum(dim=-1).abs().clip(min=1e-8, max=1)
+    D = ggx_dist(NdotH, roughness.clip(min=1e-3))
+    # ic(NdotH.shape, NdotH, D, D.mean())
+    # px.scatter(x=NdotH[0].detach().cpu().flatten(), y=D[0].detach().cpu().flatten()).show()
+    # assert(False)
+    # ic(NdotH.mean())
+    lpdf = torch.log(D.clip(min=1e-5)) + torch.log(HdotV.clip(min=1e-5)) - torch.log(NdotV) - torch.log(roughness.clip(min=1e-5))
+    # pdf = D * HdotV / NdotV / roughness.reshape(-1, 1)
+    # pdf = NdotH / 4 / HdotV
+    # pdf = D# / NdotH
+    indiv_num_samples = ray_mask.sum(dim=1, keepdim=True).clip(min=1).expand(-1, num_samples)[ray_mask]
+    mipval = -torch.log(indiv_num_samples) - lpdf
+    return mipval
 
 class Phong(torch.nn.Module):
     def __init__(self, in_channels):
@@ -374,10 +374,10 @@ class MLPBRDF(torch.nn.Module):
         half = normalize(L + V_mask)
 
         LdotN = (L * N_mask).sum(dim=-1, keepdim=True).clip(min=1e-8)
-        VdotN = (V_mask * N_mask).sum(dim=-1, keepdim=True).clip(min=1e-8)
-        NdotH = ((half * N_mask).sum(dim=-1, keepdim=True)+1e-3).clip(min=1e-20, max=1)
-
         if self.dotpe >= 0:
+
+            VdotN = (V_mask * N_mask).sum(dim=-1, keepdim=True).clip(min=1e-8)
+            NdotH = ((half * N_mask).sum(dim=-1, keepdim=True)+1e-3).clip(min=1e-20, max=1)
             indata = [LdotN, torch.sqrt((1-LdotN**2).clip(min=1e-8, max=1)),
                       VdotN, torch.sqrt((1-LdotN**2).clip(min=1e-8, max=1)),
                       NdotH, torch.sqrt((1-NdotH**2).clip(min=1e-8, max=1))]

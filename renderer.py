@@ -71,21 +71,18 @@ class BundleRender:
         fW = width
         device = rays.device
 
+        map_keys = [
+            'depth_map', 'rgb_map', 'normal_map', 'acc_map',
+            'debug_map', 'surf_width', 'world_normal_map',
+            'tint_map', 'diffuse_map', 'spec_map',
+            'roughness_map', 'brdf_map', 'diffuse_light_map']
         LOGGER.reset()
         data = self.base_renderer(
-            rays, tensorf, keys=['depth_map', 'rgb_map', 'normal_map', 'acc_map', 'termination_xyz', 'debug_map', 'surf_width', 'world_normal_map', 'tint_map', 'diffuse_map', 'spec_map', 'roughness_map', 'brdf_map'],
+            rays, tensorf, keys=map_keys + ['termination_xyz'],
             focal=self.focal, chunk=self.chunk, render2completion=True, **kwargs)
 
         LOGGER.save('rays.pkl')
         LOGGER.reset()
-        rgb_map = data['rgb_map']
-        depth_map = data['depth_map']
-        normal_map = data['normal_map']
-        debug_map = data['debug_map']
-        surf_width = data['surf_width']
-        # weight_slice = data['weight_slice']
-        weight_slice = None
-        acc_map = data['acc_map']
         points = data['termination_xyz']
         # ic(data['backwards_rays_loss'].mean(), acc_map.max())
         #  ind = [598,532]
@@ -100,33 +97,10 @@ class BundleRender:
             # val_map = val_map.reshape((fH, fW, -1))[:self.H, :self.W, :]
             return val_map
 
-
-        world_normal_map = reshape(data['world_normal_map'].detach()).cpu()
-        rgb_map, depth_map, acc_map = reshape(rgb_map.detach()).cpu(), reshape(depth_map.detach()).cpu(), reshape(acc_map.detach()).cpu()
-        debug_map = reshape(debug_map.detach()).cpu()
-        surf_width = reshape(surf_width).cpu()
-        rgb_map = rgb_map.clamp(0.0, 1.0)
-        if normal_map is not None:
-            normal_map = normal_map.reshape(height, width, 3).cpu()
-        else:
-            print(f"Falling back to normals from depth map. ")
-            normal_map = depth_to_normals(depth_map, self.focal)
-
         return dotdict(
-            rgb_map=rgb_map,
-            depth_map=depth_map,
-            debug_map=debug_map,
-            normal_map=normal_map,
+            **{k: reshape(data[k].detach()).cpu() for k in map_keys},
             env_map=env_map,
             col_map=col_map,
-            surf_width=surf_width,
-            acc_map=acc_map,
-            world_normal_map=world_normal_map,
-            roughness_map=reshape(data['roughness_map'].detach()).cpu(),
-            tint_map=reshape(data['tint_map'].detach()).cpu(),
-            diffuse_map=reshape(data['diffuse_map'].detach()).cpu(),
-            spec_map=reshape(data['spec_map'].detach()).cpu(),
-            brdf_map=reshape(data['brdf_map'].detach()).cpu(),
         )
 
 
@@ -165,6 +139,7 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
     os.makedirs(savePath+"/brdf", exist_ok=True)
     os.makedirs(savePath+"/diffuse", exist_ok=True)
     os.makedirs(savePath+"/roughness", exist_ok=True)
+    os.makedirs(savePath+"/diffuse_light", exist_ok=True)
 
     if tensorf.bg_module is not None:
         tm = tonemap.HDRTonemap()
@@ -271,6 +246,7 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
             imageio.imwrite(f'{savePath}/rgbd/{prtx}{idx:03d}.exr', data.depth_map.numpy())
             imageio.imwrite(f'{savePath}/normal/{prtx}{idx:03d}.png', vis_normal_map)
             imageio.imwrite(f'{savePath}/spec/{prtx}{idx:03d}.png', (255*(data.spec_map/(1+data.spec_map)).numpy()).astype(np.uint8))
+            imageio.imwrite(f'{savePath}/diffuse_light/{prtx}{idx:03d}.png', (255*(data.diffuse_light_map/(1+data.spec_map)).numpy()).astype(np.uint8))
             imageio.imwrite(f'{savePath}/roughness/{prtx}{idx:03d}.exr', data.roughness_map)
             imageio.imwrite(f'{savePath}/diffuse/{prtx}{idx:03d}.png', (255*data.diffuse_map.clamp(0, 1).numpy()).astype(np.uint8))
             imageio.imwrite(f'{savePath}/brdf/{prtx}{idx:03d}.png', (255*data.brdf_map.clamp(0, 1).numpy()).astype(np.uint8))

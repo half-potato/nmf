@@ -278,3 +278,46 @@ def refract_reflect(ior1, ior2, n, l, p):
     out_ratio_reflected = 1 - p * ratio_refracted
     return out_ratio_reflected
 
+class AlphaGridMask(torch.nn.Module):
+    def __init__(self, aabb, alpha_volume):
+        super(AlphaGridMask, self).__init__()
+        self.register_buffer('aabb', aabb)
+
+        aabbSize = self.aabb[1] - self.aabb[0]
+        invgrid_size = 1.0/aabbSize * 2
+        grid_size = torch.LongTensor(
+            [alpha_volume.shape[-1], alpha_volume.shape[-2], alpha_volume.shape[-3]])
+        self.register_buffer('grid_size', grid_size)
+        self.register_buffer('invgrid_size', invgrid_size)
+        self.register_buffer('alpha_volume', alpha_volume)
+
+    def sample_alpha(self, xyz_sampled, contract_space=False):
+        xyz_sampled = self.normalize_coord(xyz_sampled, contract_space)
+        H, W, D = self.alpha_volume.shape
+        i = ((xyz_sampled[..., 0]/2+0.5)*(H-1)).long()
+        j = ((xyz_sampled[..., 1]/2+0.5)*(W-1)).long()
+        k = ((xyz_sampled[..., 2]/2+0.5)*(D-1)).long()
+        alpha_vals = self.alpha_volume[i, j, k]
+        # alpha_vals = F.grid_sample(self.alpha_volume, xyz_sampled[..., :3].view(
+        #     1, -1, 1, 1, 3), align_corners=False).view(-1)
+
+        return alpha_vals
+
+    def normalize_coord(self, xyz_sampled, contract_space):
+        coords = (xyz_sampled[..., :3]-self.aabb[0]) * self.invgrid_size - 1
+        size = xyz_sampled[..., 3:4]
+        normed = torch.cat((coords, size), dim=-1)
+        if contract_space:
+            dist = torch.linalg.norm(normed[..., :3], dim=-1, keepdim=True, ord=torch.inf) + 1e-8
+            direction = normed[..., :3] / dist
+            contracted = torch.where(dist > 1, (2-1/dist), dist)/2 * direction
+            return torch.cat([ contracted, xyz_sampled[..., 3:] ], dim=-1)
+        else:
+            return normed
+
+    def contract_coord(self, xyz_sampled): 
+        dist = torch.linalg.norm(xyz_sampled[..., :3], dim=1, keepdim=True) + 1e-8
+        direction = xyz_sampled[..., :3] / dist
+        contracted = torch.where(dist > 1, (2-1/dist), dist) * direction
+        return torch.cat([ contracted, xyz_sampled[..., 3:] ], dim=-1)
+
