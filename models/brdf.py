@@ -369,15 +369,13 @@ class MLPBRDF(torch.nn.Module):
 
         features = features.reshape(n, 1, D).expand(n, m, D)[ray_mask]
         eroughness = roughness.reshape(-1, 1).expand(n, m)[ray_mask].reshape(-1, 1)
-        V_mask = V.reshape(-1, 1, 3).expand(n, m, 3)[ray_mask]
-        N_mask = N.reshape(-1, 1, 3).expand(n, m, 3)[ray_mask]
-        half = normalize(L + V_mask)
+        half = normalize(L + V)
 
-        LdotN = (L * N_mask).sum(dim=-1, keepdim=True).clip(min=1e-8)
+        LdotN = (L * N).sum(dim=-1, keepdim=True).clip(min=1e-8)
         if self.dotpe >= 0:
 
-            VdotN = (V_mask * N_mask).sum(dim=-1, keepdim=True).clip(min=1e-8)
-            NdotH = ((half * N_mask).sum(dim=-1, keepdim=True)+1e-3).clip(min=1e-20, max=1)
+            VdotN = (V * N).sum(dim=-1, keepdim=True).clip(min=1e-8)
+            NdotH = ((half * N).sum(dim=-1, keepdim=True)+1e-3).clip(min=1e-20, max=1)
             indata = [LdotN, torch.sqrt((1-LdotN**2).clip(min=1e-8, max=1)),
                       VdotN, torch.sqrt((1-LdotN**2).clip(min=1e-8, max=1)),
                       NdotH, torch.sqrt((1-NdotH**2).clip(min=1e-8, max=1))]
@@ -398,7 +396,7 @@ class MLPBRDF(torch.nn.Module):
             indata.append(eroughness)
 
         L = L.reshape(-1, 3)
-        B = V_mask.shape[0]
+        B = V.shape[0]
         if self.h_encoder is not None:
             indata += [self.h_encoder(half_vec, eroughness).reshape(B, -1), half_vec]
         if self.d_encoder is not None:
@@ -406,9 +404,9 @@ class MLPBRDF(torch.nn.Module):
         if self.feape > 0:
             indata += [positional_encoding(features, self.feape)]
         if self.v_encoder is not None:
-            indata += [self.v_encoder(V_mask, eroughness).reshape(B, -1), V_mask]
+            indata += [self.v_encoder(V, eroughness).reshape(B, -1), V]
         if self.n_encoder is not None:
-            indata += [self.n_encoder(N_mask, eroughness).reshape(B, -1), N_mask]
+            indata += [self.n_encoder(N, eroughness).reshape(B, -1), N]
         if self.l_encoder is not None:
             indata += [self.l_encoder(L, eroughness).reshape(B, -1), L]
 
@@ -440,14 +438,4 @@ class MLPBRDF(torch.nn.Module):
         # ls = splat_L[ind].detach().cpu()
         # px.scatter_3d(x=ls[:, 0], y=ls[:, 1], z=ls[:, 2], color=w.mean(dim=-1)).show()
         # assert(False)
-
-        norm = row_mask_sum(weight, ray_mask).clip(min=1e-8).mean(dim=-1, keepdim=True)
-        spec_color = row_mask_sum(incoming_light * weight, ray_mask) / norm
-        # diffuse_color = row_mask_sum((1-k_s) * diffuse, ray_mask) / (ray_mask.sum(dim=1)+1e-8)[..., None]
-        with torch.no_grad():
-            # splat_weight = torch.zeros((*ray_mask.shape, 3), dtype=weight.dtype, device=weight.device)
-            # splat_weight[ray_mask] = weight
-            # brdf_color = splat_weight[:, 0] / norm
-            brdf_color = row_mask_sum(weight, ray_mask) / norm
-
-        return matprop['tint'][mask][..., 0:1] * spec_color, brdf_color
+        return weight

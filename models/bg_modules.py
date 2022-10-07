@@ -159,7 +159,7 @@ class HierarchicalCubeMap(torch.nn.Module):
         return self.activation_fn(self.bg_mats[0]).reshape(-1, 3).mean(dim=0)
 
     def get_bright_spots(self, scale, n):
-        brightness = self.bg_mats[0].max(dim=-1, keepdim=True).values.squeeze(0)
+        brightness = self.bg_mats[0].mean(dim=-1, keepdim=True).squeeze(0)
         # 6 h w 1
         res = self.bg_resolution // scale
         bmat = F.interpolate(brightness.permute(0, 3, 1, 2), size=(res, res), mode='bilinear', align_corners=self.align_corners)

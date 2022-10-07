@@ -34,6 +34,10 @@ def sample_bright_spots_kernel(
                 x = dir[0] + std*wp.randf(rand_seed)
                 y = dir[1] + std*wp.randf(rand_seed)
                 z = dir[2] + std*wp.randf(rand_seed)
+                norm = x*x + y*y + z*z
+                x /= norm
+                y /= norm
+                z /= norm
                 # LdotV = x*V[0] + y*V[1] + z*V[2]
                 LdotN = x*N[0] + y*N[1] + z*N[2]
                 if LdotN > 0.0:
@@ -95,7 +99,7 @@ class BrightnessImportanceSampler(torch.nn.Module):
         # ic(bg_module(self.spots, -100*torch.ones_like(self.spots[:, 0:1])))
         
     def check_schedule(self, iter, batch_mul, bg_module):
-        if iter % (self.update_freq*batch_mul) == 0 and iter > 0 and iter > self.cold_start_bg_iters:
+        if iter % (self.update_freq*batch_mul) == 0 and iter > self.cold_start_bg_iters*2:
             self.update(bg_module)
 
     def sample(self, V, N, ray_mask, bright_mask):
