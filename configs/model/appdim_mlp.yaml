@@ -14,6 +14,7 @@ arch:
   max_normal_similarity: 1 #0.87
   cold_start_bg_iters: 500
   attach_normal_iter: 0
+  transmittance_thres: 1.0
   back_clip: 0.0
   percent_bright: 0.5
 
