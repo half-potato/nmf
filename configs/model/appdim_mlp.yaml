@@ -18,7 +18,7 @@ arch:
   back_clip: 0.0
   percent_bright: 0.5
 
-  detach_inter: False
+  detach_inter: True
   selector:
     _target_: modules.pt_selectors.TopNWeight
     _partial_: True

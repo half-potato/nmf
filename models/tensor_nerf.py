@@ -605,6 +605,7 @@ class TensorNeRF(torch.nn.Module):
                 #     self.selector.percent_bright = 1.0
                 bounce_mask, full_bounce_mask, ray_mask, bright_mask = self.selector(
                         app_mask, weight.detach(), VdotN, 1-roughness.detach(), num_roughness_rays)
+                tm_mask = torch.zeros_like(bounce_mask)
                 # bounce mask says which of the sampled points has greater than 0 rays
                 # ray mask assumes that each of the bounce mask points has num_roughness_rays and masks out rays from each point according to the limit per a ray
 
@@ -692,7 +693,7 @@ class TensorNeRF(torch.nn.Module):
                             -V[tm_mask],
                         ], dim=-1)
                         tm_data = self(tm_rays.reshape(-1, D), focal, recur=recur+1, white_bg=True,
-                                       override_near=self.rf.stepSize*10, is_train=is_train,
+                                       override_near=self.rf.stepSize*2, is_train=is_train,
                                        ndc_ray=False, N_samples=N_samples, tonemap=False, draw_debug=False)
                         tm_light = tm_data['rgb_map']
                         ptm_mask = tm_mask[bounce_mask]
@@ -743,9 +744,9 @@ class TensorNeRF(torch.nn.Module):
 
         # shadow_map = torch.sum(weight * shadows, 1)
         # (N, bundle_size, bundle_size)
-        # if recur > 0:
-        #     weight = weight.detach()
-        #     bg_weight = bg_weight.detach()
+        if recur > 0 and self.detach_inter:
+            weight = weight.detach()
+            bg_weight = bg_weight.detach()
 
         acc_map = torch.sum(weight, 1)
         rgb_map = torch.sum(weight[..., None] * rgb, -2)
@@ -821,7 +822,7 @@ class TensorNeRF(torch.nn.Module):
                 spec_map = row_mask_sum(s*weight[full_bounce_mask][..., None], full_bounce_mask).cpu()
                 diffuse_light_map = row_mask_sum(s2*weight[full_bounce_mask][..., None], full_bounce_mask).cpu()
                 brdf_map = row_mask_sum(brdf_rgb*weight[full_bounce_mask][..., None], full_bounce_mask).cpu()
-                if self.allow_transmit:
+                if tm_mask.any():
                     full_tm_mask = torch.zeros_like(full_bounce_mask)
                     full_tm_mask[app_mask] = tm_mask
                     transmit_map = row_mask_sum(tm_light*weight[app_mask][tm_mask][..., None], full_tm_mask).cpu()
