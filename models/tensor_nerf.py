@@ -445,7 +445,7 @@ class TensorNeRF(torch.nn.Module):
 
     def forward(self, rays_chunk, focal, start_mipval=None,
                 recur=0, override_near=None, output_alpha=None, white_bg=True,
-                is_train=False, ndc_ray=False, N_samples=-1, tonemap=True):
+                is_train=False, ndc_ray=False, N_samples=-1, tonemap=True, draw_debug=True):
         # rays_chunk: (N, (origin, viewdir, ray_up))
         output = {}
 
@@ -615,7 +615,7 @@ class TensorNeRF(torch.nn.Module):
                     bN = N[bounce_mask]
                     bV = V[bounce_mask]
                     r1 = matprop['r1'][bounce_mask]
-                    r2 = matprop['r1'][bounce_mask]
+                    r2 = matprop['r2'][bounce_mask]
                     L, row_world_basis = self.brdf_sampler.sample(
                             num_roughness_rays,
                             brefdirs, bV, bN,
@@ -666,7 +666,7 @@ class TensorNeRF(torch.nn.Module):
                         #     incoming_light = self.render_just_bg(bounce_rays.reshape(-1, D), mipval.reshape(-1))
                         incoming_data = self(bounce_rays.reshape(-1, D), focal, recur=recur+1, white_bg=False,
                                              start_mipval=mipval.reshape(-1), override_near=self.rf.stepSize*5, is_train=is_train,
-                                             ndc_ray=False, N_samples=N_samples, tonemap=False)
+                                             ndc_ray=False, N_samples=N_samples, tonemap=False, draw_debug=False)
                         incoming_light = incoming_data['rgb_map']
                     else:
                         incoming_light = self.render_just_bg(bounce_rays.reshape(-1, D), mipval.reshape(-1))
@@ -681,6 +681,7 @@ class TensorNeRF(torch.nn.Module):
                     f0 = matprop['f0'][bounce_mask].reshape(-1, 1, 1).expand(-1, ray_mask.shape[1], 1)[ray_mask]
                     LdotN = (L * eN).sum(dim=-1, keepdim=True).clip(min=0, max=1-1e-8)
                     R0 = f0 + (1-f0) * (1-LdotN)**5
+                    meanR0 = row_mask_sum(R0, ray_mask) / (ray_mask.sum(dim=1)+1e-8)[..., None]
 
                     if self.transmittance_thres < 1 and recur == 0 and self.allow_transmit:
                         tm_mask = pweight[papp_mask] > self.transmittance_thres
@@ -691,12 +692,11 @@ class TensorNeRF(torch.nn.Module):
                             -V[tm_mask],
                         ], dim=-1)
                         tm_data = self(tm_rays.reshape(-1, D), focal, recur=recur+1, white_bg=True,
-                                       override_near=self.rf.stepSize*5, is_train=is_train,
-                                       ndc_ray=False, N_samples=N_samples, tonemap=False)
+                                       override_near=self.rf.stepSize*10, is_train=is_train,
+                                       ndc_ray=False, N_samples=N_samples, tonemap=False, draw_debug=False)
                         tm_light = tm_data['rgb_map']
                         ptm_mask = tm_mask[bounce_mask]
                         # R0[~tm_mask] = 1
-                        meanR0 = row_mask_sum(R0, ray_mask) / (ray_mask.sum(dim=1)+1e-8)[..., None]
                         spec_color = row_mask_sum(incoming_light * brdf_weight * R0, ray_mask) / norm
                         tinted_ref_rgb = matprop['tint'][bounce_mask][..., 0:1] * spec_color
 
@@ -743,15 +743,15 @@ class TensorNeRF(torch.nn.Module):
 
         # shadow_map = torch.sum(weight * shadows, 1)
         # (N, bundle_size, bundle_size)
-        if recur > 0:
-            weight = weight.detach()
-            bg_weight = bg_weight.detach()
+        # if recur > 0:
+        #     weight = weight.detach()
+        #     bg_weight = bg_weight.detach()
 
         acc_map = torch.sum(weight, 1)
         rgb_map = torch.sum(weight[..., None] * rgb, -2)
         # v_world_normal_map = row_mask_sum(p_world_normal*pweight[..., None], ray_valid)
         # v_world_normal_map = acc_map[..., None] * v_world_normal_map + (1 - acc_map[..., None])
-        if not is_train:
+        if not is_train and draw_debug:
             with torch.no_grad():
                 depth_map = torch.sum(weight * z_vals, 1)
                 # depth_map = depth_map + (1. - acc_map) * rays_chunk[whole_valid, -1]
@@ -807,21 +807,29 @@ class TensorNeRF(torch.nn.Module):
                 tint_map = torch.zeros(rgb_map.shape)
                 diffuse_map = torch.zeros(rgb_map.shape)
                 roughness_map = torch.zeros((rgb_map.shape[0], 1))
+            spec_map = torch.zeros(rgb_map.shape)
+            r0_map = torch.zeros(rgb_map.shape)
+            diffuse_light_map = torch.zeros(rgb_map.shape)
+            brdf_map = torch.zeros(rgb_map.shape)
+            transmit_map = torch.zeros(rgb_map.shape)
             if app_mask.any() and self.brdf is not None and bounce_mask.any() and ray_mask.any():
                 # s = row_mask_sum(incoming_light, ray_mask) / (ray_mask.sum(dim=1)+1e-16)[..., None]
                 s = tinted_ref_rgb
                 # s = brdf_rgb
+                r0_map = row_mask_sum(meanR0.expand(-1, 3)*weight[full_bounce_mask][..., None], full_bounce_mask).cpu()
                 s2 = row_mask_sum(incoming_light[bright_mask[ray_mask]], bright_mask) / (bright_mask.sum(dim=1)+1e-16)[..., None]
                 spec_map = row_mask_sum(s*weight[full_bounce_mask][..., None], full_bounce_mask).cpu()
                 diffuse_light_map = row_mask_sum(s2*weight[full_bounce_mask][..., None], full_bounce_mask).cpu()
                 brdf_map = row_mask_sum(brdf_rgb*weight[full_bounce_mask][..., None], full_bounce_mask).cpu()
-            else:
-                spec_map = torch.zeros(rgb_map.shape)
-                diffuse_light_map = torch.zeros(rgb_map.shape)
-                brdf_map = torch.zeros(rgb_map.shape)
+                if self.allow_transmit:
+                    full_tm_mask = torch.zeros_like(full_bounce_mask)
+                    full_tm_mask[app_mask] = tm_mask
+                    transmit_map = row_mask_sum(tm_light*weight[app_mask][tm_mask][..., None], full_tm_mask).cpu()
             output['tint_map'] = tint_map
             output['diffuse_map'] = diffuse_map
             output['spec_map'] = spec_map
+            output['r0_map'] = r0_map
+            output['transmitted'] = transmit_map
             output['diffuse_light_map'] = diffuse_light_map
             output['brdf_map'] = brdf_map
             output['roughness_map'] = roughness_map

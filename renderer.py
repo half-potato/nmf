@@ -75,7 +75,7 @@ class BundleRender:
             'depth_map', 'rgb_map', 'normal_map', 'acc_map',
             'debug_map', 'surf_width', 'world_normal_map',
             'tint_map', 'diffuse_map', 'spec_map',
-            'roughness_map', 'brdf_map', 'diffuse_light_map']
+            'roughness_map', 'brdf_map', 'diffuse_light_map', 'r0_map', 'transmitted']
         LOGGER.reset()
         data = self.base_renderer(
             rays, tensorf, keys=map_keys + ['termination_xyz'],
@@ -139,6 +139,8 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
     os.makedirs(savePath+"/brdf", exist_ok=True)
     os.makedirs(savePath+"/diffuse", exist_ok=True)
     os.makedirs(savePath+"/roughness", exist_ok=True)
+    os.makedirs(savePath+"/r0", exist_ok=True)
+    os.makedirs(savePath+"/transmitted", exist_ok=True)
     os.makedirs(savePath+"/diffuse_light", exist_ok=True)
 
     if tensorf.bg_module is not None:
@@ -247,6 +249,8 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
             imageio.imwrite(f'{savePath}/normal/{prtx}{idx:03d}.png', vis_normal_map)
             imageio.imwrite(f'{savePath}/spec/{prtx}{idx:03d}.png', (255*(data.spec_map/(1+data.spec_map)).numpy()).astype(np.uint8))
             imageio.imwrite(f'{savePath}/diffuse_light/{prtx}{idx:03d}.png', (255*(data.diffuse_light_map/(1+data.diffuse_light_map)).numpy()).astype(np.uint8))
+            imageio.imwrite(f'{savePath}/transmitted/{prtx}{idx:03d}.png', (255*(data.transmitted/(1+data.transmitted)).numpy()).astype(np.uint8))
+            imageio.imwrite(f'{savePath}/r0/{prtx}{idx:03d}.exr', data.r0_map)
             imageio.imwrite(f'{savePath}/roughness/{prtx}{idx:03d}.exr', data.roughness_map)
             imageio.imwrite(f'{savePath}/diffuse/{prtx}{idx:03d}.png', (255*data.diffuse_map.clamp(0, 1).numpy()).astype(np.uint8))
             imageio.imwrite(f'{savePath}/brdf/{prtx}{idx:03d}.png', (255*data.brdf_map.clamp(0, 1).numpy()).astype(np.uint8))
