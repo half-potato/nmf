@@ -17,6 +17,7 @@ arch:
   transmittance_thres: 1.0
   back_clip: 0.0
   percent_bright: 0.5
+  transmit_iter: 1000
 
   detach_inter: True
   selector:

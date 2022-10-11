@@ -693,7 +693,7 @@ class TensorNeRF(torch.nn.Module):
                             -V[tm_mask],
                         ], dim=-1)
                         tm_data = self(tm_rays.reshape(-1, D), focal, recur=recur+1, white_bg=True,
-                                       override_near=self.rf.stepSize*2, is_train=is_train,
+                                       override_near=0.05, is_train=is_train,
                                        ndc_ray=False, N_samples=N_samples, tonemap=False, draw_debug=False)
                         tm_light = tm_data['rgb_map']
                         ptm_mask = tm_mask[bounce_mask]
@@ -876,7 +876,7 @@ class TensorNeRF(torch.nn.Module):
 
         if self.bg_module is not None and not white_bg:
             # ic(mipval)
-            bg_roughness = torch.zeros(B, 1, device=device) if start_mipval is None else start_mipval
+            bg_roughness = -100*torch.ones(B, 1, device=device) if start_mipval is None else start_mipval
             bg = self.bg_module(viewdirs[:, 0, :], bg_roughness).reshape(-1, 3)
             if tonemap:
                 bg = self.tonemap(bg, noclip=True)
