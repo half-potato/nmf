@@ -6,13 +6,10 @@ from . import safemath
 import math
 import numpy as np
 import cv2
-from .render_modules import str2fn
 import math
 import nvdiffrast.torch as nvdr
-from .cubemap_conv import cubemap_convolve, create_blur_pyramid
-import matplotlib.pyplot as plt
 from mutils import unravel_index
-from pathlib import Path
+from models import sh
 
 
 class DualParaboloidUnwrap(torch.nn.Module):
@@ -81,6 +78,15 @@ class CubeUnwrap(torch.nn.Module):
             coords[..., 1][cond] = y[cond] / l
         return coords.reshape(1, 1, -1, 2)
 
+def Al(l):
+    if l == 0:
+        return np.pi
+    if l == 1:
+        return 2*np.pi/3
+    if l % 2 == 1:
+        return 0
+    else:
+        return 2*np.pi * (-1)**(l/2-1) / ((l+2)*(l-1)) * ( math.factorial(l) / (2**l*math.factorial(l//2)**2) )
 
 class HierarchicalCubeMap(torch.nn.Module):
     def __init__(self, bg_resolution=512, num_levels=1, featureC=128, activation='identity', power=4, brightness_lr=0.01, mul_lr=0.01, mul_betas=[0.9, 0.999],
@@ -102,7 +108,10 @@ class HierarchicalCubeMap(torch.nn.Module):
         self.max_mip = start_mip
         self.register_parameter('brightness', torch.nn.Parameter(torch.tensor(0.0, dtype=float)))
         self.register_parameter('mul', torch.nn.Parameter(torch.tensor(1.0, dtype=float)))
-        self.register_parameter('mul2', torch.nn.Parameter(torch.tensor(1.0, dtype=float)))
+
+        sh_A = torch.tensor([3.141593, *([2.094395]*3), *([0.785398]*5), *([0]*7), *([-0.1309]*9)])
+        sh_A = torch.tensor(sum([[Al(l)]*(2*l+1) for l in range(16)], []))
+        self.register_buffer('sh_A', sh_A)
         if learnable_bias:
             self.register_parameter('mipbias', torch.nn.Parameter(torch.tensor(mipbias, dtype=float)))
         else:
@@ -114,6 +123,9 @@ class HierarchicalCubeMap(torch.nn.Module):
             nn.Parameter(data)
             for i in range(num_levels-1, -1, -1)])
 
+    def get_device(self):
+        return self.bg_mats[0].device
+
     def get_optparam_groups(self):
         return [
             {'params': self.bg_mats,
@@ -122,10 +134,6 @@ class HierarchicalCubeMap(torch.nn.Module):
              'name': 'bg'},
             {'params': self.brightness,
              'lr': self.brightness_lr,
-             'name': 'bg'},
-            {'params': self.mul2,
-             'lr': self.mul_lr,
-             'betas': self.mul_betas,
              'name': 'bg'},
             {'params': self.mul,
              'lr': self.mul_lr,
@@ -145,11 +153,32 @@ class HierarchicalCubeMap(torch.nn.Module):
         else:
             return torch.exp(x).clip(min=0.01, max=1000)
 
-    def calc_weight(self, mip):
-        return 1
-
-    def calc_mip(self, i):
-        return self.num_levels - 1 - i
+    def get_spherical_harmonics(self, G, mipval=0):
+        device = self.get_device()
+        _theta = torch.linspace(0, np.pi, G//2, device=device)
+        _phi = torch.linspace(0, 2*np.pi, G, device=device)
+        theta, phi = torch.meshgrid(_theta, _phi, indexing='ij')
+        sh_samples = torch.stack([
+            torch.sin(theta) * torch.cos(phi),
+            torch.sin(theta) * torch.sin(phi),
+            torch.cos(theta),
+        ], dim=-1).reshape(-1, 3)
+        # compute 
+        SB = sh_samples.shape[0]
+        samp_mipval = mipval*torch.ones(SB, 1, device=device)
+        bg = self(sh_samples, samp_mipval)
+        evaled = sh.eval_sh_bases(9, sh_samples)
+        # evaled = sh.sh_basis([0, 1, 2, 3, 4, 5, 6], sh_samples)
+        # evaled = sh.sh_basis([0, 1, 2, 4, 8, 16], sh_samples)
+        # evaled: (N, 9)
+        # bg: (N, 3)
+        # coeffs: (1, 3, 9)
+        coeffs = 2*np.pi**2 *(bg.reshape(SB, 1, 3) * evaled.reshape(SB, -1, 1) * torch.sin(theta.reshape(SB, 1, 1))).mean(dim=0)
+        # cols = (coeffs.reshape(1, -1, 3) * evaled.reshape(SB, -1, 1)).sum(dim=1)
+        # ic(cols, bg)
+        conv_coeffs = self.sh_A.reshape(-1, 1)[:coeffs.shape[0]] * coeffs
+        # cols = (conv_coeffs.reshape(1, -1, 3) * evaled.reshape(SB, -1, 1)).sum(dim=1)
+        return coeffs, conv_coeffs
 
     @property
     def bg_resolution(self):
@@ -175,23 +204,21 @@ class HierarchicalCubeMap(torch.nn.Module):
 
     def get_cubemap_faces(self):
         bg_mats = [[] for _ in range(6)]
-        for stacked_bg_mat, mip in self.iter_levels():
+        for stacked_bg_mat in self.iter_levels():
             for i, bg_mat in enumerate(stacked_bg_mat.data.unbind(1)):
                 bg_mat = F.interpolate(bg_mat.permute(0, 3, 1, 2), size=(self.bg_resolution, self.bg_resolution), mode='bilinear', align_corners=self.align_corners)
-                bg_mat *= self.calc_weight(mip)
                 bg_mats[i].append(bg_mat)
         return bg_mats
 
     def iter_levels(self):
         for i, bg_mat in enumerate(self.bg_mats):
-            yield bg_mat, self.calc_mip(i)
+            yield bg_mat
 
     @torch.no_grad()
     def save(self, path, prefix='', tonemap=None):
         bg_mats = self.get_cubemap_faces()
         for i in range(self.num_levels):
             bg_mat = torch.cat([sum(bg_mats[j][:i+1]) for j in range(6)], dim=3)
-            mip = self.calc_mip(i)
             im = self.activation_fn(bg_mat)
             if tonemap is not None:
                 im = tonemap(im)
@@ -199,7 +226,7 @@ class HierarchicalCubeMap(torch.nn.Module):
             im = (255*im).short().permute(0, 2, 3, 1).squeeze(0)
             im = im.cpu().numpy()
             im = cv2.cvtColor(im.astype(np.uint8), cv2.COLOR_RGB2BGR)
-            cv2.imwrite(str(path / f'{prefix}pano{mip}.png'), im)
+            cv2.imwrite(str(path / f'{prefix}pano.png'), im)
 
     @torch.no_grad()
     def upsample(self, bg_resolution):
@@ -227,7 +254,7 @@ class HierarchicalCubeMap(torch.nn.Module):
         # ic(viewdirs, miplevel)
 
         sumemb = 0
-        for bg_mat, mip in self.iter_levels():
+        for bg_mat in self.iter_levels():
             # emb = F.grid_sample(smooth_mat.permute(1, 0, 2, 3), x, mode='bilinear', align_corners=self.align_corners)
             # emb = nvdr.texture(bg_mat, V, uv_da=torch.exp(saSample).reshape(1, -1, 1, 1).expand(1, -1, 1, 6).contiguous(), boundary_mode='cube')
                     # mip_level_bias=mipbias*torch.ones((1, B, 1), device=V.device))
@@ -238,9 +265,9 @@ class HierarchicalCubeMap(torch.nn.Module):
             # offset = bg_mat.mean()
 
             sumemb += emb
-            if mip >= max_level:
-                break
         img = self.activation_fn(sumemb)
 
         return img
 
+if __name__ == "__main__":
+    import matplotlib.pyplot as plt

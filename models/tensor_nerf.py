@@ -19,6 +19,7 @@ import utils
 from modules import distortion_loss, row_mask_sum
 from mutils import normalize
 from models.brdf import calculate_mipval
+from models import sh
 
 LOGGER = Logger(enable=False)
 FIXED_SPHERE = False
@@ -520,26 +521,28 @@ class TensorNeRF(torch.nn.Module):
 
         if app_mask.any():
             #  Compute normals for app mask
+            
+            app_xyz = xyz_sampled[papp_mask]
 
             # TODO REMOVE
-            norms = self.calculate_normals(xyz_sampled[papp_mask])
+            norms = self.calculate_normals(app_xyz)
             world_normal[papp_mask] = norms
             # pred norms is initialized to world norms to set loss to zero for align_world_loss when prediction is none
             p_world_normal[papp_mask] = norms.detach()
 
-            app_xyz = xyz_normed[papp_mask]
+            app_norm_xyz = xyz_normed[papp_mask]
 
             if all_app_features is None:
-                app_features = self.rf.compute_appfeature(app_xyz)
+                app_features = self.rf.compute_appfeature(app_norm_xyz)
             else:
                 app_features = all_app_features[papp_mask]
-                # _, app_features = self.rf.compute_feature(app_xyz)
+                # _, app_features = self.rf.compute_feature(app_norm_xyz)
 
             noise_app_features = (app_features + torch.randn_like(app_features) * self.appdim_noise_std)
 
             # get base color of the point
             diffuse, tint, matprop = self.diffuse_module(
-                app_xyz, viewdirs[app_mask], app_features)
+                app_norm_xyz, viewdirs[app_mask], app_features)
 
             # ic(diffuse.mean(dim=0))
             app_features = app_features[..., self.diffuse_module.allocation:]
@@ -549,7 +552,7 @@ class TensorNeRF(torch.nn.Module):
 
             # interpolate between the predicted and world normals
             if self.normal_module is not None:
-                p_world_normal[papp_mask] = self.normal_module(app_xyz, app_features)
+                p_world_normal[papp_mask] = self.normal_module(app_norm_xyz, app_features)
                 N = self.N
                 v_world_normal = normalize((1-N)*p_world_normal + N*world_normal)
                 # TODO REMOVE
@@ -570,8 +573,6 @@ class TensorNeRF(torch.nn.Module):
                     v_world_normal[mask] = corner_norms[mask]
                     # v_world_normal = normalize(corner_norms)
 
-                # v_world_normal = xyz_sampled[..., :3] / (xyz_sampled[..., :3].norm(dim=-1, keepdim=True) + 1e-8)
-                # world_normal = xyz_sampled[..., :3] / (xyz_sampled[..., :3].norm(dim=-1, keepdim=True) + 1e-8)
                 app_features = app_features[..., self.normal_module.allocation:]
                 noise_app_features = noise_app_features[..., self.normal_module.allocation:]
             else:
@@ -584,6 +585,15 @@ class TensorNeRF(torch.nn.Module):
             VdotN = (V * N).sum(-1, keepdim=True)
             refdirs = 2 * VdotN * N - V
 
+            if self.bg_module is not None:
+                # compute spherical harmonic coefficients for the background
+                coeffs, conv_coeffs = self.bg_module.get_spherical_harmonics(100)
+                evaled = sh.eval_sh_bases(coeffs.shape[0], N)
+                E = (conv_coeffs.reshape(1, -1, 3) * evaled.reshape(evaled.shape[0], -1, 1)).sum(dim=1)
+                if self.detach_bg:
+                    E = E.detach()
+                diffuse = diffuse * E
+
 
             reflect_rgb = torch.zeros_like(diffuse)
             roughness = torch.min(matprop['r1'], matprop['r2']).squeeze(-1)
@@ -592,7 +602,7 @@ class TensorNeRF(torch.nn.Module):
             if self.ref_module is not None and recur >= self.max_recurs:
                 viewdotnorm = (viewdirs[app_mask]*N).sum(dim=-1, keepdim=True)
                 ref_col = self.ref_module(
-                    app_xyz, viewdirs[app_mask],
+                    app_norm_xyz, viewdirs[app_mask],
                     noise_app_features, refdirs=refdirs,
                     roughness=roughness, viewdotnorm=viewdotnorm)
                 reflect_rgb = tint * ref_col
@@ -610,7 +620,7 @@ class TensorNeRF(torch.nn.Module):
                 # ray mask assumes that each of the bounce mask points has num_roughness_rays and masks out rays from each point according to the limit per a ray
 
                 # xyz_sampled is already masked by ray_valid
-                ray_xyz = xyz_sampled[full_bounce_mask[ray_valid]][..., :3].reshape(-1, 1, 3).expand(-1, num_roughness_rays, 3)
+                ray_xyz = app_xyz[bounce_mask][..., :3].reshape(-1, 1, 3).expand(-1, num_roughness_rays, 3)
                 if bounce_mask.any() and ray_mask.any() and ray_xyz.shape[0] == ray_mask.shape[0]:
                     brefdirs = refdirs[bounce_mask].reshape(-1, 1, 3)
                     bN = N[bounce_mask]
@@ -676,7 +686,7 @@ class TensorNeRF(torch.nn.Module):
                             eV, L, eN, halfvec, diffvec,
                             noise_app_features[bounce_mask], roughness[bounce_mask], matprop,
                             bounce_mask, ray_mask)
-                    norm = row_mask_sum(brdf_weight, ray_mask).clip(min=1e-8).mean(dim=-1, keepdim=True)
+                    norm = row_mask_sum(brdf_weight, ray_mask).clip(min=1e-8) #.mean(dim=-1, keepdim=True)
                     with torch.no_grad():
                         brdf_rgb = row_mask_sum(brdf_weight, ray_mask) / norm
                     f0 = matprop['f0'][bounce_mask].reshape(-1, 1, 1).expand(-1, ray_mask.shape[1], 1)[ray_mask]
@@ -699,13 +709,13 @@ class TensorNeRF(torch.nn.Module):
                         ptm_mask = tm_mask[bounce_mask]
                         # R0[~tm_mask] = 1
                         spec_color = row_mask_sum(incoming_light * brdf_weight * R0, ray_mask) / norm
-                        tinted_ref_rgb = matprop['tint'][bounce_mask][..., 0:1] * spec_color
+                        tinted_ref_rgb = tint[bounce_mask] * spec_color
 
                         reflect_rgb[tm_mask] = tinted_ref_rgb[ptm_mask] + (1-meanR0[ptm_mask]) * tm_light 
                         reflect_rgb[bounce_mask & ~tm_mask] = tinted_ref_rgb[~ptm_mask]
                     else:
                         spec_color = row_mask_sum(incoming_light * brdf_weight * R0, ray_mask) / norm
-                        tinted_ref_rgb = matprop['tint'][bounce_mask][..., 0:1] * spec_color
+                        tinted_ref_rgb = tint[bounce_mask] * spec_color
                         reflect_rgb[bounce_mask] = tinted_ref_rgb
 
                     # s = row_mask_sum(incoming_light.detach(), ray_mask) / (ray_mask.sum(dim=1)+1e-8)[..., None]
@@ -731,7 +741,7 @@ class TensorNeRF(torch.nn.Module):
             # in addition, the light is interpolated between emissive and reflective
             # ic(reflect_rgb.mean(), diffuse.mean())
             # debug[app_mask] = diffuse
-            tint = tint[..., 0:1]
+            tint = tint
         else:
             tint = torch.tensor(0.0)
             reflect_rgb = torch.tensor(0.0)
@@ -875,7 +885,6 @@ class TensorNeRF(torch.nn.Module):
         # ic(weight.mean(), rgb.mean(), rgb_map.mean(), v_world_normal.mean(), sigma.mean(), dists.mean(), alpha.mean())
 
         if self.bg_module is not None and not white_bg:
-            # ic(mipval)
             bg_roughness = -100*torch.ones(B, 1, device=device) if start_mipval is None else start_mipval
             bg = self.bg_module(viewdirs[:, 0, :], bg_roughness).reshape(-1, 3)
             if tonemap:

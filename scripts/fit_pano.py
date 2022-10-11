@@ -40,7 +40,7 @@ pano_feat_dim = 27*3
 #  num_layers = 3
 num_layers = 8
 
-epochs = 5000
+epochs = 100
 
 num_panos = len(pano_paths)
 colors = []
@@ -91,24 +91,24 @@ def init_weights(m):
     if isinstance(m, torch.nn.Linear):
         torch.nn.init.xavier_uniform_(m.weight, gain=np.sqrt(2))
 
+# mlp = torch.nn.Sequential(
+#     torch.nn.Linear(ish.dim(), featureC),
+#     # torch.nn.Linear(ish.dim()+pano_feat_dim, featureC),
+#     *sum([[
+#             torch.nn.ReLU(inplace=True),
+#             torch.nn.Linear(featureC, featureC, bias=False)
+#         ] for _ in range(num_layers-2)], []),
+#     torch.nn.ReLU(inplace=True),
+#     torch.nn.Linear(featureC, 3),
+#     torch.nn.Sigmoid()
+# ).to(device)
+
 mlp = torch.nn.Sequential(
-    torch.nn.Linear(ish.dim(), featureC),
-    # torch.nn.Linear(ish.dim()+pano_feat_dim, featureC),
-    *sum([[
-            torch.nn.ReLU(inplace=True),
-            torch.nn.Linear(featureC, featureC, bias=False)
-        ] for _ in range(num_layers-2)], []),
-    torch.nn.ReLU(inplace=True),
-    torch.nn.Linear(featureC, 3),
+    torch.nn.Linear(ish.dim(), 3),
     torch.nn.Sigmoid()
 ).to(device)
 
-#  mlp = torch.nn.Sequential(
-#      torch.nn.Linear(ish.dim()+25, 3),
-#      torch.nn.Sigmoid()
-#  ).to(device)
-
-# """
+"""
 encoding = tcnn.Encoding(3, dict(
     otype="HashGrid",
     n_levels=16,
@@ -127,7 +127,7 @@ network = tcnn.Network(encoding.n_output_dims, 3, dict(
 mlp = torch.nn.Sequential(
     encoding, network
 ).to(device)
-# """
+"""
 
 mlp.apply(init_weights)
 
@@ -166,8 +166,8 @@ for i in pbar:
     feats = get_features(inds)
     # enc = torch.cat([enc, feats], dim=-1)
     #  enc = torch.cat([enc, eval_sh_bases(4, samp_vecs)], dim=-1)
-    # output = mlp(enc)
-    output = mlp(samp_vecs)
+    output = mlp(enc)
+    # output = mlp(samp_vecs)
 
     #  output = mlp(samp_vecs)
     #  loss = ((output - samp.half())**2).mean()
@@ -195,8 +195,8 @@ with torch.no_grad():
             #  enc = torch.cat([enc, eval_sh_bases(4, samp_vecs)], dim=-1)
             feats = get_features(inds)
             # enc = torch.cat([enc, feats], dim=-1)
-            # output = mlp(enc)
-            output = mlp(samp_vecs)
+            output = mlp(enc)
+            # output = mlp(samp_vecs)
 
             #  output = mlp(samp_vecs)
 

@@ -46,3 +46,5 @@ log/*
 outputs/*
 multirun/*
 build/*
+raymarching_full/build/*
+*.egg

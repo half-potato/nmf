@@ -366,7 +366,7 @@ class MLPDiffuse(torch.nn.Module):
                         # torch.nn.BatchNorm1d(featureC)
                     ] for _ in range(num_layers-2)], []),
                 torch.nn.ReLU(inplace=True),
-                torch.nn.Linear(featureC, 9),
+                torch.nn.Linear(featureC, 10),
             )
             torch.nn.init.constant_(self.mlp[-1].bias, 0)
             # self.mlp.apply(self.init_weights)
@@ -422,9 +422,9 @@ class MLPDiffuse(torch.nn.Module):
         r1 = torch.sigmoid(mlp_out[..., 7:8]).clip(min=1e-2)
         r2 = torch.sigmoid(mlp_out[..., 8:9]).clip(min=1e-2)
         # ic(mlp_out[..., 0:6])
-        tint = torch.sigmoid((mlp_out[..., 3:4]-self.tint_offset).clip(min=-10, max=10))
+        tint = torch.sigmoid((mlp_out[..., 3:6]-self.tint_offset).clip(min=-10, max=10))
         # ic(tint.mean())
-        f0 = (torch.sigmoid((mlp_out[..., 4:5]+3).clip(min=-10, max=10))+0.001).clip(max=1)
+        f0 = (torch.sigmoid((mlp_out[..., 9:10]+3).clip(min=-10, max=10))+0.001).clip(max=1)
         # diffuse = rgb[..., :3]
         # tint = F.softplus(mlp_out[..., 3:6])
         diffuse = torch.sigmoid((mlp_out[..., :3]-2))
@@ -506,7 +506,7 @@ class MLPNormal(torch.nn.Module):
         # ], dim=1)
 
         normals = self.mlp(mlp_in)
-        normals = normals / torch.norm(normals, dim=-1, keepdim=True)
+        normals = normals / (torch.norm(normals, dim=-1, keepdim=True)+1e-8)
 
         return normals
 
