@@ -287,6 +287,7 @@ class MLPBRDF(torch.nn.Module):
         self.d_encoder = d_encoder
         self.mix_diffuse = mix_diffuse
         self.lr = lr
+        self.activation = activation
         if h_encoder is not None:
             self.in_mlpC += self.h_encoder.dim() + 3
         if d_encoder is not None:
@@ -328,12 +329,13 @@ class MLPBRDF(torch.nn.Module):
             torch.nn.init.xavier_uniform_(m.weight, gain=np.sqrt(2))
 
     def activation(self, x):
-        # y = torch.tanh(x/10)+1
-        # ic(x, y)
-        # return y
-        col = torch.sigmoid(x[..., :3])
-        brightness = torch.exp(x[..., 3:4].clip(min=-10, max=10)-1)
-        return col * brightness
+        if self.activation == 'sigexp':
+            col = torch.sigmoid(x[..., :3])
+            brightness = torch.exp(x[..., 3:4].clip(min=-10, max=10)-1)
+            return col * brightness
+        else:
+            return str2fn(self.activation)(x[..., :3])
+            # raise Exception(f"{self.activation} not implemented in BRDF")
         # return torch.sigmoid(x)
         # return F.softplus(x+1.0)/2
 

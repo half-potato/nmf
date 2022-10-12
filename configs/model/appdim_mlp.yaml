@@ -18,6 +18,7 @@ arch:
   back_clip: 0.0
   percent_bright: 0.5
   transmit_iter: 1000
+  normalize_brdf: False
 
   detach_inter: True
   selector:
@@ -103,7 +104,7 @@ arch:
     # num_layers: 4
     # dotpe: 6
     # featureC: 128
-    activation: 'softplus'
+    activation: 'sigexp'
     # activation: 'sigmoid'
     # activation: 'sigmoid'
     mul_ggx: False

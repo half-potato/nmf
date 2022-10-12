@@ -15,6 +15,8 @@ from .grid_sample_Cinf import gkern
 def str2fn(name):
     if name == 'sigmoid':
         return torch.nn.Sigmoid()
+    if name == 'exp':
+        return torch.exp
     elif name == 'softplus':
         return torch.nn.Softplus()
     elif name == 'identity':

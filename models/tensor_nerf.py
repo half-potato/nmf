@@ -47,7 +47,7 @@ class TensorNeRF(torch.nn.Module):
                  alphaMask=None, specularity_threshold=0.005, max_recurs=0, use_diffuse=True, transmittance_thres=1,
                  max_normal_similarity=1, infinity_border=False, min_refraction=1.1, enable_refraction=True, transmit_iter=500,
                  rayMarch_weight_thres=0.0001, detach_inter=False, attach_normal_iter=0, percent_bright=0.1, 
-                 max_bounce_rays=4000, roughness_rays=3, bounce_min_weight=0.001, appdim_noise_std=0.0,
+                 max_bounce_rays=4000, roughness_rays=3, bounce_min_weight=0.001, appdim_noise_std=0.0, normalize_brdf=True,
                  world_bounces=0, selector=None, cold_start_bg_iters = 0, back_clip=0.2, max_recur_rays=5,
                  update_sampler_list=[5000], max_floater_loss=6, **kwargs):
         super(TensorNeRF, self).__init__()
@@ -72,6 +72,7 @@ class TensorNeRF(torch.nn.Module):
         else:
             self.tonemap = tonemap
 
+        self.normalize_brdf = normalize_brdf
         self.max_recur_rays = max_recur_rays
         self.world_bounces = world_bounces
         self.back_clip = back_clip
@@ -686,7 +687,10 @@ class TensorNeRF(torch.nn.Module):
                             eV, L, eN, halfvec, diffvec,
                             noise_app_features[bounce_mask], roughness[bounce_mask], matprop,
                             bounce_mask, ray_mask)
-                    norm = row_mask_sum(brdf_weight, ray_mask).clip(min=1e-8) #.mean(dim=-1, keepdim=True)
+                    if self.normalize_brdf:
+                        norm = row_mask_sum(brdf_weight, ray_mask)+1e-8 #.mean(dim=-1, keepdim=True)
+                    else:
+                        norm = 1
                     with torch.no_grad():
                         brdf_rgb = row_mask_sum(brdf_weight, ray_mask) / norm
                     f0 = matprop['f0'][bounce_mask].reshape(-1, 1, 1).expand(-1, ray_mask.shape[1], 1)[ray_mask]
@@ -714,7 +718,7 @@ class TensorNeRF(torch.nn.Module):
                         reflect_rgb[tm_mask] = tinted_ref_rgb[ptm_mask] + (1-meanR0[ptm_mask]) * tm_light 
                         reflect_rgb[bounce_mask & ~tm_mask] = tinted_ref_rgb[~ptm_mask]
                     else:
-                        spec_color = row_mask_sum(incoming_light * brdf_weight * R0, ray_mask) / norm
+                        spec_color = row_mask_sum(incoming_light * brdf_weight, ray_mask) / norm
                         tinted_ref_rgb = tint[bounce_mask] * spec_color
                         reflect_rgb[bounce_mask] = tinted_ref_rgb
 
@@ -724,7 +728,7 @@ class TensorNeRF(torch.nn.Module):
                     debug[full_bounce_mask] += bright_mask.sum(dim=1, keepdim=True)
                     bad_mask = VdotN < 0
                     vdotn = VdotN[bad_mask]
-                    reflect_rgb[bad_mask.squeeze(-1)] = ((-vdotn).clip(min=0)*torch.rand_like(vdotn)).reshape(-1, 1)
+                    reflect_rgb[bad_mask.squeeze(-1)] = tint[bad_mask.squeeze(-1)]*((-vdotn).clip(min=0)*torch.rand_like(vdotn)).reshape(-1, 1)
                     if self.use_diffuse:
                         rgb[app_mask] = (reflect_rgb + diffuse).clip(0, 1)
                     else:
@@ -810,7 +814,7 @@ class TensorNeRF(torch.nn.Module):
 
             if app_mask.any():
                 eweight = weight[app_mask][..., None]
-                t = tint[..., 0:1].expand(-1, 3)
+                t = tint#[..., 0:1].expand(-1, 3)
                 tint_map = row_mask_sum(t.detach()*eweight, app_mask).cpu()
                 diffuse_map = row_mask_sum(matprop['diffuse'].detach()*eweight, app_mask).cpu()
                 roughness_map = row_mask_sum(roughness.reshape(-1, 1).detach()*eweight, app_mask).cpu()
@@ -823,14 +827,17 @@ class TensorNeRF(torch.nn.Module):
             diffuse_light_map = torch.zeros(rgb_map.shape)
             brdf_map = torch.zeros(rgb_map.shape)
             transmit_map = torch.zeros(rgb_map.shape)
+            if app_mask.any():
+                diffuse_light_map = row_mask_sum(E*weight[app_mask][..., None], app_mask).cpu()
             if app_mask.any() and self.brdf is not None and bounce_mask.any() and ray_mask.any():
-                # s = row_mask_sum(incoming_light, ray_mask) / (ray_mask.sum(dim=1)+1e-16)[..., None]
-                s = tinted_ref_rgb
+                s = row_mask_sum(incoming_light, ray_mask) / (ray_mask.sum(dim=1)+1e-16)[..., None]
+                # s = tinted_ref_rgb
                 # s = brdf_rgb
                 r0_map = row_mask_sum(meanR0.expand(-1, 3)*weight[full_bounce_mask][..., None], full_bounce_mask).cpu()
-                s2 = row_mask_sum(incoming_light[bright_mask[ray_mask]], bright_mask) / (bright_mask.sum(dim=1)+1e-16)[..., None]
+                # s2 = row_mask_sum(incoming_light[bright_mask[ray_mask]], bright_mask) / (bright_mask.sum(dim=1)+1e-16)[..., None]
+                # diffuse_light_map = row_mask_sum(s2*weight[full_bounce_mask][..., None], full_bounce_mask).cpu()
+
                 spec_map = row_mask_sum(s*weight[full_bounce_mask][..., None], full_bounce_mask).cpu()
-                diffuse_light_map = row_mask_sum(s2*weight[full_bounce_mask][..., None], full_bounce_mask).cpu()
                 brdf_map = row_mask_sum(brdf_rgb*weight[full_bounce_mask][..., None], full_bounce_mask).cpu()
                 if tm_mask.any():
                     full_tm_mask = torch.zeros_like(full_bounce_mask)
