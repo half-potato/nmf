@@ -168,11 +168,11 @@ class HierarchicalCubeMap(torch.nn.Module):
         samp_mipval = mipval*torch.ones(SB, 1, device=device)
         bg = self(sh_samples, samp_mipval)
         evaled = sh.eval_sh_bases(9, sh_samples)
-        # evaled = sh.sh_basis([0, 1, 2, 3, 4, 5, 6], sh_samples)
         # evaled = sh.sh_basis([0, 1, 2, 4, 8, 16], sh_samples)
         # evaled: (N, 9)
         # bg: (N, 3)
         # coeffs: (1, 3, 9)
+        # integral:
         coeffs = 2*np.pi**2 *(bg.reshape(SB, 1, 3) * evaled.reshape(SB, -1, 1) * torch.sin(theta.reshape(SB, 1, 1))).mean(dim=0)
         # cols = (coeffs.reshape(1, -1, 3) * evaled.reshape(SB, -1, 1)).sum(dim=1)
         # ic(cols, bg)

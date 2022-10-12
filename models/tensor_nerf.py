@@ -609,7 +609,7 @@ class TensorNeRF(torch.nn.Module):
                 reflect_rgb = tint * ref_col
                 debug[app_mask] += ref_col / (ref_col + 1)
                 rgb[app_mask] = (reflect_rgb + diffuse).clip(0, 1)
-            else:
+            elif recur <= self.max_recurs:
                 num_roughness_rays = self.max_recur_rays if recur > 0 else self.roughness_rays
                 # compute which rays to reflect
                 # if not is_train:
@@ -724,15 +724,15 @@ class TensorNeRF(torch.nn.Module):
 
                     # s = row_mask_sum(incoming_light.detach(), ray_mask) / (ray_mask.sum(dim=1)+1e-8)[..., None]
                     # debug[full_bounce_mask] += s# / (s+1)
-                    # debug[full_bounce_mask] += ray_mask.sum(dim=1, keepdim=True)
-                    debug[full_bounce_mask] += bright_mask.sum(dim=1, keepdim=True)
+                    debug[full_bounce_mask] += ray_mask.sum(dim=1, keepdim=True)
+                    # debug[full_bounce_mask] += bright_mask.sum(dim=1, keepdim=True)
                     bad_mask = VdotN < 0
-                    vdotn = VdotN[bad_mask]
-                    reflect_rgb[bad_mask.squeeze(-1)] = tint[bad_mask.squeeze(-1)]*((-vdotn).clip(min=0)*torch.rand_like(vdotn)).reshape(-1, 1)
+                    vdotn = VdotN[bad_mask].reshape(-1, 1)
+                    reflect_rgb[bad_mask.squeeze(-1)] = tint[bad_mask.squeeze(-1)]*((-vdotn).clip(min=0)*torch.rand_like(vdotn))
                     if self.use_diffuse:
-                        rgb[app_mask] = (reflect_rgb + diffuse).clip(0, 1)
+                        rgb[app_mask] = reflect_rgb + diffuse
                     else:
-                        rgb[app_mask] = (reflect_rgb).clip(0, 1)
+                        rgb[app_mask] = reflect_rgb
                     # reflect_rgb[~bounce_mask] = diffuse[~bounce_mask]
                     # rgb[app_mask] = (reflect_rgb).clip(0, 1)
 
@@ -741,6 +741,8 @@ class TensorNeRF(torch.nn.Module):
                     # LOGGER.log_rays(bounce_rays.reshape(-1, D), recur+1, reflect_data)
 
                 bounce_count = bounce_mask.sum()
+            else:
+                rgb[app_mask] = diffuse
             # this is a modified rendering equation where the emissive light and light under the integral is all multiplied by the base color
             # in addition, the light is interpolated between emissive and reflective
             # ic(reflect_rgb.mean(), diffuse.mean())
@@ -763,7 +765,7 @@ class TensorNeRF(torch.nn.Module):
             bg_weight = bg_weight.detach()
 
         acc_map = torch.sum(weight, 1)
-        rgb_map = torch.sum(weight[..., None] * rgb, -2)
+        rgb_map = torch.sum(weight[..., None] * rgb.clip(min=0, max=1), -2)
         # v_world_normal_map = row_mask_sum(p_world_normal*pweight[..., None], ray_valid)
         # v_world_normal_map = acc_map[..., None] * v_world_normal_map + (1 - acc_map[..., None])
         if not is_train and draw_debug:
@@ -814,7 +816,8 @@ class TensorNeRF(torch.nn.Module):
 
             if app_mask.any():
                 eweight = weight[app_mask][..., None]
-                t = tint#[..., 0:1].expand(-1, 3)
+                # t = tint[..., 0:1].expand(-1, 3)
+                t = tint
                 tint_map = row_mask_sum(t.detach()*eweight, app_mask).cpu()
                 diffuse_map = row_mask_sum(matprop['diffuse'].detach()*eweight, app_mask).cpu()
                 roughness_map = row_mask_sum(roughness.reshape(-1, 1).detach()*eweight, app_mask).cpu()
