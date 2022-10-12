@@ -600,7 +600,7 @@ class TensorNeRF(torch.nn.Module):
             roughness = torch.min(matprop['r1'], matprop['r2']).squeeze(-1)
             # roughness = 1e-3*torch.ones_like(roughness)
             # roughness = torch.where((xyz_sampled[..., 0].abs() < 0.15) | (xyz_sampled[..., 1].abs() < 0.15), 0.30, 0.15)[papp_mask]
-            if self.ref_module is not None and recur >= self.max_recurs:
+            if self.ref_module is not None:
                 viewdotnorm = (viewdirs[app_mask]*N).sum(dim=-1, keepdim=True)
                 ref_col = self.ref_module(
                     app_norm_xyz, viewdirs[app_mask],
@@ -609,7 +609,7 @@ class TensorNeRF(torch.nn.Module):
                 reflect_rgb = tint * ref_col
                 debug[app_mask] += ref_col / (ref_col + 1)
                 rgb[app_mask] = (reflect_rgb + diffuse).clip(0, 1)
-            elif recur <= self.max_recurs:
+            else:
                 num_roughness_rays = self.max_recur_rays if recur > 0 else self.roughness_rays
                 # compute which rays to reflect
                 # if not is_train:

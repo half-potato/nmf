@@ -18,7 +18,7 @@ arch:
   back_clip: 0.0
   percent_bright: 0.2
   transmit_iter: 1000
-  normalize_brdf: False
+  normalize_brdf: True
 
   detach_inter: True
   selector:
