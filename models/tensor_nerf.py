@@ -44,7 +44,7 @@ class TensorNeRF(torch.nn.Module):
     def __init__(self, rf, aabb, near_far,
                  diffuse_module, sampler, brdf_sampler=None, brdf=None, tonemap=None, normal_module=None, ref_module=None, bg_module=None,
                  visibility_module=None, grid_size=None, bright_sampler=None,
-                 alphaMask=None, specularity_threshold=0.005, max_recurs=0, use_diffuse=True, transmittance_thres=1,
+                 alphaMask=None, specularity_threshold=0.005, max_recurs=0, use_diffuse=True, transmittance_thres=1, recur_weight_thres=1e-3,
                  max_normal_similarity=1, infinity_border=False, min_refraction=1.1, enable_refraction=True, transmit_iter=500,
                  rayMarch_weight_thres=0.0001, detach_inter=False, attach_normal_iter=0, percent_bright=0.1, 
                  max_bounce_rays=4000, roughness_rays=3, bounce_min_weight=0.001, appdim_noise_std=0.0, normalize_brdf=True,
@@ -86,6 +86,7 @@ class TensorNeRF(torch.nn.Module):
         self.allow_transmit = False
         self.transmit_iter = transmit_iter
         self.transmittance_thres = transmittance_thres
+        self.recur_weight_thres = recur_weight_thres
 
         self.bounce_min_weight = bounce_min_weight
         self.min_refraction = min_refraction
@@ -508,7 +509,8 @@ class TensorNeRF(torch.nn.Module):
 
         # app stands for appearance
         pweight = weight[ray_valid]
-        app_mask = (weight > self.rayMarch_weight_thres)
+        thres = self.rayMarch_weight_thres if recur == 0 else self.recur_weight_thres
+        app_mask = (weight > thres)
         papp_mask = app_mask[ray_valid]
 
         # if self.visibility_module is not None:
@@ -741,8 +743,6 @@ class TensorNeRF(torch.nn.Module):
                     # LOGGER.log_rays(bounce_rays.reshape(-1, D), recur+1, reflect_data)
 
                 bounce_count = bounce_mask.sum()
-            else:
-                rgb[app_mask] = diffuse
             # this is a modified rendering equation where the emissive light and light under the integral is all multiplied by the base color
             # in addition, the light is interpolated between emissive and reflective
             # ic(reflect_rgb.mean(), diffuse.mean())
