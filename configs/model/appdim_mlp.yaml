@@ -16,9 +16,9 @@ arch:
   attach_normal_iter: 0
   transmittance_thres: 1.0
   back_clip: 0.0
-  percent_bright: 0.2
+  percent_bright: 0.1
   transmit_iter: 1000
-  normalize_brdf: True
+  normalize_brdf: False
 
   detach_inter: True
   selector:
@@ -41,7 +41,7 @@ arch:
   sampler:
     _target_: samplers.continuous_alphagrid.ContinuousAlphagrid
     _partial_: True
-    multiplier: 1
+    multiplier: 2
     shrink_iters: [2000, 4000]
     dynamic_batchsize: False
     sample_mode: multi_jitter
@@ -98,14 +98,14 @@ arch:
     # d_encoder:
     #   _target_: models.ish.ListISH
     #   degs: [0,1,2,4]
-    featureC: 128
+    featureC: 64
     num_layers: 4
 
     # num_layers: 4
     # dotpe: 6
     # featureC: 128
-    activation: 'sigexp'
-    # activation: 'sigmoid'
+    # activation: 'sigexp'
+    activation: 'sigmoid'
     # activation: 'sigmoid'
     mul_ggx: False
     mix_diffuse: False
@@ -143,7 +143,7 @@ arch:
     featureC: 128
     num_layers: 3
     lr: 1e-4
-    tint_offset: -2
+    tint_offset: 2
     # allocation: 7
 
   normal_module:
@@ -156,6 +156,7 @@ arch:
     feape: 0
     featureC: 128
     num_layers: 3
+    size_multi: 2.5e-3
     # allocation: 3
 
   # visibility_module:
@@ -181,7 +182,7 @@ params:
   TV_weight_app: 0.0
   normal_lambda: 6e-3
   diffuse_lambda: 0
-  backwards_rays_lambda: 0.1
+  backwards_rays_lambda: 0.05
   floater_lambda: 1e-3
   visibility_lambda: 0
   # floater_lambda: 0.00001

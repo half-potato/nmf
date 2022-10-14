@@ -241,7 +241,7 @@ def reconstruction(args):
     tensorf.sampler.update(tensorf.rf, init=True)
 
 
-    pbar = tqdm(range(params.n_iters * batch_mul), miniters=args.progress_refresh_rate, file=sys.stdout)
+    pbar = tqdm(range(params.n_iters), miniters=args.progress_refresh_rate, file=sys.stdout)
     old_decay = False
     def init_optimizer(grad_vars):
         # optimizer = torch.optim.Adam(grad_vars, betas=(0.9, 0.999), weight_decay=0, eps=1e-6)
@@ -264,106 +264,93 @@ def reconstruction(args):
     # with torch.profiler.profile(record_shapes=True, schedule=torch.profiler.schedule(wait=1, warmup=1, active=20), with_stack=True) as p:
     # with torch.autograd.detect_anomaly():
         for iteration in pbar:
-
-            if iteration < 250:
-                ray_idx, rgb_idx = trainingSampler.nextids(batch=params.batch_size//8)
-            elif iteration < 500:
-                ray_idx, rgb_idx = trainingSampler.nextids(batch=params.batch_size//4)
-            else:
-                ray_idx, rgb_idx = trainingSampler.nextids()
-
-            # ray_idx, rgb_idx = trainingSampler.nextids()
-
-            # patches = allrgbs[ray_idx].reshape(-1, args.bundle_size, args.bundle_size, 3)
-            # plt.imshow(patches[0])
-            # plt.show()
-
-            rays_train, rgba_train = allrays[ray_idx], allrgbs[rgb_idx].reshape(-1, allrgbs.shape[-1])
-            rgb_train = rgba_train[..., :3]
-            if rgba_train.shape[-1] == 4:
-                alpha_train = rgba_train[..., 3]
-            else:
-                alpha_train = None
-
-            #rgb_map, alphas_map, depth_map, weights, uncertainty
-            with torch.cuda.amp.autocast(enabled=args.fp16):
-            # if True:
-                data = renderer(rays_train, tensorf,
-                        keys = ['rgb_map', 'floater_loss', 'normal_loss', 'backwards_rays_loss', 'diffuse_reg', 'roughness', 'whole_valid'],#, 'normal_map'],
-                        focal=focal, output_alpha=alpha_train, chunk=params.batch_size, white_bg = white_bg, is_train=True, ndc_ray=ndc_ray)
-
-                # loss = torch.mean((rgb_map[:, 1, 1] - rgb_train[:, 1, 1]) ** 2)
-                normal_loss = data['normal_loss'].mean()
-                floater_loss = data['floater_loss'].mean()
-                diffuse_reg = data['diffuse_reg'].mean()
-                rgb_map = data['rgb_map']
-                if not train_dataset.hdr:
-                    rgb_map = rgb_map.clip(max=1)
-                whole_valid = data['whole_valid'] 
-                if params.charbonier_loss:
-                    loss = torch.sqrt((rgb_map - rgb_train[whole_valid]) ** 2 + params.charbonier_eps**2).mean()
-                else:
-                    # loss = ((rgb_map - rgb_train[whole_valid]) ** 2).mean()
-                    # loss = F.huber_loss(rgb_map.clip(0, 1), rgb_train[whole_valid], delta=1, reduction='mean')
-                    loss = ((rgb_map.clip(0, 1) - rgb_train[whole_valid].clip(0, 1))**2).mean()
-                # gt_normal_map = test_dataset.all_norms[ray_idx].to(device)
-                # norm_err = -(data['normal_map'] * gt_normal_map).sum(dim=-1).mean()
-                # ic(norm_err)
-                # loss = torch.sqrt(F.huber_loss(rgb_map, rgb_train, delta=1, reduction='none') + params.charbonier_eps**2).mean()
-                # photo_loss = ((rgb_map.clip(0, 1) - rgb_train[whole_valid].clip(0, 1)) ** 2).mean().detach()
-                photo_loss = loss.detach()
-                backwards_rays_loss = data['backwards_rays_loss']
-
-                # loss
-                total_loss = loss + \
-                    params.floater_lambda*floater_loss + \
-                    params.backwards_rays_lambda*backwards_rays_loss + \
-                    params.diffuse_lambda * diffuse_reg# + \
-                    # 1.0 * norm_err
-                # ic(total_loss, params.normal_lambda*normal_loss, params.floater_lambda*floater_loss, params.backwards_rays_lambda*backwards_rays_loss, params.diffuse_lambda*diffuse_reg)
-                if iteration > 0000:
-                    total_loss += params.normal_lambda*normal_loss
-
-                if tensorf.visibility_module is not None:
-                    pass
-                    # if iteration % 1 == 0 and iteration > 250:
-                    #     # if iteration < 100 or iteration % 1000 == 0:
-                    #     if iteration % 250 == 0 and iteration < 2000:
-                    #         tensorf.init_vis_module()
-                    #         torch.cuda.empty_cache()
-                    #     else:
-                    #         tensorf.compute_visibility_loss(params.N_visibility_rays)
-
-                if ortho_reg_weight > 0:
-                    loss_reg = tensorf.rf.vector_comp_diffs()
-                    total_loss += ortho_reg_weight*loss_reg
-                    summary_writer.add_scalar('train/reg', loss_reg.detach().item(), global_step=iteration)
-                if L1_reg_weight > 0:
-                    loss_reg_L1 = tensorf.rf.density_L1()
-                    total_loss += L1_reg_weight*loss_reg_L1
-                    summary_writer.add_scalar('train/reg_l1', loss_reg_L1.detach().item(), global_step=iteration)
-
-                loss_tv = 0
-                if TV_weight_density>0:
-                    TV_weight_density *= lr_factor
-                    loss_tv = tensorf.rf.TV_loss_density(tvreg) * TV_weight_density
-                    total_loss = total_loss + loss_tv
-                    summary_writer.add_scalar('train/reg_tv_density', loss_tv.detach().item(), global_step=iteration)
-                if TV_weight_app>0:
-                    TV_weight_app *= lr_factor
-                    loss_tv = loss_tv + tensorf.rf.TV_loss_app(tvreg)*TV_weight_app
-                    total_loss = total_loss + loss_tv
-                    summary_writer.add_scalar('train/reg_tv_app', loss_tv.detach().item(), global_step=iteration)
-
             optimizer.zero_grad()
-            total_loss.backward()
-            # torch.nn.utils.clip_grad_norm_(tensorf.parameters(), 1e-3)
+            for bi in range(batch_mul):
+                if iteration < 250:
+                    ray_idx, rgb_idx = trainingSampler.nextids(batch=params.batch_size//8)
+                elif iteration < 500:
+                    ray_idx, rgb_idx = trainingSampler.nextids(batch=params.batch_size//4)
+                else:
+                    ray_idx, rgb_idx = trainingSampler.nextids()
+
+                # ray_idx, rgb_idx = trainingSampler.nextids()
+
+                # patches = allrgbs[ray_idx].reshape(-1, args.bundle_size, args.bundle_size, 3)
+                # plt.imshow(patches[0])
+                # plt.show()
+
+                rays_train, rgba_train = allrays[ray_idx], allrgbs[rgb_idx].reshape(-1, allrgbs.shape[-1])
+                rgb_train = rgba_train[..., :3]
+                if rgba_train.shape[-1] == 4:
+                    alpha_train = rgba_train[..., 3]
+                else:
+                    alpha_train = None
+
+                #rgb_map, alphas_map, depth_map, weights, uncertainty
+                with torch.cuda.amp.autocast(enabled=args.fp16):
+                # if True:
+                    data = renderer(rays_train, tensorf,
+                            keys = ['rgb_map', 'floater_loss', 'normal_loss', 'backwards_rays_loss', 'diffuse_reg', 'roughness', 'whole_valid'],#, 'normal_map'],
+                            focal=focal, output_alpha=alpha_train, chunk=params.batch_size, white_bg = white_bg, is_train=True, ndc_ray=ndc_ray)
+
+                    # loss = torch.mean((rgb_map[:, 1, 1] - rgb_train[:, 1, 1]) ** 2)
+                    normal_loss = data['normal_loss'].mean()
+                    floater_loss = data['floater_loss'].mean()
+                    diffuse_reg = data['diffuse_reg'].mean()
+                    rgb_map = data['rgb_map']
+                    if not train_dataset.hdr:
+                        rgb_map = rgb_map.clip(max=1)
+                    whole_valid = data['whole_valid'] 
+                    if params.charbonier_loss:
+                        loss = torch.sqrt((rgb_map - rgb_train[whole_valid]) ** 2 + params.charbonier_eps**2).mean()
+                    else:
+                        # loss = ((rgb_map - rgb_train[whole_valid]) ** 2).mean()
+                        # loss = F.huber_loss(rgb_map.clip(0, 1), rgb_train[whole_valid], delta=1, reduction='mean')
+                        loss = ((rgb_map.clip(0, 1) - rgb_train[whole_valid].clip(0, 1))**2).mean()
+                    # gt_normal_map = test_dataset.all_norms[ray_idx].to(device)
+                    # norm_err = -(data['normal_map'] * gt_normal_map).sum(dim=-1).mean()
+                    # ic(norm_err)
+                    # loss = torch.sqrt(F.huber_loss(rgb_map, rgb_train, delta=1, reduction='none') + params.charbonier_eps**2).mean()
+                    # photo_loss = ((rgb_map.clip(0, 1) - rgb_train[whole_valid].clip(0, 1)) ** 2).mean().detach()
+                    photo_loss = loss.detach()
+                    backwards_rays_loss = data['backwards_rays_loss']
+
+                    # loss
+                    total_loss = loss + \
+                        params.normal_lambda*normal_loss + \
+                        params.floater_lambda*floater_loss + \
+                        params.backwards_rays_lambda*backwards_rays_loss + \
+                        params.diffuse_lambda * diffuse_reg# + \
+
+
+                    if ortho_reg_weight > 0:
+                        loss_reg = tensorf.rf.vector_comp_diffs()
+                        total_loss += ortho_reg_weight*loss_reg
+                        summary_writer.add_scalar('train/reg', loss_reg.detach().item(), global_step=iteration)
+                    if L1_reg_weight > 0:
+                        loss_reg_L1 = tensorf.rf.density_L1()
+                        total_loss += L1_reg_weight*loss_reg_L1
+                        summary_writer.add_scalar('train/reg_l1', loss_reg_L1.detach().item(), global_step=iteration)
+
+                    loss_tv = 0
+                    if TV_weight_density>0:
+                        TV_weight_density *= lr_factor
+                        loss_tv = tensorf.rf.TV_loss_density(tvreg) * TV_weight_density
+                        total_loss = total_loss + loss_tv
+                        summary_writer.add_scalar('train/reg_tv_density', loss_tv.detach().item(), global_step=iteration)
+                    if TV_weight_app>0:
+                        TV_weight_app *= lr_factor
+                        loss_tv = loss_tv + tensorf.rf.TV_loss_app(tvreg)*TV_weight_app
+                        total_loss = total_loss + loss_tv
+                        summary_writer.add_scalar('train/reg_tv_app', loss_tv.detach().item(), global_step=iteration)
+
+                total_loss.backward()
             optimizer.step()
             if not old_decay:
                 scheduler.step()
 
             photo_loss = photo_loss.detach().item()
-            
+                
             PSNRs.append(-10.0 * np.log(photo_loss) / np.log(10.0))
             summary_writer.add_scalar('train/PSNR', PSNRs[-1], global_step=iteration)
             summary_writer.add_scalar('train/mse', photo_loss, global_step=iteration)
@@ -402,25 +389,25 @@ def reconstruction(args):
                 if args.save_often:
                     tensorf.save(f'{logfolder}/{args.expname}_{iteration:06d}.th', args.model.arch)
 
-            if tensorf.check_schedule(iteration, batch_mul):
+            if tensorf.check_schedule(iteration, 1):
                 grad_vars = tensorf.get_optparam_groups()
                 optimizer, scheduler = init_optimizer(grad_vars)
-                # new_grad_vars = tensorf.get_optparam_groups()
-                # for param_group, new_param_group in zip(optimizer.param_groups, new_grad_vars):
-                #     param_group['params'] = new_param_group['params']
+                    # new_grad_vars = tensorf.get_optparam_groups()
+                    # for param_group, new_param_group in zip(optimizer.param_groups, new_grad_vars):
+                    #     param_group['params'] = new_param_group['params']
 
-            # if iteration in update_alphamask_list:
+                # if iteration in update_alphamask_list:
 
-                #  if reso_cur[0] * reso_cur[1] * reso_cur[2]<256**3:# update volume resolution
-                    # tensorVM.alphaMask = None
-                    # L1_reg_weight = params.L1_weight_rest
-                    # logger.info("continuing L1_reg_weight", L1_reg_weight)
+                    #  if reso_cur[0] * reso_cur[1] * reso_cur[2]<256**3:# update volume resolution
+                        # tensorVM.alphaMask = None
+                        # L1_reg_weight = params.L1_weight_rest
+                        # logger.info("continuing L1_reg_weight", L1_reg_weight)
 
 
-            # if not ndc_ray and iteration == update_AlphaMask_list[-1] and args.filter_rays:
-            #     # filter rays outside the bbox
-            #     allrays, allrgbs, mask = tensorf.filtering_rays(allrays, allrgbs, focal)
-            #     trainingSampler = SimpleSampler(allrays.shape[0], params.batch_size)
+                # if not ndc_ray and iteration == update_AlphaMask_list[-1] and args.filter_rays:
+                #     # filter rays outside the bbox
+                #     allrays, allrgbs, mask = tensorf.filtering_rays(allrays, allrgbs, focal)
+                #     trainingSampler = SimpleSampler(allrays.shape[0], params.batch_size)
 
     #         p.step()
     # p.export_chrome_trace('p.trace')

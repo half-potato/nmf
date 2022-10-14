@@ -688,7 +688,7 @@ class TensorNeRF(torch.nn.Module):
                             noise_app_features[bounce_mask], roughness[bounce_mask], matprop,
                             bounce_mask, ray_mask)
                     if self.normalize_brdf:
-                        norm = row_mask_sum(brdf_weight, ray_mask)+1e-8 #.mean(dim=-1, keepdim=True)
+                        norm = row_mask_sum(brdf_weight, ray_mask).clip(min=1.0) #.mean(dim=-1, keepdim=True)
                     else:
                         norm = 1
                     with torch.no_grad():
@@ -724,11 +724,14 @@ class TensorNeRF(torch.nn.Module):
 
                     # s = row_mask_sum(incoming_light.detach(), ray_mask) / (ray_mask.sum(dim=1)+1e-8)[..., None]
                     # debug[full_bounce_mask] += s# / (s+1)
-                    debug[full_bounce_mask] += ray_mask.sum(dim=1, keepdim=True)
+                    # debug[full_bounce_mask] += ray_mask.sum(dim=1, keepdim=True)
                     # debug[full_bounce_mask] += bright_mask.sum(dim=1, keepdim=True)
+                    # reflect_rgb[~bounce_mask] = tint[~bounce_mask] * E[~bounce_mask]
+
                     bad_mask = VdotN < 0
                     vdotn = VdotN[bad_mask].reshape(-1, 1)
                     reflect_rgb[bad_mask.squeeze(-1)] = tint[bad_mask.squeeze(-1)]*((-vdotn).clip(min=0)*torch.rand_like(vdotn))
+                    debug[app_mask] = (-VdotN).clip(min=0)
                     if self.use_diffuse:
                         rgb[app_mask] = reflect_rgb + diffuse
                     else:
@@ -741,8 +744,6 @@ class TensorNeRF(torch.nn.Module):
                     # LOGGER.log_rays(bounce_rays.reshape(-1, D), recur+1, reflect_data)
 
                 bounce_count = bounce_mask.sum()
-            else:
-                rgb[app_mask] = diffuse
             # this is a modified rendering equation where the emissive light and light under the integral is all multiplied by the base color
             # in addition, the light is interpolated between emissive and reflective
             # ic(reflect_rgb.mean(), diffuse.mean())

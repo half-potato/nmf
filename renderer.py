@@ -242,6 +242,7 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
         # rgb_map = np.concatenate((rgb_map, depth_map), axis=1)
         rgb_maps.append(rgb_map)
         depth_maps.append(vis_depth_map)
+
         if savePath is not None:
             imageio.imwrite(f'{savePath}/{prtx}{idx:03d}.png', rgb_map)
             rgb_map = np.concatenate((rgb_map, vis_depth_map), axis=1)
@@ -253,14 +254,14 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
             imageio.imwrite(f'{savePath}/r0/{prtx}{idx:03d}.exr', data.r0_map)
             imageio.imwrite(f'{savePath}/roughness/{prtx}{idx:03d}.exr', data.roughness_map)
             imageio.imwrite(f'{savePath}/diffuse/{prtx}{idx:03d}.png', (255*data.diffuse_map.clamp(0, 1).numpy()).astype(np.uint8))
-            imageio.imwrite(f'{savePath}/brdf/{prtx}{idx:03d}.png', (255*data.brdf_map.clamp(0, 1).numpy()).astype(np.uint8))
+            imageio.imwrite(f'{savePath}/brdf/{prtx}{idx:03d}.png', (255*(data.brdf_map/(data.brdf_map+1)).numpy()).astype(np.uint8))
             imageio.imwrite(f'{savePath}/tint/{prtx}{idx:03d}.png', (255*data.tint_map.clamp(0, 1).numpy()).astype(np.uint8))
             imageio.imwrite(f'{savePath}/world_normal/{prtx}{idx:03d}.png', vis_world_normal_map)
             imageio.imwrite(f'{savePath}/err/{prtx}{idx:03d}.png', err_map)
             imageio.imwrite(f'{savePath}/surf_width/{prtx}{idx:03d}.png', data.surf_width.numpy().astype(np.uint8))
             # debug = 255*data.debug_map.clamp(0, 1)
             debug = data.debug_map
-            imageio.imwrite(f'{savePath}/debug/{prtx}{idx:03d}.png', (debug.numpy()).astype(np.uint8))
+            imageio.imwrite(f'{savePath}/debug/{prtx}{idx:03d}.exr', (debug.numpy()))
             if tensorf.ref_module is not None:
                 imageio.imwrite(f'{savePath}/envmaps/{prtx}ref_map_{idx:03d}.png', env_map)
                 imageio.imwrite(f'{savePath}/envmaps/{prtx}view_map_{idx:03d}.png', col_map)

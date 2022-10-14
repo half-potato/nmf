@@ -367,7 +367,6 @@ class MLPBRDF(torch.nn.Module):
         D = features.shape[-1]
         device = incoming_light.device
         n, m = ray_mask.shape
-        ray_mask = ray_mask.squeeze(-1)
 
         features = features.reshape(n, 1, D).expand(n, m, D)[ray_mask]
         eroughness = roughness.reshape(-1, 1).expand(n, m)[ray_mask].reshape(-1, 1)

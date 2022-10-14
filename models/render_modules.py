@@ -424,7 +424,7 @@ class MLPDiffuse(torch.nn.Module):
         r1 = torch.sigmoid(mlp_out[..., 7:8]).clip(min=1e-2)
         r2 = torch.sigmoid(mlp_out[..., 8:9]).clip(min=1e-2)
         # ic(mlp_out[..., 0:6])
-        tint = torch.sigmoid((mlp_out[..., 3:6]-self.tint_offset).clip(min=-10, max=10))
+        tint = torch.sigmoid((mlp_out[..., 3:6]+self.tint_offset).clip(min=-10, max=10))
         # ic(tint.mean())
         f0 = (torch.sigmoid((mlp_out[..., 9:10]+3).clip(min=-10, max=10))+0.001).clip(max=1)
         # diffuse = rgb[..., :3]
@@ -450,7 +450,7 @@ class MLPNormal(torch.nn.Module):
     feape: int
     featureC: int
     num_layers: int
-    def __init__(self, in_channels, pospe=6, feape=6, featureC=128, num_layers=2, allocation=0, lr=1e-4):
+    def __init__(self, in_channels, pospe=6, feape=6, featureC=128, num_layers=2, allocation=0, lr=1e-4, size_multi=2.5e-3):
         super().__init__()
 
         in_channels = in_channels if allocation <= 0 else allocation
@@ -463,6 +463,7 @@ class MLPNormal(torch.nn.Module):
         self.feape = feape
         self.lr = lr
         self.allocation = allocation
+        self.size_multi = size_multi
 
         self.mlp = torch.nn.Sequential(
             torch.nn.Linear(self.in_mlpC, featureC),
@@ -493,7 +494,7 @@ class MLPNormal(torch.nn.Module):
             indata.append(features)
 
         if self.pospe > 0:
-            indata += [safemath.integrated_pos_enc((pts, 2.5e-3*size), 0, self.pospe)]
+            indata += [safemath.integrated_pos_enc((pts, self.size_multi*size), 0, self.pospe)]
             # ic(safemath.integrated_pos_enc((pts, 2.5e-3*size), 0, self.pospe), size.min(), size.max())
         if self.feape > 0:
             indata += [positional_encoding(features, self.feape)]
