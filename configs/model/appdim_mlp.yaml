@@ -3,7 +3,8 @@ arch:
   _partial_: True
 
   rayMarch_weight_thres: 1e-4
-  max_recurs: 1
+  recur_weight_thres: 1e-4
+  max_recurs: 2
   roughness_rays: 50
   max_recur_rays: 5
   infinity_border: False
