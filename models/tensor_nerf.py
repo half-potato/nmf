@@ -692,7 +692,7 @@ class TensorNeRF(torch.nn.Module):
                     if self.normalize_brdf:
                         norm = row_mask_sum(brdf_weight, ray_mask).clip(min=1.0) #.mean(dim=-1, keepdim=True)
                     else:
-                        norm = 1
+                        norm = (ray_mask.sum(dim=1)+1e-8)[..., None]
                     with torch.no_grad():
                         brdf_rgb = row_mask_sum(brdf_weight, ray_mask) / norm
                     f0 = matprop['f0'][bounce_mask].reshape(-1, 1, 1).expand(-1, ray_mask.shape[1], 1)[ray_mask]
