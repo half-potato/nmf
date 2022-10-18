@@ -67,9 +67,17 @@ class TensorBase(torch.nn.Module):
         raise Exception("Not implemented")
 
     def compute_densityfeature(self, xyz_sampled):
-        raise Exception("Not implemented")
+        # ic(xyz_sampled.min(), xyz_sampled.max())
+        # traceback.print_stack()
+        return self._compute_densityfeature(self.normalize_coord(xyz_sampled))
 
     def compute_appfeature(self, xyz_sampled):
+        return self._compute_appfeature(self.normalize_coord(xyz_sampled))
+
+    def _compute_densityfeature(self, xyz_sampled):
+        raise Exception("Not implemented")
+
+    def _compute_appfeature(self, xyz_sampled):
         raise Exception("Not implemented")
 
 

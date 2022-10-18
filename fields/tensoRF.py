@@ -128,7 +128,7 @@ class TensorVMSplit(TensorVoxelBase):
         coordinate_line = torch.stack((torch.zeros_like(coordinate_line), coordinate_line), dim=-1).view(3, -1, 1, 2)
         return coordinate_plane, coordinate_line
 
-    def compute_densityfeature(self, xyz_sampled):
+    def _compute_densityfeature(self, xyz_sampled):
         # mask1 = torch.linalg.norm(xyz_sampled[..., :3], dim=-1, ord=torch.inf) < 0.613/1.5
         # mask2 = (xyz_sampled[..., 0] < 0) & (xyz_sampled[..., 1] > 0)
         # return torch.where(mask1 & ~mask2, 99999999.0, 0.0)
@@ -154,7 +154,7 @@ class TensorVMSplit(TensorVoxelBase):
         return self.feature2density(sigma_feature)
 
 
-    def compute_appfeature(self, xyz_sampled):
+    def _compute_appfeature(self, xyz_sampled):
         coordinate_plane, coordinate_line = self.coordinates(xyz_sampled)
         coefs = []
         # plane_kerns = [self.norm_plane_kernels[0][0:1]]
@@ -266,7 +266,7 @@ class TensorCP(TensorVoxelBase):
                      {'params': self.basis_mat.parameters(), 'lr':lr_init_network}]
         return grad_vars
 
-    def compute_densityfeature(self, xyz_sampled):
+    def _compute_densityfeature(self, xyz_sampled):
 
         coordinate_line = torch.stack((xyz_sampled[..., self.vecMode[0]], xyz_sampled[..., self.vecMode[1]], xyz_sampled[..., self.vecMode[2]]))
         coordinate_line = torch.stack((torch.zeros_like(coordinate_line), coordinate_line), dim=-1).detach().view(3, -1, 1, 2)
@@ -283,7 +283,7 @@ class TensorCP(TensorVoxelBase):
         
         return sigma_feature
     
-    def compute_appfeature(self, xyz_sampled):
+    def _compute_appfeature(self, xyz_sampled):
 
         coordinate_line = torch.stack(
             (xyz_sampled[..., self.vecMode[0]], xyz_sampled[..., self.vecMode[1]], xyz_sampled[..., self.vecMode[2]]))
@@ -386,7 +386,7 @@ class TensorVM(TensorVoxelBase):
                          {'params': self.basis_mat.parameters(), 'lr':lr_init_network}]
         return grad_vars
 
-    def compute_densityfeature(self, xyz_sampled):
+    def _compute_densityfeature(self, xyz_sampled):
         coordinate_plane = torch.stack((xyz_sampled[..., self.matMode[0]], xyz_sampled[..., self.matMode[1]], xyz_sampled[..., self.matMode[2]])).detach().view(3, -1, 1, 2)
         coordinate_line = torch.stack((xyz_sampled[..., self.vecMode[0]], xyz_sampled[..., self.vecMode[1]], xyz_sampled[..., self.vecMode[2]]))
         coordinate_line = torch.stack((torch.zeros_like(coordinate_line), coordinate_line), dim=-1).detach().view(3, -1, 1, 2)
@@ -398,10 +398,9 @@ class TensorVM(TensorVoxelBase):
         
         sigma_feature = torch.sum(plane_feats * line_feats, dim=0)
         
-        
         return sigma_feature
     
-    def compute_appfeature(self, xyz_sampled):
+    def _compute_appfeature(self, xyz_sampled):
         coordinate_plane = torch.stack((xyz_sampled[..., self.matMode[0]], xyz_sampled[..., self.matMode[1]], xyz_sampled[..., self.matMode[2]])).detach().view(3, -1, 1, 2)
         coordinate_line = torch.stack((xyz_sampled[..., self.vecMode[0]], xyz_sampled[..., self.vecMode[1]], xyz_sampled[..., self.vecMode[2]]))
         coordinate_line = torch.stack((torch.zeros_like(coordinate_line), coordinate_line), dim=-1).detach().view(3, -1, 1, 2)
@@ -409,9 +408,7 @@ class TensorVM(TensorVoxelBase):
         plane_feats = F.grid_sample(self.plane_coef[:, :self.app_n_comp], coordinate_plane, align_corners=self.align_corners).view(3 * self.app_n_comp, -1)
         line_feats = F.grid_sample(self.line_coef[:, :self.app_n_comp], coordinate_line, align_corners=self.align_corners).view(3 * self.app_n_comp, -1)
         
-        
         app_features = self.basis_mat((plane_feats * line_feats).T)
-        
         
         return app_features
     

@@ -48,7 +48,7 @@ class TensorNeRF(torch.nn.Module):
                  max_normal_similarity=1, infinity_border=False, min_refraction=1.1, enable_refraction=True, transmit_iter=500,
                  rayMarch_weight_thres=0.0001, detach_inter=False, attach_normal_iter=0, percent_bright=0.1, 
                  max_bounce_rays=4000, roughness_rays=3, bounce_min_weight=0.001, appdim_noise_std=0.0, normalize_brdf=True,
-                 world_bounces=0, selector=None, cold_start_bg_iters = 0, back_clip=0.2, max_recur_rays=5,
+                 world_bounces=0, selector=None, cold_start_bg_iters = 0, back_clip=0.2, max_recur_rays=5, eval_batch_size=512,
                  update_sampler_list=[5000], max_floater_loss=6, **kwargs):
         super(TensorNeRF, self).__init__()
         self.rf = rf(aabb=aabb, grid_size=grid_size)
@@ -87,6 +87,7 @@ class TensorNeRF(torch.nn.Module):
         self.transmit_iter = transmit_iter
         self.transmittance_thres = transmittance_thres
         self.recur_weight_thres = recur_weight_thres
+        self.eval_batch_size = eval_batch_size
 
         self.bounce_min_weight = bounce_min_weight
         self.min_refraction = min_refraction
@@ -225,17 +226,17 @@ class TensorNeRF(torch.nn.Module):
             self.bright_sampler.check_schedule(iter, batch_mul, self.bg_module)
         if require_reassignment:
             self.sampler.update(self.rf, init=True)
-        if iter > self.cold_start_bg_iters:
+        if iter > batch_mul*self.cold_start_bg_iters:
             self.detach_bg = False
-        self.allow_transmit = self.transmit_iter <= iter
-        self.attach_normal = self.attach_normal_iter <= iter
+        self.allow_transmit = batch_mul*self.transmit_iter <= iter
+        self.attach_normal = batch_mul*self.attach_normal_iter <= iter
         return require_reassignment
 
     def render_env_sparse(self, ray_origins, env_dirs, roughness: float):
         B, M = env_dirs.shape[:2]
         ray_origins = torch.cat([ray_origins, roughness*torch.ones((B, 1), device=self.get_device())], dim=-1)
         norm_ray_origins = self.rf.normalize_coord(ray_origins)
-        app_features = self.rf.compute_appfeature(norm_ray_origins)
+        app_features = self.rf.compute_appfeature(ray_origins)
         app_features = app_features.reshape(B, 1, -1).expand(B, M, -1)
         norm_ray_origins = norm_ray_origins.reshape(B, 1, -1).expand(B, M, -1)
         roughness = torch.tensor(roughness, device=ray_origins.device)
@@ -298,8 +299,7 @@ class TensorNeRF(torch.nn.Module):
             xyz_g.requires_grad = True
 
             # compute sigma
-            xyz_g_normed = self.rf.normalize_coord(xyz_g)
-            validsigma = self.rf.compute_densityfeature(xyz_g_normed)
+            validsigma = self.rf.compute_densityfeature(xyz_g)
 
             # compute normal
             grad_outputs = torch.ones_like(validsigma)
@@ -356,9 +356,9 @@ class TensorNeRF(torch.nn.Module):
 
                     if ray_valid.any():
                         if self.rf.separate_appgrid:
-                            psigma = self.rf.compute_densityfeature(xyz_normed)
+                            psigma = self.rf.compute_densityfeature(xyz_sampled)
                         else:
-                            psigma, all_app_features = self.rf.compute_feature(xyz_normed)
+                            psigma, all_app_features = self.rf.compute_feature(xyz_sampled)
                         sigma[ray_valid] = psigma
 
                     # weight: [N_rays, N_samples]
@@ -433,7 +433,7 @@ class TensorNeRF(torch.nn.Module):
 
         # get value from MLP and compare to get loss
         norm_ray_origins = self.rf.normalize_coord(origins)
-        # app_features = self.rf.compute_appfeature(norm_ray_origins)
+        # app_features = self.rf.compute_appfeature(origins)
         torch.cuda.empty_cache()
         return self.visibility_module.update(norm_ray_origins, viewdirs, bgvisibility)
 
@@ -494,9 +494,9 @@ class TensorNeRF(torch.nn.Module):
         else:
             if ray_valid.any():
                 if self.rf.separate_appgrid:
-                    psigma = self.rf.compute_densityfeature(xyz_normed)
+                    psigma = self.rf.compute_densityfeature(xyz_sampled)
                 else:
-                    psigma, all_app_features = self.rf.compute_feature(xyz_normed)
+                    psigma, all_app_features = self.rf.compute_feature(xyz_sampled)
                 sigma[ray_valid] = psigma
 
 
@@ -536,7 +536,7 @@ class TensorNeRF(torch.nn.Module):
             app_norm_xyz = xyz_normed[papp_mask]
 
             if all_app_features is None:
-                app_features = self.rf.compute_appfeature(app_norm_xyz)
+                app_features = self.rf.compute_appfeature(app_xyz)
             else:
                 app_features = all_app_features[papp_mask]
                 # _, app_features = self.rf.compute_feature(app_norm_xyz)

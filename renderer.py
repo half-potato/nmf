@@ -55,14 +55,13 @@ def chunk_renderer(rays, tensorf, focal, keys=['rgb_map'], chunk=4096, render2co
     return data
 
 class BundleRender:
-    def __init__(self, base_renderer, H, W, focal, bundle_size=1, chunk=512, scale_normal=False):
+    def __init__(self, base_renderer, H, W, focal, bundle_size=1, scale_normal=False):
         self.base_renderer = base_renderer
         self.bundle_size = bundle_size
         self.H = H 
         self.W = W
         self.scale_normal = scale_normal
         self.focal = focal
-        self.chunk = chunk
 
     @torch.no_grad()
     def __call__(self, rays, tensorf, **kwargs):
@@ -79,7 +78,7 @@ class BundleRender:
         LOGGER.reset()
         data = self.base_renderer(
             rays, tensorf, keys=map_keys + ['termination_xyz'],
-            focal=self.focal, chunk=self.chunk, render2completion=True, **kwargs)
+            focal=self.focal, chunk=tensorf.eval_batch_size, render2completion=True, **kwargs)
 
         LOGGER.save('rays.pkl')
         LOGGER.reset()

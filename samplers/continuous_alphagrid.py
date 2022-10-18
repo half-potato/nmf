@@ -466,8 +466,7 @@ class ContinuousAlphagrid(torch.nn.Module):
                         for cas in range(self.cascade):
                             cas_xyzs = self.coords2xyz(coords, cas, conv=self.conv)
                             # query density
-                            cas_norm = rf.normalize_coord(cas_xyzs)
-                            sigmas = rf.compute_densityfeature(cas_norm).reshape(-1)
+                            sigmas = rf.compute_densityfeature(cas_xyzs).reshape(-1)
                             # from `scalbnf(MIN_CONE_STEPSIZE(), 0)`, check `splat_grid_samples_nerf_max_nearest_neighbor`
                             # scale == 2 * sqrt(3) / 1024
                             # assign 
@@ -493,8 +492,7 @@ class ContinuousAlphagrid(torch.nn.Module):
                 # same below
                 cas_xyzs = self.coords2xyz(coords, cas, conv=self.conv)
                 # query density
-                cas_norm = rf.normalize_coord(cas_xyzs)
-                sigmas = rf.compute_densityfeature(cas_norm).reshape(-1)
+                sigmas = rf.compute_densityfeature(cas_xyzs).reshape(-1)
                 # from `scalbnf(MIN_CONE_STEPSIZE(), 0)`, check `splat_grid_samples_nerf_max_nearest_neighbor`
                 # scale == 2 * sqrt(3) / 1024
                 # assign 
