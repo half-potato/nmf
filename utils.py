@@ -6,6 +6,7 @@ import torch.nn.functional as F
 import scipy.signal
 import torch.nn as nn
 from itertools import product 
+from icecream import ic
 
 mse2psnr = lambda x : -10. * torch.log(x) / torch.log(torch.Tensor([10.]))
 
@@ -140,21 +141,14 @@ class TVLoss(nn.Module):
         super(TVLoss,self).__init__()
 
     def forward(self,x):
-        batch_size = x.size()[0]
-        h_x = x.size()[2]
-        w_x = x.size()[3]
-
-        count_h = self._tensor_size(x[:,:,1:,:])
-        count_w = self._tensor_size(x[:,:,:,1:])
-        h_tv = torch.pow((x[:,:,1:,:]-x[:,:,:h_x-1,:]),2).sum()
-        w_tv = torch.pow((x[:,:,:,1:]-x[:,:,:,:w_x-1]),2).sum()
-        if len(x.shape) == 4:
-            return 2*(h_tv/count_h+w_tv/count_w)/batch_size
-        elif len(x.shape) == 5:
-            d_x = x.size()[4]
-            count_d = self._tensor_size(x[:,:,:,:,1:])
-            d_tv = torch.pow((x[..., 1:]-x[..., :d_x-1]),2).sum()
-            return 2*(d_tv/count_d + h_tv/count_h + w_tv/count_w) / batch_size
+        if x.shape[-1] == 1:
+            h_tv = x[:,:,1:,:]-x[:,:,:-1,:]
+            return h_tv.abs().mean()
+        else:
+            h_tv = x[:,:,1:,:-1]-x[:,:,:-1,:-1]
+            w_tv = x[:,:,:-1,1:]-x[:,:,:-1,:-1]
+            
+            return (w_tv**2 + h_tv**2 + 1e-5).sqrt().mean()
 
 
     def _tensor_size(self,t):

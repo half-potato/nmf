@@ -13,14 +13,13 @@ arch:
   # world_bounces: 0
   world_bounces: 2048000
   max_normal_similarity: 1 #0.87
-  cold_start_bg_iters: 250
+  cold_start_bg_iters: 500
   attach_normal_iter: 0
   transmittance_thres: 1.0
   back_clip: 0.0
   percent_bright: 0.1
   transmit_iter: 1000
   normalize_brdf: False
-  eval_batch_size: 512
 
   detach_inter: True
   selector:
@@ -117,7 +116,7 @@ arch:
 
   bg_module:
     _target_: models.bg_modules.HierarchicalCubeMap
-    bg_resolution: 1024
+    bg_resolution: 512
     mipbias: -1
     num_levels: 1
     activation: 'exp'
@@ -145,7 +144,7 @@ arch:
     featureC: 128
     num_layers: 3
     lr: 1e-4
-    tint_offset: -2
+    tint_offset: 2
     # allocation: 7
 
   normal_module:
@@ -161,18 +160,31 @@ arch:
     size_multi: 2.5e-3
     # allocation: 3
 
-  # visibility_module:
+  # ref_module:
   #   _partial_: True
-  #   _target_: modules.naive_vis_cache.NaiveVisCache
-  #   grid_size: 128
-  #   required_count: 100
-    # lr: 1e-3
-    # view_encoder:
-    #   _target_: models.ish.ListISH
-    #   degs: [0,1,2,4]
-    # feape: 0
-    # featureC: 64
-    # num_layers: 3
+  #   _target_: models.render_modules.MLPRender_FP
+  #   feape: 0
+  #   lr: 1e-4
+  #   # view_encoder:
+  #   #   _target_: models.ish.FullISH
+  #   #   max_degree: 4
+  #   ref_encoder:
+  #     _target_: models.ish.ListISH
+  #     degs: [0,1,2,4,8,16]
+  #   # ref_encoder:
+  #   #   _target_: models.render_modules.PE
+  #   #   max_degree: 4
+  #   # ref_encoder:
+  #   #   _target_: models.ish.ISH
+  #   #   max_degree: 6
+  #   # ref_encoder:
+  #   #   _target_: models.ish.RandISH
+  #   #   rand_n: 64
+  #   #   std: 5
+  #   # activation: 'softplus'
+  #   activation: 'sigmoid'
+  #   featureC: 256
+  #   num_layers: 8
 
   rf: 'placeholder'
 
@@ -182,10 +194,11 @@ params:
 
   TV_weight_density: 0.0
   TV_weight_app: 0.0
+  TV_weight_bg: 0.0
   normal_lambda: 6e-3
   diffuse_lambda: 0
   backwards_rays_lambda: 0.05
-  floater_lambda: 1e-3
+  floater_lambda: 0 # 1e-3
   visibility_lambda: 0
   # floater_lambda: 0.00001
   charbonier_eps: 1e-3

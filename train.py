@@ -347,22 +347,23 @@ def reconstruction(args):
                 if TV_weight_density>0:
                     TV_weight_density *= lr_factor
                     loss_tv = tensorf.rf.TV_loss_density(tvreg) * TV_weight_density
-                    total_loss = total_loss + loss_tv
                     summary_writer.add_scalar('train/reg_tv_density', loss_tv.detach().item(), global_step=iteration)
                 if TV_weight_app>0:
                     TV_weight_app *= lr_factor
                     loss_tv = loss_tv + tensorf.rf.TV_loss_app(tvreg)*TV_weight_app
-                    total_loss = total_loss + loss_tv
                     summary_writer.add_scalar('train/reg_tv_app', loss_tv.detach().item(), global_step=iteration)
+                if params.TV_weight_bg > 0:
+                    loss_tv = loss_tv + params.TV_weight_bg*tensorf.bg_module.tv_loss()
+                total_loss = total_loss + loss_tv
 
-            optimizer.zero_grad()
-            total_loss.backward()
-            # torch.nn.utils.clip_grad_norm_(tensorf.parameters(), 1e-3)
-            optimizer.step()
-            if not old_decay:
-                scheduler.step()
+                optimizer.zero_grad()
+                total_loss.backward()
+                # torch.nn.utils.clip_grad_norm_(tensorf.parameters(), 1e-3)
+                optimizer.step()
+                if not old_decay:
+                    scheduler.step()
 
-            photo_loss = photo_loss.detach().item()
+                photo_loss = photo_loss.detach().item()
             
             PSNRs.append(-10.0 * np.log(photo_loss) / np.log(10.0))
             summary_writer.add_scalar('train/PSNR', PSNRs[-1], global_step=iteration)
@@ -384,6 +385,7 @@ def reconstruction(args):
                     + f' nerr = {float(normal_loss):.1e}'
                     + f' back = {backwards_rays_loss:.5e}'
                     + f' float = {floater_loss:.1e}'
+                    + f' tv = {loss_tv:.4e}'
                     # + f' mipbias = {float(tensorf.bg_module.mipbias):.1e}'
                     # + f' mse = {photo_loss:.6f}'
                 )

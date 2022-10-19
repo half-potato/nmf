@@ -65,7 +65,7 @@ class TensorNeRF(torch.nn.Module):
         self.visibility_module = visibility_module(in_channels=self.rf.app_dim-al, bound=bound) if (visibility_module is not None) and world_bounces > 0 else None
         self.sampler = sampler(near_far=near_far, aabb=aabb)
         self.bright_sampler = bright_sampler if bright_sampler is None else bright_sampler(max_samples=int(roughness_rays*percent_bright+1), cold_start_bg_iters=cold_start_bg_iters)
-        self.selector = selector(percent_bright=percent_bright, bounces_per_ray=roughness_rays)
+        self.selector = selector(percent_bright=percent_bright, bounces_per_ray=roughness_rays) if selector is not None else None
         self.bg_module = bg_module
         if tonemap is None:
             self.tonemap = SRGBTonemap()
@@ -276,8 +276,8 @@ class TensorNeRF(torch.nn.Module):
 
         color, tint, matprop = self.diffuse_module(xyz_samp, ang_vecs.reshape(-1, 3), app_features)
         if self.ref_module is not None:
-        # roughness = 1/np.pi*torch.ones((app_features.shape[0], 1), dtype=xyz.dtype, device=xyz.device)
-            roughness = matprop['roughness'] if roughness is None else roughness * torch.ones((app_features.shape[0], 1), dtype=xyz.dtype, device=xyz.device)
+            roughness = 1/np.pi*torch.ones((app_features.shape[0], 1), dtype=xyz.dtype, device=xyz.device)
+            # roughness = matprop['roughness'] if roughness is None else roughness * torch.ones((app_features.shape[0], 1), dtype=xyz.dtype, device=xyz.device)
             viewdotnorm = torch.ones((app_features.shape[0], 1), dtype=xyz.dtype, device=xyz.device)
             envmap = (tint.reshape(-1, 3) * self.ref_module(xyz_samp, staticdir, app_features, refdirs=ang_vecs.reshape(
                 -1, 3), roughness=roughness, viewdotnorm=viewdotnorm)).reshape(res, 2*res, 3)
@@ -602,7 +602,7 @@ class TensorNeRF(torch.nn.Module):
             roughness = torch.min(matprop['r1'], matprop['r2']).squeeze(-1)
             # roughness = 1e-3*torch.ones_like(roughness)
             # roughness = torch.where((xyz_sampled[..., 0].abs() < 0.15) | (xyz_sampled[..., 1].abs() < 0.15), 0.30, 0.15)[papp_mask]
-            if self.ref_module is not None:
+            if self.ref_module is not None and (self.max_recurs == recur):
                 viewdotnorm = (viewdirs[app_mask]*N).sum(dim=-1, keepdim=True)
                 ref_col = self.ref_module(
                     app_norm_xyz, viewdirs[app_mask],
@@ -611,7 +611,7 @@ class TensorNeRF(torch.nn.Module):
                 reflect_rgb = tint * ref_col
                 debug[app_mask] += ref_col / (ref_col + 1)
                 rgb[app_mask] = (reflect_rgb + diffuse).clip(0, 1)
-            else:
+            elif self.max_recurs > 0:
                 num_roughness_rays = self.max_recur_rays if recur > 0 else self.roughness_rays
                 # compute which rays to reflect
                 # if not is_train:
@@ -746,6 +746,8 @@ class TensorNeRF(torch.nn.Module):
                     # LOGGER.log_rays(bounce_rays.reshape(-1, D), recur+1, reflect_data)
 
                 bounce_count = bounce_mask.sum()
+            else:
+                rgb[app_mask] = diffuse
             # this is a modified rendering equation where the emissive light and light under the integral is all multiplied by the base color
             # in addition, the light is interpolated between emissive and reflective
             # ic(reflect_rgb.mean(), diffuse.mean())
@@ -833,7 +835,7 @@ class TensorNeRF(torch.nn.Module):
             diffuse_light_map = torch.zeros(rgb_map.shape)
             brdf_map = torch.zeros(rgb_map.shape)
             transmit_map = torch.zeros(rgb_map.shape)
-            if app_mask.any():
+            if app_mask.any() and self.bg_module is not None:
                 diffuse_light_map = row_mask_sum(E*weight[app_mask][..., None], app_mask).cpu()
             if app_mask.any() and self.brdf is not None and bounce_mask.any() and ray_mask.any():
                 s = row_mask_sum(incoming_light, ray_mask) / (ray_mask.sum(dim=1)+1e-16)[..., None]

@@ -144,6 +144,18 @@ class HierarchicalCubeMap(torch.nn.Module):
              'name': 'mipbias'}
         ]
 
+    def tv_loss(self):
+        imgs = self.bg_mats[0]
+        loss = 0
+        for i in range(6):
+            img = imgs[0, i]
+            # img.shape: h, w, 3
+            tv_h = ((img[1:, :-1] - img[:-1, :-1])**2)
+            tv_w = ((img[:-1, 1:] - img[:-1, :-1])**2)
+            loss = loss + (tv_h + tv_w+1e-5).sqrt().mean()
+        return loss
+
+
     def activation_fn(self, x):
         x = self.brightness.clip(min=-1, max=2) + self.mul*x
         if self.activation == 'softplus':

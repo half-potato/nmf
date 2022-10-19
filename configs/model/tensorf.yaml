@@ -17,14 +17,25 @@ arch:
     # _target_: models.tonemap.SRGBTonemap
 
   sampler:
+    # _target_: samplers.continuous_alphagrid.ContinuousAlphagrid
+    # _partial_: True
+    # multiplier: 1
+    # shrink_iters: [2000, 4000]
+    # dynamic_batchsize: False
+    # sample_mode: single_jitter
+    # test_sample_mode: midpoint
+    # threshold: 1e-3
+    # grid_size: 128
+    # bound: 1.5
     _target_: samplers.continuous_alphagrid.ContinuousAlphagrid
     _partial_: True
-    multiplier: 1
+    multiplier: 2
     shrink_iters: [2000, 4000]
     dynamic_batchsize: False
-    sample_mode: single_jitter
+    sample_mode: multi_jitter
+    # sample_mode: single_jitter
     test_sample_mode: midpoint
-    threshold: 1e-3
+    threshold: 5e-5
     grid_size: 128
     bound: 1.5
 
@@ -44,14 +55,15 @@ arch:
   normal_module:
     _partial_: True
     _target_: models.render_modules.MLPNormal
-    lr: 1e-3
-    pospe: -1
-    feape: 2
+    lr: 3e-3
+    # pospe: -1
+    # feape: 2
+    pospe: 12
+    feape: 0
     # pospe: 12
     # feape: 0
     featureC: 128
-    num_layers: 3
-    # allocation: 3
+    num_layers: 4
 
   rf: 'placeholder'
 
@@ -61,9 +73,9 @@ params:
 
   TV_weight_density: 0.0
   TV_weight_app: 0.0
-  normal_lambda: 3e-3
+  normal_lambda: 6e-3
   diffuse_lambda: 0
-  backwards_rays_lambda: 0.1
+  backwards_rays_lambda: 0.05
   floater_lambda: 0 #1e-4
   visibility_lambda: 0
   N_visibility_rays: 128
