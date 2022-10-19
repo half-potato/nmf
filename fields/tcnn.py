@@ -5,7 +5,7 @@ import numpy as np
 from icecream import ic
 
 class TCNNRF(TensorBase):
-    def __init__(self, aabb, encoder_conf, featureC=128, num_layers=4, **kwargs):
+    def __init__(self, aabb, encoder_conf, grid_size, featureC=128, num_layers=4, **kwargs):
         super().__init__(aabb, **kwargs)
 
         # self.nSamples = 1024                                                                                                                                                                                        
@@ -46,7 +46,7 @@ class TCNNRF(TensorBase):
     def density_L1(self):
         return torch.tensor(0.0, device=self.get_device())
 
-    def check_schedule(self, iter):
+    def check_schedule(self, iter, batch_mul):
         return False
 
     def coords2input(self, xyz_normed):

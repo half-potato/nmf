@@ -45,11 +45,12 @@ arch:
     multiplier: 2
     shrink_iters: [2000, 4000]
     dynamic_batchsize: False
-    sample_mode: multi_jitter
-    # sample_mode: single_jitter
+    # sample_mode: multi_jitter
+    sample_mode: single_jitter
     test_sample_mode: midpoint
     threshold: 5e-5
-    grid_size: 128
+    grid_size: 256
+    conv: 10
     bound: 1.5
 
     # _target_: samplers.alphagrid.AlphaGridSampler
