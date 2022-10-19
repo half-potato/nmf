@@ -147,12 +147,21 @@ class HierarchicalCubeMap(torch.nn.Module):
     def tv_loss(self):
         imgs = self.bg_mats[0]
         loss = 0
-        for i in range(6):
-            img = imgs[0, i]
-            # img.shape: h, w, 3
-            tv_h = ((img[1:, :-1] - img[:-1, :-1])**2)
-            tv_w = ((img[:-1, 1:] - img[:-1, :-1])**2)
-            loss = loss + (tv_h + tv_w+1e-5).sqrt().mean()
+        max_scale_i = int(math.log2(self.bg_resolution))
+        max_scale_i = 1
+        for i in range(max_scale_i):
+            scale = 2 ** i
+            res = self.bg_resolution // scale
+            imgs_resize = F.interpolate(imgs.permute(0, 3, 1, 2, 4)[0], size=(res, res), mode='bilinear', align_corners=self.align_corners)
+            for i in range(6):
+                # img = self.activation_fn(imgs[0, i])
+                # img = img / (img.mean(dim=-1, keepdim=True)+1e-8)
+                img = imgs_resize[0, i]
+                # img.shape: h, w, 3
+                tv_h = (img[1:, :-1] - img[:-1, :-1]).abs()
+                tv_w = (img[:-1, 1:] - img[:-1, :-1]).abs()
+                loss_c = (tv_h + tv_w+1e-8).mean()
+                loss = loss + loss_c
         return loss
 
 

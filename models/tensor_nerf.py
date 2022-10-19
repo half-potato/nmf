@@ -611,7 +611,7 @@ class TensorNeRF(torch.nn.Module):
                 reflect_rgb = tint * ref_col
                 debug[app_mask] += ref_col / (ref_col + 1)
                 rgb[app_mask] = (reflect_rgb + diffuse).clip(0, 1)
-            elif self.max_recurs > 0:
+            elif self.brdf is not None:
                 num_roughness_rays = self.max_recur_rays if recur > 0 else self.roughness_rays
                 # compute which rays to reflect
                 # if not is_train:

@@ -45,8 +45,8 @@ arch:
     multiplier: 2
     shrink_iters: [2000, 4000]
     dynamic_batchsize: False
-    sample_mode: multi_jitter
-    # sample_mode: single_jitter
+    # sample_mode: multi_jitter
+    sample_mode: single_jitter
     test_sample_mode: midpoint
     threshold: 5e-5
     grid_size: 128
@@ -116,7 +116,7 @@ arch:
 
   bg_module:
     _target_: models.bg_modules.HierarchicalCubeMap
-    bg_resolution: 512
+    bg_resolution: 256
     mipbias: -1
     num_levels: 1
     activation: 'exp'

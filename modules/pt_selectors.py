@@ -21,13 +21,13 @@ class Selector:
         ainds, ajinds = torch.where(app_mask)
         full_bounce_mask[ainds[bounce_mask], ajinds[bounce_mask]] = 1
 
-        # mweight = weight.clone()
-        # # mweight[~app_mask] = 0
-        # mweight[weight < self.val_thres] = 0
-        # # mweight[inv_full_bounce_mask] = 0
-        # # ic(mweight.sum(dim=1, keepdim=True))
-        # n_weight = weight / mweight.sum(dim=1, keepdim=True).clip(min=0.1)
-        n_weight = weight
+        mweight = weight.clone()
+        # mweight[~app_mask] = 0
+        mweight[weight < self.val_thres] = 0
+        # mweight[inv_full_bounce_mask] = 0
+        # ic(mweight.sum(dim=1, keepdim=True))
+        n_weight = weight / mweight.sum(dim=1, keepdim=True).clip(min=0.1)
+        # n_weight = weight
         pt_limit = n_weight * self.bounces_per_ray + 0.5
         # num_missing = (self.bounces_per_ray - pt_limit.int().sum(dim=1, keepdim=True))
         # b = num_missing - torch.rand_like(weight) * app_mask.sum(dim=1, keepdim=True)
