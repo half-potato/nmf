@@ -1,9 +1,13 @@
 import torch
 import torch.nn.functional as F
 from icecream import ic
+import math
 
 SIGN = -1
 # sign = -1 matches grid sample
+def gaussian_partial(squaredbit, std):
+    dist = torch.exp(-0.5*squaredbit) / (std*math.sqrt(2*math.pi))
+    return dist / (dist.sum()+1e-8)
 
 def gaussian_fn(M, std, **kwargs):
     n = torch.arange(0, M, **kwargs) - (M - 1.0) / 2.0
@@ -80,10 +84,13 @@ class GridSampler2D(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output):
         input, grid = ctx.saved_tensors
+        device = input.device
         grad_grid = None
         is_3d = len(grid.shape) == 5
-        Gsize = max(grid.shape)
+        Gsize = max(input.shape)
         if ctx.needs_input_grad[1]:
+            # f_blur = torch.tensor([0.0, 1.0, 0.0], device=grid.device)
+            # f_edge = SIGN*torch.tensor([1, 0.0, -1], device=grid.device) / 2
             f_blur = torch.tensor([0.5, 0.5], device=grid.device)
             f_edge = SIGN*torch.tensor([1, -1], device=grid.device) / 2
             l = len(f_blur)
@@ -113,6 +120,31 @@ class GridSampler2D(torch.autograd.Function):
 
                 grad_grid = torch.stack([(grad_output*dx).sum(dim=1), (grad_output*dy).sum(dim=1), (grad_output*dz).sum(dim=1)], dim=-1)
             else:
+                """
+                s = 2
+                # input = torch.zeros((1, 5, 400, 200), device=device)
+                fadj_size = torch.tensor(input.shape[-2:]) / 256
+                adj_size = s * fadj_size.ceil().int()
+                fx, fy = torch.meshgrid(
+                    torch.linspace(-adj_size[1]/2, adj_size[1]/2, adj_size[1], device=device),
+                    torch.linspace(-adj_size[0]/2, adj_size[0]/2, adj_size[0], device=device), indexing='xy')
+                cx2 = fx**2
+                cy2 = fy**2
+
+                dist_x_pos = (cy2 + (fx - adj_size[1]/3)**2) / (s * fadj_size[1] * ctx.smoothing)**2
+                dist_x_neg = (cy2 + (fx + adj_size[1]/3)**2) / (s * fadj_size[1] * ctx.smoothing)**2
+
+                dist_y_pos = (cx2 + (fy - adj_size[0]/3)**2) / (s * fadj_size[0] * ctx.smoothing)**2
+                dist_y_neg = (cx2 + (fy + adj_size[0]/3)**2) / (s * fadj_size[0] * ctx.smoothing)**2
+
+                sm_dx_filter = ((gaussian_partial(dist_x_pos, ctx.smoothing) - gaussian_partial(dist_x_neg, ctx.smoothing))/2).reshape(1, 1, *adj_size)
+                sm_dy_filter = ((gaussian_partial(dist_y_pos, ctx.smoothing) - gaussian_partial(dist_y_neg, ctx.smoothing))/2).reshape(1, 1, *adj_size)
+                """
+                # """
+                # ic(adj_size, fadj_size, (fx + adj_size[0]/3)**2)
+                # ic(dist_x_pos)
+                # ic(dist_x_neg)
+
                 dy_filter = (f_blur[None, :] * f_edge[:, None]).reshape(1, 1, l, l)
                 dx_filter = dy_filter.permute(0, 1, 3, 2)
 
@@ -120,10 +152,25 @@ class GridSampler2D(torch.autograd.Function):
                 smooth_kern /= smooth_kern.sum()
                 sm_dx_filter = combine_kernels2d(smooth_kern, dx_filter)
                 sm_dy_filter = combine_kernels2d(smooth_kern, dy_filter)
-                s = sm_dx_filter.shape[-1]
+                # """
+                # ic(sm_dx_filter1, sm_dx_filter)
+                # ic(sm_dy_filter1, sm_dy_filter, sm_dy_filter1.shape)
+                size_mul = (torch.tensor(input.shape[-2:]) / 256).ceil().int()
+                # if size_mul[0] != size_mul[1]:
+                #     ic(sm_dx_filter.shape, sm_dy_filter.shape, size_mul)
+                sm_dx_filter = F.interpolate(sm_dx_filter, tuple((torch.tensor(sm_dx_filter.shape[-2:]) * size_mul).int()), mode='bilinear', align_corners=True)
+                sm_dy_filter = F.interpolate(sm_dy_filter, tuple((torch.tensor(sm_dy_filter.shape[-2:]) * size_mul).int()), mode='bilinear', align_corners=True)
+                # if size_mul[0] != size_mul[1]:
+                #     ic(size_mul, adj_size, sm_dx_filter.shape, sm_dy_filter.shape, sm_dx_filter1.shape, sm_dy_filter1.shape)
+                #     ic(sm_dx_filter, sm_dx_filter1)
+                #     ic(sm_dy_filter, sm_dy_filter1)
+                # """
 
-                dx_input = F.conv2d(input.permute(1, 0, 2, 3), sm_dx_filter.reshape(1, -1, s, s), stride=1, padding=s//2)
-                dy_input = F.conv2d(input.permute(1, 0, 2, 3), sm_dy_filter.reshape(1, -1, s, s), stride=1, padding=s//2)
+                padding = (sm_dx_filter.shape[-2]//2, sm_dx_filter.shape[-1]//2)
+                dx_input = F.conv2d(input.permute(1, 0, 2, 3), sm_dx_filter, stride=1, padding=padding)
+                dy_input = F.conv2d(input.permute(1, 0, 2, 3), sm_dy_filter, stride=1, padding=padding)
+                # dx_input = dx_input / input.shape[-2] * 128
+                # dy_input = dy_input / input.shape[-1] * 128
 
                 dx = F.grid_sample(dx_input.permute(1, 0, 2, 3), grid, mode=ctx.mode, padding_mode=ctx.padding_mode, align_corners=ctx.align_corners)
                 dy = F.grid_sample(dy_input.permute(1, 0, 2, 3), grid, mode=ctx.mode, padding_mode=ctx.padding_mode, align_corners=ctx.align_corners)

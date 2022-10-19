@@ -64,7 +64,8 @@ def render_test(args):
         tensorf.bg_module = bg_module
     tensorf = tensorf.to(device)
     tensorf.sampler.update(tensorf.rf, init=True)
-    tensorf.bright_sampler.update(tensorf.bg_module)
+    if tensorf.bright_sampler is not None:
+        tensorf.bright_sampler.update(tensorf.bg_module)
 
     logfolder = os.path.dirname(args.ckpt)
     if args.render_train:

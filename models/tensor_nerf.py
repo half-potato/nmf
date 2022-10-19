@@ -806,6 +806,13 @@ class TensorNeRF(torch.nn.Module):
                 # surface width in voxels
                 surface_width = app_mask.sum(dim=1)
                 # surface_width = (weight.max(dim=1).values*255).int()
+                # filtw = weight[acc_map > 0.9].detach().cpu()
+                # if filtw.shape[0] > 10:
+                #     hist = filtw[random.randint(0, filtw.shape[0])]
+                #     t1 = torch.max(torch.where(hist > 1e-4)[0])
+                #     t0 = torch.min(torch.where(hist > 1e-4)[0])
+                #     px.bar(x=torch.arange(hist.shape[0])[t0:t1], y=hist[t0:t1]).show()
+                #     assert(False)
 
                 # TODO REMOVE
                 LOGGER.log_norms_n_rays(xyz_sampled[papp_mask], v_world_normal[papp_mask], weight[app_mask])

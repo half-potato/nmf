@@ -295,7 +295,7 @@ class ContinuousAlphagrid(torch.nn.Module):
     def xyz2coords(self, xyz):
         cas = self.xyz2cas(xyz)
         cas_xyzs = xyz
-        bound = (2 ** cas).clip(max=self.bound)
+        bound = self.bound.clip(min=2**cas)
         if self.disable_cascade:
             bound = self.bound
         half_grid_size = bound / self.grid_size
@@ -311,7 +311,7 @@ class ContinuousAlphagrid(torch.nn.Module):
         if self.disable_cascade:
             bound = self.bound
         else:
-            bound = min(2 ** cas, self.bound)
+            bound = self.bound.clip(min=2**cas)
         half_grid_size = bound / self.grid_size
         # scale to current cascade's resolution
         cas_xyzs = xyzs * (bound - half_grid_size)
@@ -360,7 +360,7 @@ class ContinuousAlphagrid(torch.nn.Module):
 
                     # cascading
                     for cas in range(self.cascade):
-                        bound = min(2 ** cas, self.bound)
+                        bound = self.bound.clip(min=2 ** cas)
                         half_grid_size = bound / self.grid_size
                         # scale to current cascade's resolution
                         cas_world_xyzs = world_xyzs * (bound - half_grid_size)
