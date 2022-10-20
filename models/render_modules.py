@@ -508,7 +508,7 @@ class MLPNormal(torch.nn.Module):
         #     -torch.sin(ele),
         # ], dim=1)
 
-        normals = self.mlp(mlp_in)
+        normals = self.mlp(mlp_in).clip(min=-10, max=10)
         normals = normals / (torch.norm(normals, dim=-1, keepdim=True)+1e-8)
 
         return normals

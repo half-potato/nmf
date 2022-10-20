@@ -2,6 +2,7 @@ _partial_: True
 _target_: fields.tcnn.TCNNRF
 distance_scale: 5
 density_shift: 0
+# activation: 'exp'
 activation: 'softplus'
 featureC: 64
 num_layers: 3

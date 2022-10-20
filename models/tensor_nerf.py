@@ -732,6 +732,7 @@ class TensorNeRF(torch.nn.Module):
 
                     bad_mask = VdotN < 0
                     vdotn = VdotN[bad_mask].reshape(-1, 1)
+                    # reflect_rgb[bad_mask.squeeze(-1)] = tint[bad_mask.squeeze(-1)]*((-vdotn).clip(min=0)*torch.rand_like(vdotn))
                     reflect_rgb[bad_mask.squeeze(-1)] = tint[bad_mask.squeeze(-1)]*((-vdotn).clip(min=0)*torch.rand_like(vdotn))
                     debug[app_mask] = (-VdotN).clip(min=0)
                     if self.use_diffuse:
