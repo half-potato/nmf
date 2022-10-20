@@ -117,7 +117,7 @@ arch:
 
   bg_module:
     _target_: models.bg_modules.HierarchicalCubeMap
-    bg_resolution: 512
+    bg_resolution: 256
     mipbias: -1
     num_levels: 1
     activation: 'exp'

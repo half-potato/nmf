@@ -257,7 +257,7 @@ def reconstruction(args):
         #         lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=10000, T_mult=1)
         # ])
         # scheduler = lr_scheduler.SequentialLR(optimizer, schedulers=[scheduler1, scheduler2], milestones=[3000])
-        scheduler = lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=params.n_iters * batch_mul, T_mult=1, eta_min=1e-3)
+        # scheduler = lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=params.n_iters * batch_mul, T_mult=1, eta_min=1e-3)
         scheduler = lr_scheduler.LambdaLR(optimizer, lambda iter: 0.1 ** min(iter / params.n_iters, 1))
         # scheduler = lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=1000, T_mult=1, eta_min=1e-3)
         return optimizer, scheduler

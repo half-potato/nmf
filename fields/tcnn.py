@@ -54,7 +54,7 @@ class TCNNRF(TensorBase):
 
     def compute_feature(self, xyz_normed):
         feat = self.encoding(self.coords2input(xyz_normed)).type(xyz_normed.dtype)
-        sigfeat = self.sigma_net(feat)
+        sigfeat = self.sigma_net(feat).clamp(-15, 15)
         return self.feature2density(sigfeat).reshape(-1), feat
 
     def compute_appfeature(self, xyz_normed):
@@ -63,7 +63,7 @@ class TCNNRF(TensorBase):
 
     def compute_densityfeature(self, xyz_normed):
         feat = self.encoding(self.coords2input(xyz_normed)).type(xyz_normed.dtype)
-        sigfeat = self.sigma_net(feat)
+        sigfeat = self.sigma_net(feat).clamp(-15, 15)
         return self.feature2density(sigfeat).reshape(-1)
 
     def shrink(self, new_aabb, voxel_size):
