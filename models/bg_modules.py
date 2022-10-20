@@ -147,7 +147,7 @@ class HierarchicalCubeMap(torch.nn.Module):
     def tv_loss(self):
         imgs = self.bg_mats[0]
         loss = 0
-        max_scale_i = int(math.log2(self.bg_resolution))
+        max_scale_i = max(int(math.log2(self.bg_resolution)) - 2, 1)
         max_scale_i = 1
         for i in range(max_scale_i):
             scale = 2 ** i
