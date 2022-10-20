@@ -302,7 +302,7 @@ class TensorNeRF(torch.nn.Module):
             validsigma = self.rf.compute_densityfeature(xyz_g)
 
             # compute normal
-            grad_outputs = 1e-6*torch.ones_like(validsigma)
+            grad_outputs = 1e-3*torch.ones_like(validsigma)
             g = grad(validsigma, xyz_g, grad_outputs=grad_outputs, create_graph=True, allow_unused=True)
             norms = normalize(-g[0][:, :3])
             return norms

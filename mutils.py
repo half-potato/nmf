@@ -1,8 +1,11 @@
 import torch
 from typing import Tuple
 
-def normalize(v, ord=2):
-    return v / (torch.linalg.norm(v, dim=-1, keepdim=True, ord=ord)+1e-8)
+def normalize(v, ord=2, eps=torch.finfo(torch.float32).eps):
+    if ord == 2:
+        return v / (v**2).sum(axis=-1, keepdim=True).clip(min=eps).sqrt()
+    else:
+        return v / (torch.linalg.norm(v, dim=-1, keepdim=True, ord=ord)+1e-8)
 
 def expand_bits(v):                                                                                                                                                                                                
     v = (v * 0x00010001) & 0xFF0000FF                                                                                                                                                                              
