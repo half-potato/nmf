@@ -248,35 +248,35 @@ class ContinuousAlphagrid(torch.nn.Module):
         device = rays_chunk.device
         N, M = xyz_sampled.shape[:2]
         # sample alphas and cull samples from the ray
-        # coords, cas = self.xyz2coords(xyz_sampled[ray_valid][..., :3].reshape(-1, 3))
-        # indices = morton3D(coords).long() # [N]
-        # indices = indices.clip(min=0, max=self.density_bitfield.shape[0]*8) # [N]
-        # sigma = torch.zeros_like(xyz_sampled[..., 0])
-        # sigma[ray_valid] = self.density_grid[cas, indices]
-        #
-        # dists = torch.cat((z_vals[:, 1:] - z_vals[:, :-1], torch.zeros_like(z_vals[:, :1])), dim=-1)
-        # # alpha_mask = alpha > self.active_density_thresh
-        #
-        # alpha = 1. - torch.exp(-sigma * dists)
-        #
-        # # T is the term that integrates the alpha backwards to prevent occluded objects from influencing things
-        # # multiply in exponential space to take exponential of integral
-        # T = torch.cumprod(torch.cat([
-        #     torch.ones(alpha.shape[0], 1, device=alpha.device),
-        #     1. - alpha + 1e-10
-        # ], dim=-1), dim=-1)
-        #
-        # weights = alpha * T[:, :-1]  # [N_rays, N_samples]
-        # alpha_mask = weights > self.threshold
-        # # ic(sigma.shape, dists.shape, dists.mean(), alpha.mean(), alpha_mask.sum())
-        # ic(alpha_mask.sum(), ray_valid.sum())
-        # ray_valid = alpha_mask & ray_valid
+        coords, cas = self.xyz2coords(xyz_sampled[ray_valid][..., :3].reshape(-1, 3))
+        indices = morton3D(coords).long() # [N]
+        indices = indices.clip(min=0, max=self.density_bitfield.shape[0]*8) # [N]
+        '''
+        sigma = torch.zeros_like(xyz_sampled[..., 0])
+        sigma[ray_valid] = self.density_grid[cas, indices]
 
-        # alpha_mask = (self.density_bitfield[indices // 8] & (1 << (indices % 8))) > 0
+        dists = torch.cat((z_vals[:, 1:] - z_vals[:, :-1], torch.zeros_like(z_vals[:, :1])), dim=-1)
+        # alpha_mask = alpha > self.active_density_thresh
 
-        # ray_invalid = ~ray_valid
-        # ray_invalid[ray_valid] |= (~alpha_mask)
-        # ray_valid = ~ray_invalid
+        alpha = 1. - torch.exp(-sigma * dists)
+
+        # T is the term that integrates the alpha backwards to prevent occluded objects from influencing things
+        # multiply in exponential space to take exponential of integral
+        T = torch.cumprod(torch.cat([
+            torch.ones(alpha.shape[0], 1, device=alpha.device),
+            1. - alpha + 1e-10
+        ], dim=-1), dim=-1)
+
+        weights = alpha * T[:, :-1]  # [N_rays, N_samples]
+        alpha_mask = weights > self.threshold
+        # ic(sigma.shape, dists.shape, dists.mean(), alpha.mean(), alpha_mask.sum())
+        ray_valid = alpha_mask & ray_valid
+        '''
+
+        alpha_mask = (self.density_bitfield[indices // 8] & (1 << (indices % 8))) > 0
+        ray_invalid = ~ray_valid
+        ray_invalid[ray_valid] |= (~alpha_mask)
+        ray_valid = ~ray_invalid
 
         if self.dynamic_batchsize and is_train:
             whole_valid = torch.cumsum(ray_valid.sum(dim=1), dim=0) < self.max_samples
@@ -522,8 +522,8 @@ class ContinuousAlphagrid(torch.nn.Module):
         self.iter_density += 1
 
         # convert to bitfield
-        self.active_density_thresh = min(self.mean_density, self.threshold)
-        self.density_bitfield = raymarching.packbits(self.density_grid, self.active_density_thresh, self.density_bitfield)
+        self.active_density_thresh = min(self.mean_density*self.stepsize, self.threshold)
+        self.density_bitfield = raymarching.packbits(self.density_grid*self.stepsize, self.active_density_thresh, self.density_bitfield)
 
         ### update step counter
 

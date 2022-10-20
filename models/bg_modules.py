@@ -152,7 +152,10 @@ class HierarchicalCubeMap(torch.nn.Module):
         for i in range(max_scale_i):
             scale = 2 ** i
             res = self.bg_resolution // scale
-            imgs_resize = F.interpolate(imgs.permute(0, 3, 1, 2, 4)[0], size=(res, res), mode='bilinear', align_corners=self.align_corners)
+            if scale > 1:
+                imgs_resize = F.interpolate(imgs.permute(0, 3, 1, 2, 4)[0], size=(res, res), mode='bilinear', align_corners=self.align_corners)
+            else:
+                imgs_resize = imgs
             for i in range(6):
                 # img = self.activation_fn(imgs[0, i])
                 # img = img / (img.mean(dim=-1, keepdim=True)+1e-8)
