@@ -61,10 +61,13 @@ class TCNNRF(TensorBase):
         feat = self.encoding(xyz_normed[..., :3].reshape(-1, 3).contiguous()).type(xyz_normed.dtype)
         return feat
 
-    def compute_densityfeature(self, xyz_normed):
+    def compute_densityfeature(self, xyz_normed, activate=True):
         feat = self.encoding(self.coords2input(xyz_normed)).type(xyz_normed.dtype)
         sigfeat = self.sigma_net(feat)
-        return self.feature2density(sigfeat).reshape(-1)
+        if activate:
+            return self.feature2density(sigfeat).reshape(-1)
+        else:
+            return sigfeat.reshape(-1)
 
     def shrink(self, new_aabb, voxel_size):
         pass

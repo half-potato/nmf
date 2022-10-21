@@ -299,11 +299,12 @@ class TensorNeRF(torch.nn.Module):
             xyz_g.requires_grad = True
 
             # compute sigma
-            validsigma = self.rf.compute_densityfeature(xyz_g)
+            validsigma = self.rf.compute_densityfeature(xyz_g, activate=False)
 
             # compute normal
-            grad_outputs = 1e-3*torch.ones_like(validsigma)
+            grad_outputs = torch.ones_like(validsigma)
             g = grad(validsigma, xyz_g, grad_outputs=grad_outputs, create_graph=True, allow_unused=True)
+            # n = torch.linalg.norm(g[0][:, :3], dim=-1)
             norms = normalize(-g[0][:, :3])
             return norms
 

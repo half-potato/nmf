@@ -66,15 +66,15 @@ class TensorBase(torch.nn.Module):
     def vector_comp_diffs(self):
         raise Exception("Not implemented")
 
-    def compute_densityfeature(self, xyz_sampled):
+    def compute_densityfeature(self, xyz_sampled, activate=True):
         # ic(xyz_sampled.min(), xyz_sampled.max())
         # traceback.print_stack()
-        return self._compute_densityfeature(self.normalize_coord(xyz_sampled))
+        return self._compute_densityfeature(self.normalize_coord(xyz_sampled), activate=activate)
 
     def compute_appfeature(self, xyz_sampled):
         return self._compute_appfeature(self.normalize_coord(xyz_sampled))
 
-    def _compute_densityfeature(self, xyz_sampled):
+    def _compute_densityfeature(self, xyz_sampled, activate=True):
         raise Exception("Not implemented")
 
     def _compute_appfeature(self, xyz_sampled):
