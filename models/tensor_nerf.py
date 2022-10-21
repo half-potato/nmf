@@ -483,9 +483,9 @@ class TensorNeRF(torch.nn.Module):
         sigma = torch.zeros(full_shape[:-1], device=device)
 
         world_normal = torch.zeros((M, 3), device=device)
-        p_world_normal = torch.zeros((M, 3), device=device)
 
         all_app_features = None
+        p_world_normal = torch.zeros((M, 3), device=device)
         if FIXED_SPHERE:
             sigma[ray_valid] = torch.where(torch.linalg.norm(xyz_sampled, dim=-1) < 0.44, 99999999.0, 0.0)
         elif FIXED_RETRO:
@@ -497,7 +497,7 @@ class TensorNeRF(torch.nn.Module):
                 if self.rf.separate_appgrid:
                     psigma = self.rf.compute_densityfeature(xyz_sampled)
                 else:
-                    psigma, all_app_features = self.rf.compute_feature(xyz_sampled)
+                    psigma, p_world_normal, all_app_features = self.rf.compute_feature(xyz_sampled)
                 sigma[ray_valid] = psigma
 
 
@@ -531,8 +531,6 @@ class TensorNeRF(torch.nn.Module):
             # TODO REMOVE
             norms = self.calculate_normals(app_xyz)
             world_normal[papp_mask] = norms
-            # pred norms is initialized to world norms to set loss to zero for align_world_loss when prediction is none
-            p_world_normal[papp_mask] = norms.detach()
 
             app_norm_xyz = xyz_normed[papp_mask]
 
@@ -558,7 +556,7 @@ class TensorNeRF(torch.nn.Module):
             if self.normal_module is not None:
                 p_world_normal[papp_mask] = self.normal_module(app_norm_xyz, app_features)
                 N = self.N
-                v_world_normal = normalize((1-N)*p_world_normal + N*world_normal)
+                v_world_normal = p_world_normal # normalize((1-N)*p_world_normal + N*world_normal)
                 # TODO REMOVE
                 if FIXED_SPHERE:
                     v_world_normal = normalize(xyz_sampled[..., :3])

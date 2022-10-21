@@ -11,6 +11,7 @@ from models.ish import ISH, RandISH
 from typing import List
 import cv2
 from .grid_sample_Cinf import gkern
+from mutils import normalize
 
 def str2fn(name):
     if name == 'sigmoid':
@@ -508,8 +509,7 @@ class MLPNormal(torch.nn.Module):
         #     -torch.sin(ele),
         # ], dim=1)
 
-        normals = self.mlp(mlp_in).clip(min=-10, max=10)
-        normals = normals / (torch.norm(normals, dim=-1, keepdim=True)+1e-8)
+        normals = normalize(self.mlp(mlp_in).clip(min=-10, max=10))
 
         return normals
 

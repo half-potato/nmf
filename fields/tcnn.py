@@ -3,6 +3,7 @@ import tinycudann as tcnn
 from .tensor_base import TensorBase
 import numpy as np
 from icecream import ic
+from mutils import normalize
 
 class TCNNRF(TensorBase):
     def __init__(self, aabb, encoder_conf, grid_size, featureC=128, num_layers=4, **kwargs):
@@ -33,7 +34,7 @@ class TCNNRF(TensorBase):
                     torch.nn.Linear(featureC, featureC),
                 ] for _ in range(num_layers-2)], []),
             torch.nn.ReLU(inplace=True),
-            torch.nn.Linear(featureC, 1)
+            torch.nn.Linear(featureC, 4)
         )
 
     def get_optparam_groups(self):
@@ -54,8 +55,10 @@ class TCNNRF(TensorBase):
 
     def compute_feature(self, xyz_normed):
         feat = self.encoding(self.coords2input(xyz_normed)).type(xyz_normed.dtype)
-        sigfeat = self.sigma_net(feat)
-        return self.feature2density(sigfeat).reshape(-1), feat
+        mlp_out = self.sigma_net(feat)
+        sigfeat = mlp_out[:, 0]
+        normals = normalize(mlp_out[:, 1:4])
+        return self.feature2density(sigfeat).reshape(-1), normals, feat
 
     def compute_appfeature(self, xyz_normed):
         feat = self.encoding(xyz_normed[..., :3].reshape(-1, 3).contiguous()).type(xyz_normed.dtype)
@@ -63,7 +66,8 @@ class TCNNRF(TensorBase):
 
     def compute_densityfeature(self, xyz_normed, activate=True):
         feat = self.encoding(self.coords2input(xyz_normed)).type(xyz_normed.dtype)
-        sigfeat = self.sigma_net(feat)
+        mlp_out = self.sigma_net(feat)
+        sigfeat = mlp_out[:, 0]
         if activate:
             return self.feature2density(sigfeat).reshape(-1)
         else:
