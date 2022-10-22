@@ -5,7 +5,7 @@ arch:
   rayMarch_weight_thres: 1e-4
   recur_weight_thres: 1e-4
   max_recurs: 1
-  roughness_rays: 50
+  roughness_rays: 100
   max_recur_rays: 5
   infinity_border: False
   use_diffuse: True
@@ -112,9 +112,9 @@ arch:
     # activation: 'sigmoid'
     mul_ggx: False
     mix_diffuse: False
-    use_roughness: true
+    use_roughness: False
     detach_roughness: false
-    lr: 1e-5
+    lr: 1e-4
 
   bg_module:
     _target_: models.bg_modules.HierarchicalCubeMap
@@ -145,21 +145,21 @@ arch:
     #   max_degree: 2
     featureC: 128
     num_layers: 3
-    lr: 1e-4
+    lr: 1e-5
     tint_offset: 2
     # allocation: 7
 
-  # normal_module:
-  #   _partial_: True
-  #   _target_: models.render_modules.MLPNormal
-  #   lr: 3e-3
-  #   # pospe: -1
-  #   # feape: 2
-  #   pospe: 12
-  #   feape: 0
-  #   featureC: 128
-  #   num_layers: 4
-  #   size_multi: 2.5e-3
+  normal_module:
+    _partial_: True
+    _target_: models.render_modules.MLPNormal
+    lr: 6e-3
+    # pospe: -1
+    # feape: 2
+    pospe: 12
+    feape: 0
+    featureC: 128
+    num_layers: 4
+    size_multi: 2.5e-3
     # allocation: 3
 
   # ref_module:
@@ -198,8 +198,11 @@ params:
   TV_weight_app: 0.0
   TV_weight_bg: 0.0
   normal_lambda: 1e-2
+  final_normal_lambda: 1e-2
   diffuse_lambda: 0
   backwards_rays_lambda: 0.05
+  final_ori_lambda: 0.05
+  
   floater_lambda: 0 # 1e-3
   visibility_lambda: 0
   # floater_lambda: 0.00001

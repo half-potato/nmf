@@ -7,6 +7,7 @@ from torch.optim import lr_scheduler
 from torch.utils.tensorboard import SummaryWriter
 import datetime
 from omegaconf import DictConfig, OmegaConf
+import math
 
 from dataLoader import dataset_dict
 import sys
@@ -263,6 +264,11 @@ def reconstruction(args):
         # scheduler = lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=1000, T_mult=1, eta_min=1e-3)
         return optimizer, scheduler
     optimizer, scheduler = init_optimizer(grad_vars)
+    # x**params.n_iters = init/final
+    ori_decay = math.exp(math.log(params.final_ori_lambda / params.backwards_rays_lambda) / params.n_iters)
+    normal_decay = math.exp(math.log(params.final_normal_lambda / params.normal_lambda) / params.n_iters)
+    ic(ori_decay, ori_decay**params.n_iters * params.backwards_rays_lambda)
+    ic(normal_decay)
     if True:
     # with torch.profiler.profile(record_shapes=True, schedule=torch.profiler.schedule(wait=1, warmup=1, active=20), with_stack=True) as p:
     # with torch.autograd.detect_anomaly():
@@ -326,6 +332,9 @@ def reconstruction(args):
                 # ic(total_loss, params.normal_lambda*normal_loss, params.floater_lambda*floater_loss, params.backwards_rays_lambda*backwards_rays_loss, params.diffuse_lambda*diffuse_reg)
                 if iteration > 0000:
                     total_loss += params.normal_lambda*normal_loss
+
+                # params.backwards_rays_lambda *= ori_decay
+                # params.normal_lambda *= normal_decay
 
                 if tensorf.visibility_module is not None:
                     pass

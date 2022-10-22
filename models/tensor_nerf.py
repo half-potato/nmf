@@ -554,6 +554,7 @@ class TensorNeRF(torch.nn.Module):
 
             # interpolate between the predicted and world normals
             if self.normal_module is not None:
+                p_world_normal = torch.zeros_like(p_world_normal)
                 p_world_normal[papp_mask] = self.normal_module(app_norm_xyz, app_features)
                 N = self.N
                 v_world_normal = p_world_normal # normalize((1-N)*p_world_normal + N*world_normal)
@@ -685,7 +686,8 @@ class TensorNeRF(torch.nn.Module):
                         incoming_light = self.render_just_bg(bounce_rays.reshape(-1, D), mipval.reshape(-1))
 
                     brdf_weight = self.brdf(incoming_light,
-                            eV, L, eN, halfvec, diffvec,
+                            # eV, L, eN, halfvec, diffvec,
+                            eV, L, eN, halfvec.detach(), diffvec.detach(),
                             noise_app_features[bounce_mask], roughness[bounce_mask], matprop,
                             bounce_mask, ray_mask)
                     if self.normalize_brdf:
@@ -732,7 +734,7 @@ class TensorNeRF(torch.nn.Module):
                     bad_mask = VdotN < 0
                     vdotn = VdotN[bad_mask].reshape(-1, 1)
                     # reflect_rgb[bad_mask.squeeze(-1)] = tint[bad_mask.squeeze(-1)]*((-vdotn).clip(min=0)*torch.rand_like(vdotn))
-                    reflect_rgb[bad_mask.squeeze(-1)] = tint[bad_mask.squeeze(-1)]*((-vdotn).clip(min=0)*torch.rand_like(vdotn))
+                    reflect_rgb[bad_mask.squeeze(-1)] = tint[bad_mask.squeeze(-1)]*((-vdotn).clip(min=0)**2*torch.rand_like(vdotn))
                     debug[app_mask] = (-VdotN).clip(min=0)
                     if self.use_diffuse:
                         rgb[app_mask] = reflect_rgb + diffuse
