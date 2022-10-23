@@ -109,7 +109,6 @@ arch:
     # activation: 'sigexp'
     activation: 'sigmoid'
     # activation: 'sigmoid'
-    mul_ggx: False
     mix_diffuse: False
     use_roughness: true
     detach_roughness: false

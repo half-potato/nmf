@@ -111,7 +111,6 @@ arch:
     bias: 0
     activation: 'sigmoid'
     # activation: 'sigmoid'
-    mul_ggx: False
     mix_diffuse: False
     use_roughness: False
     detach_roughness: false
