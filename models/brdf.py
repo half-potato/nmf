@@ -275,14 +275,14 @@ class PBR(torch.nn.Module):
 
 class MLPBRDF(torch.nn.Module):
     def __init__(self, in_channels, h_encoder=None, d_encoder=None, v_encoder=None, n_encoder=None, l_encoder=None, feape=6, featureC=128, num_layers=2, dotpe=0,
-                 mul_ggx=False, mix_diffuse=False, activation='sigmoid', use_roughness=False, lr=1e-4, detach_roughness=False, shift=0):
+                 mix_diffuse=False, activation='sigmoid', bias=0, use_roughness=False, lr=1e-4, detach_roughness=False, shift=0):
         super().__init__()
 
         self.in_channels = in_channels
         self.use_roughness = use_roughness
         self.detach_roughness = detach_roughness
-        self.mul_ggx = mul_ggx
         self.dotpe = dotpe
+        self.bias = bias
         self.in_mlpC = 2*feape*in_channels + in_channels + (1 if use_roughness else 0)
         if dotpe >= 0:
             self.in_mlpC += 6 + 2*dotpe*6
@@ -341,7 +341,7 @@ class MLPBRDF(torch.nn.Module):
             brightness = torch.exp(x[..., 3:4].clip(min=-10, max=10)-1)
             return col * brightness
         else:
-            return str2fn(self.activation_name)(x[..., :3])
+            return str2fn(self.activation_name)(x[..., :3]+self.bias)
             # raise Exception(f"{self.activation} not implemented in BRDF")
         # return torch.sigmoid(x)
         # return F.softplus(x+1.0)/2
@@ -429,9 +429,6 @@ class MLPBRDF(torch.nn.Module):
         # ic(f0.mean())
         ref_weight = mlp_out[..., :3]
 
-        if self.mul_ggx:
-            D = ggx_dist(NdotH, roughness.reshape(-1, 1))
-            LdotN = LdotN*D
         LdotN = LdotN.clip(min=0)
 
         weight = ref_weight * LdotN.detach()

@@ -1,7 +1,18 @@
-import warp as wp
 from icecream import ic
 import torch
 import time
+
+# warp isn't faster
+def row_mask_sum(mat, mask):
+    B, M = mask.shape
+    N, D = mat.shape
+    device = mat.device
+    dtype = mat.dtype
+    full_mat = torch.zeros((B, M, D), dtype=dtype, device=device)
+    full_mat[mask] = mat
+    return full_mat.sum(dim=1)
+"""
+import warp as wp
 
 wp.init()
 
@@ -128,16 +139,6 @@ class _RowMaskSum(torch.autograd.Function):
 
 row_mask_sum = _RowMaskSum.apply
 
-# warp isn't faster
-def row_mask_sum(mat, mask):
-    B, M = mask.shape
-    N, D = mat.shape
-    device = mat.device
-    dtype = mat.dtype
-    full_mat = torch.zeros((B, M, D), dtype=dtype, device=device)
-    full_mat[mask] = mat
-    return full_mat.sum(dim=1)
-
 
 if __name__ == "__main__":
     B = 100
@@ -159,3 +160,5 @@ if __name__ == "__main__":
     dmat1 = torch.autograd.grad(gt_sum, mat, deriv, allow_unused=True)
     dmat2 = torch.autograd.grad(calc_sum, mat, deriv, allow_unused=True)
     ic(torch.equal(dmat1[0], dmat2[0]))
+
+"""
