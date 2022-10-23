@@ -256,7 +256,7 @@ class HierarchicalCubeMap(torch.nn.Module):
     def upsample(self, bg_resolution):
         return
 
-    def sa2mip(self, u, saSample):
+    def sa2mip(self, u, saSample, eps=torch.finfo(torch.float32).eps):
         h, w = self.bg_mats[-1].shape[-2], self.bg_mats[-1].shape[-3]
         saTexel = 4 * math.pi / (6*h*w) * 4
         # TODO calculate distortion of cube map for saTexel
@@ -266,7 +266,7 @@ class HierarchicalCubeMap(torch.nn.Module):
         # saTexel is the ratio to the solid angle subtended by one pixel of the 0th mipmap level
         num_pixels = self.bg_mats[-1].numel() // 3
         # saTexel = distortion / num_pixels
-        miplevel = ((saSample - torch.log(saTexel)) / math.log(self.power))/2 + self.mipbias + self.mipnoise * torch.rand_like(saSample)
+        miplevel = ((saSample - torch.log(saTexel.clip(min=eps))) / math.log(self.power))/2 + self.mipbias + self.mipnoise * torch.rand_like(saSample)
         return miplevel.clip(0)
         
     def forward(self, viewdirs, saSample, max_level=None):

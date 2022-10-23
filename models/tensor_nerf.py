@@ -686,8 +686,8 @@ class TensorNeRF(torch.nn.Module):
                         incoming_light = self.render_just_bg(bounce_rays.reshape(-1, D), mipval.reshape(-1))
 
                     brdf_weight = self.brdf(incoming_light,
-                            # eV, L, eN, halfvec, diffvec,
-                            eV, L, eN, halfvec.detach(), diffvec.detach(),
+                            eV, L, eN, halfvec, diffvec,
+                            # eV, L, eN, halfvec.detach(), diffvec.detach(),
                             noise_app_features[bounce_mask], roughness[bounce_mask], matprop,
                             bounce_mask, ray_mask)
                     if self.normalize_brdf:
@@ -746,6 +746,8 @@ class TensorNeRF(torch.nn.Module):
                     # m = full_bounce_mask.sum(dim=1) > 0
                     # LOGGER.log_rays(rays_chunk[m].reshape(-1, D), recur, dict(depth_map=depth_map.detach()[m]))
                     # LOGGER.log_rays(bounce_rays.reshape(-1, D), recur+1, reflect_data)
+                else:
+                    rgb[app_mask] = diffuse
 
                 bounce_count = bounce_mask.sum()
             else:

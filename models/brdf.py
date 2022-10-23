@@ -141,6 +141,13 @@ class GGXSampler(torch.nn.Module):
         # ic((1-a).min(), a.min(), a.max(), phi.min(), phi.max(), (1-a).max())
         N_stretch = P1*T1_mask + P2*T2_mask + (1 - P1*P1 - P2*P2).clip(min=0).sqrt() * V_stretch_mask
         H_l = normalize(torch.stack([r_mask1*N_stretch[..., 0], r_mask2*N_stretch[..., 1], N_stretch[..., 2].clip(min=0)], dim=-1))
+
+        first = torch.zeros_like(ray_mask)
+        first[:, 0] = True
+        H_l[first[ray_mask], 0] = 0
+        H_l[first[ray_mask], 1] = 0
+        H_l[first[ray_mask], 2] = 1
+
         H = torch.matmul(row_world_basis_mask, H_l.unsqueeze(-1)).squeeze(-1)
         # H = torch.einsum('bni,bij->bnj', H_l, row_world_basis)
 
@@ -157,22 +164,22 @@ class GGXSampler(torch.nn.Module):
 
         return L, row_world_basis_mask
 
-def calculate_mipval(H, V, N, ray_mask, roughness):
+def calculate_mipval(H, V, N, ray_mask, roughness, eps=torch.finfo(torch.float32).eps):
     num_samples = ray_mask.shape[1]
-    NdotH = ((H * N).sum(dim=-1)+1e-3).clip(min=1e-8, max=1)
+    NdotH = ((H * N).sum(dim=-1)).clip(min=eps, max=1)
     HdotV = (H * V).sum(dim=-1).abs()
-    NdotV = (N * V).sum(dim=-1).abs().clip(min=1e-8, max=1)
-    D = ggx_dist(NdotH, roughness.clip(min=1e-3))
+    NdotV = (N * V).sum(dim=-1).abs().clip(min=eps, max=1)
+    logD = 2*torch.log(roughness.clip(min=eps)) - 2*torch.log((NdotH**2*(roughness**2-1)+1).clip(min=eps))
     # ic(NdotH.shape, NdotH, D, D.mean())
     # px.scatter(x=NdotH[0].detach().cpu().flatten(), y=D[0].detach().cpu().flatten()).show()
     # assert(False)
     # ic(NdotH.mean())
-    lpdf = torch.log(D.clip(min=1e-5)) + torch.log(HdotV.clip(min=1e-5)) - torch.log(NdotV) - torch.log(roughness.clip(min=1e-5))
+    lpdf = logD + torch.log(HdotV.clip(min=eps)) - torch.log(NdotV)# - torch.log(roughness.clip(min=1e-5))
     # pdf = D * HdotV / NdotV / roughness.reshape(-1, 1)
     # pdf = NdotH / 4 / HdotV
     # pdf = D# / NdotH
-    indiv_num_samples = ray_mask.sum(dim=1, keepdim=True).clip(min=1).expand(-1, num_samples)[ray_mask]
-    mipval = -torch.log(indiv_num_samples) - lpdf
+    indiv_num_samples = ray_mask.sum(dim=1, keepdim=True).expand(-1, num_samples)[ray_mask]
+    mipval = -torch.log(indiv_num_samples.clip(min=1)) - lpdf
     return mipval
 
 class Phong(torch.nn.Module):
