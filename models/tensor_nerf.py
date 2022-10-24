@@ -688,7 +688,7 @@ class TensorNeRF(torch.nn.Module):
                     brdf_weight = self.brdf(incoming_light,
                             eV, L, eN, halfvec, diffvec,
                             # eV, L, eN, halfvec.detach(), diffvec.detach(),
-                            noise_app_features[bounce_mask], roughness[bounce_mask], matprop,
+                            app_features[bounce_mask], roughness[bounce_mask], matprop,
                             bounce_mask, ray_mask)
                     if self.normalize_brdf:
                         norm = row_mask_sum(brdf_weight, ray_mask).clip(min=1.0) #.mean(dim=-1, keepdim=True)
@@ -716,14 +716,17 @@ class TensorNeRF(torch.nn.Module):
                         ptm_mask = tm_mask[bounce_mask]
                         # R0[~tm_mask] = 1
                         spec_color = row_mask_sum(incoming_light * brdf_weight * R0, ray_mask) / norm
-                        tinted_ref_rgb = tint[bounce_mask] * spec_color
+                        tinted_ref_rgb =  spec_color
 
                         reflect_rgb[tm_mask] = tinted_ref_rgb[ptm_mask] + (1-meanR0[ptm_mask]) * tm_light 
                         reflect_rgb[bounce_mask & ~tm_mask] = tinted_ref_rgb[~ptm_mask]
                     else:
                         spec_color = row_mask_sum(incoming_light * brdf_weight, ray_mask) / norm
-                        tinted_ref_rgb = tint[bounce_mask] * spec_color
+                        tinted_ref_rgb =  spec_color
+                        if self.detach_bg:
+                            tinted_ref_rgb.detach_()
                         reflect_rgb[bounce_mask] = tinted_ref_rgb
+                    # ic(incoming_light.mean(), brdf_weight.mean())
 
                     # s = row_mask_sum(incoming_light.detach(), ray_mask) / (ray_mask.sum(dim=1)+1e-8)[..., None]
                     # debug[full_bounce_mask] += s# / (s+1)
@@ -734,7 +737,7 @@ class TensorNeRF(torch.nn.Module):
                     bad_mask = VdotN < 0
                     vdotn = VdotN[bad_mask].reshape(-1, 1)
                     # reflect_rgb[bad_mask.squeeze(-1)] = tint[bad_mask.squeeze(-1)]*((-vdotn).clip(min=0)*torch.rand_like(vdotn))
-                    reflect_rgb[bad_mask.squeeze(-1)] = tint[bad_mask.squeeze(-1)]*((-vdotn).clip(min=0)**2*torch.rand_like(vdotn))
+                    reflect_rgb[bad_mask.squeeze(-1)] = ((-vdotn).clip(min=0)**2*torch.rand_like(vdotn))
                     debug[app_mask] = (-VdotN).clip(min=0)
                     if self.use_diffuse:
                         rgb[app_mask] = reflect_rgb + diffuse
