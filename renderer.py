@@ -74,7 +74,7 @@ class BundleRender:
             'depth_map', 'rgb_map', 'normal_map', 'acc_map',
             'debug_map', 'surf_width', 'world_normal_map',
             'tint_map', 'diffuse_map', 'spec_map',
-            'roughness_map', 'brdf_map', 'diffuse_light_map', 'r0_map', 'transmitted']
+            'roughness_map', 'brdf_map', 'diffuse_light_map', 'r0_map', 'transmitted', 'cross_section']
         LOGGER.reset()
         data = self.base_renderer(
             rays, tensorf, keys=map_keys + ['termination_xyz'],
@@ -141,6 +141,7 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
     os.makedirs(savePath+"/r0", exist_ok=True)
     os.makedirs(savePath+"/transmitted", exist_ok=True)
     os.makedirs(savePath+"/diffuse_light", exist_ok=True)
+    os.makedirs(savePath+"/cross_section", exist_ok=True)
 
     if tensorf.bg_module is not None:
         tm = tonemap.HDRTonemap()
@@ -258,6 +259,9 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
             imageio.imwrite(f'{savePath}/world_normal/{prtx}{idx:03d}.png', vis_world_normal_map)
             imageio.imwrite(f'{savePath}/err/{prtx}{idx:03d}.png', err_map)
             imageio.imwrite(f'{savePath}/surf_width/{prtx}{idx:03d}.png', data.surf_width.numpy().astype(np.uint8))
+
+            cross_section = (data.cross_section.clamp(0, 1).numpy() * 255).astype('uint8')
+            imageio.imwrite(f'{savePath}/cross_section/{prtx}{idx:03d}.png', cross_section)
             # debug = 255*data.debug_map.clamp(0, 1)
             debug = data.debug_map
             imageio.imwrite(f'{savePath}/debug/{prtx}{idx:03d}.exr', (debug.numpy()))

@@ -275,24 +275,20 @@ class PBR(torch.nn.Module):
 
 class MLPBRDF(torch.nn.Module):
     def __init__(self, in_channels, h_encoder=None, d_encoder=None, v_encoder=None, n_encoder=None, l_encoder=None, feape=6, featureC=128, num_layers=2, dotpe=0,
-                 mix_diffuse=False, activation='sigmoid', bias=0, use_roughness=False, lr=1e-4, detach_roughness=False, shift=0):
+                 activation='sigmoid', bias=0, lr=1e-4, shift=0):
         super().__init__()
 
         self.in_channels = in_channels
-        self.use_roughness = use_roughness
-        self.detach_roughness = detach_roughness
         self.dotpe = dotpe
         self.bias = bias
-        self.in_mlpC = 2*feape*in_channels + in_channels + (1 if use_roughness else 0)
+        self.in_mlpC = 2*feape*in_channels + in_channels
         if dotpe >= 0:
             self.in_mlpC += 6 + 2*dotpe*6
-        # self.in_mlpC = 2*feape*in_channels + (1 if use_roughness else 0) + 6
         self.v_encoder = v_encoder
         self.n_encoder = n_encoder
         self.l_encoder = l_encoder
         self.h_encoder = h_encoder
         self.d_encoder = d_encoder
-        self.mix_diffuse = mix_diffuse
         self.lr = lr
         self.activation_name = activation
         if h_encoder is not None:
@@ -362,21 +358,14 @@ class MLPBRDF(torch.nn.Module):
     #     self()
         
 
-    def forward(self, incoming_light, V, L, N, half_vec, diff_vec,
-            features, roughness, matprop,
-            mask, ray_mask):
+    def forward(self, V, L, N, half_vec, diff_vec, efeatures, eroughness):
         # V: (n, 3)-viewdirs, the outgoing light direction
         # L: (n, m, 3) incoming light direction. bounce_rays
         # N: (n, 1, 3) outward normal
         # features: (B, D)
         # matprop: dictionary of attributes
         # mask: mask for matprop
-        D = features.shape[-1]
-        device = incoming_light.device
-        n, m = ray_mask.shape
 
-        features = features.reshape(n, 1, D).expand(n, m, D)[ray_mask]
-        eroughness = roughness.reshape(-1, 1).expand(n, m)[ray_mask].reshape(-1, 1)
         half = normalize(L + V)
 
         LdotN = (L * N).sum(dim=-1, keepdim=True).clip(min=1e-8)
@@ -394,14 +383,7 @@ class MLPBRDF(torch.nn.Module):
         else:
             indata = []
         # indata = [safemath.arccos(LdotN.reshape(-1, 1)), safemath.arccos(VdotN.reshape(-1, 1)), safemath.arccos(NdotH.reshape(-1, 1))]
-        indata += [features]
-
-        # ic(indata)
-        # indata = [features]
-        if self.detach_roughness:
-            eroughness = eroughness.detach()
-        if self.use_roughness:
-            indata.append(eroughness)
+        indata += [efeatures]
 
         L = L.reshape(-1, 3)
         B = V.shape[0]

@@ -9,7 +9,7 @@ arch:
   max_recur_rays: 5
   infinity_border: False
   use_diffuse: True
-  appdim_noise_std: 0.0
+  appdim_noise_std: 1.0
   # world_bounces: 0
   world_bounces: 2048000
   max_normal_similarity: 1 #0.87
@@ -20,6 +20,7 @@ arch:
   percent_bright: 0.1
   transmit_iter: 1000
   normalize_brdf: False
+  noise_decay: 1.0
 
   detach_inter: True
   selector:
@@ -111,9 +112,6 @@ arch:
     bias: 0
     activation: 'sigmoid'
     # activation: 'sigmoid'
-    mix_diffuse: False
-    use_roughness: False
-    detach_roughness: false
     lr: 1e-4
 
   bg_module:
@@ -124,14 +122,14 @@ arch:
     activation: 'exp'
     power: 2
     stds: []
-    lr: 0.4
+    lr: 0.1
     init_val: -1
     mul_lr: 0.1
     brightness_lr: 0.01
     betas: [0.9, 0.999]
     mul_betas: [0.9, 0.99]
     mipbias_lr: 1e-4
-    mipnoise: 0.5
+    mipnoise: 0.0
 
   diffuse_module:
     _partial_: True
@@ -145,7 +143,7 @@ arch:
     #   max_degree: 2
     featureC: 128
     num_layers: 3
-    lr: 1e-5
+    lr: 1e-4
     tint_offset: 2
     # allocation: 7
 
@@ -198,7 +196,7 @@ params:
   TV_weight_app: 0.0
   TV_weight_bg: 0.0
   normal_lambda: 1e-2
-  final_normal_lambda: 1e-2
+  final_normal_lambda: 9e-2
   diffuse_lambda: 0
   backwards_rays_lambda: 0.05
   final_ori_lambda: 0.05

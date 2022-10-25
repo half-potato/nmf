@@ -202,7 +202,7 @@ class HierarchicalCubeMap(torch.nn.Module):
         # ic(cols, bg)
         conv_coeffs = self.sh_A.reshape(-1, 1)[:coeffs.shape[0]] * coeffs
         # cols = (conv_coeffs.reshape(1, -1, 3) * evaled.reshape(SB, -1, 1)).sum(dim=1)
-        return coeffs, conv_coeffs
+        return coeffs, conv_coeffs / np.pi
 
     @property
     def bg_resolution(self):
@@ -267,7 +267,8 @@ class HierarchicalCubeMap(torch.nn.Module):
         num_pixels = self.bg_mats[-1].numel() // 3
         # saTexel = distortion / num_pixels
         miplevel = ((saSample - torch.log(saTexel.clip(min=eps))) / math.log(self.power))/2 + self.mipbias + self.mipnoise * torch.rand_like(saSample)
-        return miplevel.clip(0)
+        
+        return miplevel.clip(0)#, max=int(math.log(h) / math.log(2))-2)
         
     def forward(self, viewdirs, saSample, max_level=None):
         # saSample is log of saSample

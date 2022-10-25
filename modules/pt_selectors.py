@@ -49,10 +49,12 @@ class Selector:
 
         # derived masks
         full_bounce_mask = torch.zeros_like(app_mask)
+        inv_full_bounce_mask = torch.zeros_like(app_mask)
         ainds, ajinds = torch.where(app_mask)
         full_bounce_mask[ainds[bounce_mask], ajinds[bounce_mask]] = 1
+        inv_full_bounce_mask[ainds[~bounce_mask], ajinds[~bounce_mask]] = 1
 
-        return bounce_mask, full_bounce_mask, ray_mask, bright_mask
+        return bounce_mask, full_bounce_mask, inv_full_bounce_mask, ray_mask, bright_mask
 
 class TopNCombined(Selector):
     def _forward(self, app_mask, weight, VdotN, prob):

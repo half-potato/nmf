@@ -245,7 +245,6 @@ def reconstruction(args):
 
 
     pbar = tqdm(range(params.n_iters * batch_mul), miniters=args.progress_refresh_rate, file=sys.stdout)
-    old_decay = False
     def init_optimizer(grad_vars):
         # optimizer = torch.optim.Adam(grad_vars, betas=(0.9, 0.999), weight_decay=0, eps=1e-6)
         optimizer = torch.optim.Adam(grad_vars, betas=(0.9, 0.99))
@@ -274,9 +273,9 @@ def reconstruction(args):
     # with torch.autograd.detect_anomaly():
         for iteration in pbar:
 
-            if iteration < 250:
-                ray_idx, rgb_idx = trainingSampler.nextids(batch=params.batch_size//8)
-            elif iteration < 500:
+            # if iteration < 250:
+            #     ray_idx, rgb_idx = trainingSampler.nextids(batch=params.batch_size//8)
+            if iteration < 500:
                 ray_idx, rgb_idx = trainingSampler.nextids(batch=params.batch_size//4)
             else:
                 ray_idx, rgb_idx = trainingSampler.nextids()
@@ -334,7 +333,7 @@ def reconstruction(args):
                     total_loss += params.normal_lambda*normal_loss
 
                 # params.backwards_rays_lambda *= ori_decay
-                # params.normal_lambda *= normal_decay
+                params.normal_lambda *= normal_decay
 
                 if tensorf.visibility_module is not None:
                     pass
@@ -372,8 +371,7 @@ def reconstruction(args):
                 total_loss.backward()
                 # torch.nn.utils.clip_grad_norm_(tensorf.parameters(), 1e-3)
                 optimizer.step()
-                if not old_decay:
-                    scheduler.step()
+                scheduler.step()
 
                 photo_loss = photo_loss.detach().item()
             
