@@ -189,8 +189,8 @@ arch:
   rf: 'placeholder'
 
 params:
-  L1_weight_inital: 8e-5
-  L1_weight_rest: 4e-5
+  L1_weight_inital: 0
+  L1_weight_rest: 0
 
   TV_weight_density: 0.0
   TV_weight_app: 0.0

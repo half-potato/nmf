@@ -726,7 +726,6 @@ class TensorNeRF(torch.nn.Module):
                         if self.detach_bg:
                             tinted_ref_rgb.detach_()
                         reflect_rgb[bounce_mask] = tinted_ref_rgb
-                    # ic(incoming_light.mean(), brdf_weight.mean())
 
                     # s = row_mask_sum(incoming_light.detach(), ray_mask) / (ray_mask.sum(dim=1)+1e-8)[..., None]
                     # debug[full_bounce_mask] += s# / (s+1)
@@ -747,11 +746,10 @@ class TensorNeRF(torch.nn.Module):
                 #     reflect_rgb[~bounce_mask] = nb_ref_col
                 #     brdf_rgb[inv_full_bounce_mask] = nb_brdf_weight
 
-                if not self.detach_bg:
-                    bad_mask = VdotN < 0
-                    vdotn = VdotN[bad_mask].reshape(-1, 1)
-                    # reflect_rgb[bad_mask.squeeze(-1)] = tint[bad_mask.squeeze(-1)]*((-vdotn).clip(min=0)**2*torch.rand_like(vdotn))
-                    reflect_rgb[bad_mask.squeeze(-1)] = ((-vdotn).clip(min=0)**2*torch.rand_like(vdotn))
+                bad_mask = VdotN < 0
+                vdotn = VdotN[bad_mask].reshape(-1, 1)
+                # reflect_rgb[bad_mask.squeeze(-1)] = tint[bad_mask.squeeze(-1)]*((-vdotn).clip(min=0)**2*torch.rand_like(vdotn))
+                reflect_rgb[bad_mask.squeeze(-1)] = ((-vdotn).clip(min=0)**2*torch.rand_like(vdotn))
                 debug[full_bounce_mask] += 1
                 # debug[app_mask] = (-VdotN).clip(min=0)
                 if self.use_diffuse:
@@ -894,7 +892,10 @@ class TensorNeRF(torch.nn.Module):
             output['roughness_map'] = roughness_map
         elif recur == 0:
             # viewdirs point inward. -viewdirs aligns with p_world_normal. So we want it below 0
-            backwards_rays_loss = (torch.matmul(viewdirs[ray_valid].reshape(-1, 1, 3).detach(), p_world_normal.reshape(-1, 3, 1)).reshape(pweight.shape).clamp(min=self.back_clip) - self.back_clip)**2
+            backwards_rays_loss = ((
+                torch.matmul(viewdirs[ray_valid].reshape(-1, 1, 3).detach(), p_world_normal.reshape(-1, 3, 1))
+                     .reshape(pweight.shape) - self.back_clip)
+                .clamp(min=0))**2
             # debug[ray_valid] = backwards_rays_loss.reshape(-1, 1).expand(-1, 3)
             backwards_rays_loss = (pweight * backwards_rays_loss).sum() / pweight.sum().clip(min=1e-5)
 

@@ -44,7 +44,7 @@ class TensorBase(torch.nn.Module):
         if self.activation == "softplus_shift":
             return F.softplus(density_features+self.density_shift)
         elif self.activation == "softplus":
-            return F.softplus(density_features)
+            return F.softplus(density_features.clamp(-15, 60))
         elif self.activation == "relu":
             return F.relu(density_features)
         elif self.activation == "relu_shift":

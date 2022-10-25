@@ -62,6 +62,26 @@ def render_test(args):
         from models import bg_modules
         bg_module = bg_modules.HierarchicalCubeMap(bg_resolution=2048, num_levels=1, featureC=128, activation='softplus', power=2, lr=1e-2)
         bg_module.load_state_dict(bg_sd, strict=False)
+        a = bg_module.bg_mats[0].reshape(-1, 3).mean(dim=-1)
+        b = tensorf.bg_module.bg_mats[0].reshape(-1, 3).mean(dim=-1)
+        a.sort()
+        b.sort()
+        a0 = a[500]
+        a1 = a[-500]
+        b0 = b[500]
+        b1 = b[-500]
+        # a0 = torch.quantile(a, 0.05)
+        # a1 = torch.quantile(a, 0.95)
+        # b0 = torch.quantile(b, 0.05)
+        # b1 = torch.quantile(b, 0.95)
+        new_mul = (tensorf.bg_module.mul*(b1-b0)) / (bg_module.mul*(a1-a0))
+        new_mul = 3
+        bg_module.mul *= new_mul
+        offset = tensorf.bg_module.mean_color().mean() / bg_module.mean_color().mean()
+        ic(new_mul, offset, torch.log(offset))
+        bg_module.brightness += torch.log(offset)
+
+        # bg_module.mul += 1
         tensorf.bg_module = bg_module
     tensorf = tensorf.to(device)
     tensorf.sampler.update(tensorf.rf, init=True)
@@ -121,7 +141,7 @@ def reconstruction(args):
     if args.ckpt is not None:
         # TODO REMOVE
         ckpt = torch.load(args.ckpt)
-        tensorf = TensorNeRF.load(ckpt, args.model.arch)
+        tensorf = TensorNeRF.load(ckpt, args.model.arch, strict=False)
 
         # del ckpt['state_dict']['bg_module.bg_mats.0']
         # del ckpt['state_dict']['bg_module.bg_mats.1']
@@ -227,6 +247,7 @@ def reconstruction(args):
             sigma_feat = tensorf.rf.compute_densityfeature(xyz)
 
             alpha = 1-torch.exp(-sigma_feat * 0.015 * tensorf.rf.distance_scale)
+            # ic(alpha.mean(), sigma_feat.mean(), tensorf.rf.distance_scale)
             # sigma = 1-torch.exp(-sigma_feat)
             # loss = (sigma-torch.rand_like(sigma)*args.start_density).abs().mean()
             # target_alpha = (params.start_density+params.start_density*(2*torch.rand_like(alpha)-1))
