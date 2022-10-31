@@ -597,7 +597,7 @@ class TensorNeRF(torch.nn.Module):
                 coeffs, conv_coeffs = self.bg_module.get_spherical_harmonics(100)
                 evaled = sh.eval_sh_bases(coeffs.shape[0], N)
                 E = (conv_coeffs.reshape(1, -1, 3) * evaled.reshape(evaled.shape[0], -1, 1)).sum(dim=1).detach()
-                diffuse = diffuse * E.detach()# * np.pi
+                # diffuse = diffuse * E.detach()# * np.pi
 
 
             reflect_rgb = torch.zeros_like(diffuse)
@@ -750,8 +750,9 @@ class TensorNeRF(torch.nn.Module):
                 vdotn = VdotN[bad_mask].reshape(-1, 1)
                 # reflect_rgb[bad_mask.squeeze(-1)] = tint[bad_mask.squeeze(-1)]*((-vdotn).clip(min=0)**2*torch.rand_like(vdotn))
                 reflect_rgb[bad_mask.squeeze(-1)] = ((-vdotn).clip(min=0)**2*torch.rand_like(vdotn))
-                debug[full_bounce_mask] += 1
-                # debug[app_mask] = (-VdotN).clip(min=0)
+                # reflect_rgb[bad_mask.squeeze(-1)] = ((-vdotn).clip(min=0)**2*torch.randn_like(vdotn))
+                # debug[full_bounce_mask] += 1
+                debug[app_mask] = (-VdotN).clip(min=0)**2
                 if self.use_diffuse:
                     rgb[app_mask] = reflect_rgb + diffuse
                 else:
@@ -921,6 +922,14 @@ class TensorNeRF(torch.nn.Module):
 
             # output['diffuse_reg'] = (roughness-0.5).clip(min=0).mean() + tint.clip(min=1e-3).mean()
             # output['diffuse_reg'] = tint.clip(min=1e-3).mean()
+            if self.bg_module is not None:
+                envmap_brightness = self.bg_module.mean_color().mean()
+                if self.detach_bg:
+                    envmap_brightness.detach_()
+                output['envmap_reg'] = envmap_brightness
+            else:
+                output['envmap_reg'] = torch.tensor(0.0)
+
             output['diffuse_reg'] = diffuse.mean()-tint.mean()
             output['normal_loss'] = normal_loss
             output['backwards_rays_loss'] = backwards_rays_loss

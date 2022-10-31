@@ -318,13 +318,14 @@ def reconstruction(args):
             with torch.cuda.amp.autocast(enabled=args.fp16):
             # if True:
                 data = renderer(rays_train, tensorf,
-                        keys = ['rgb_map', 'floater_loss', 'normal_loss', 'backwards_rays_loss', 'diffuse_reg', 'roughness', 'whole_valid'],#, 'normal_map'],
+                        keys = ['rgb_map', 'floater_loss', 'normal_loss', 'backwards_rays_loss', 'diffuse_reg', 'roughness', 'whole_valid', 'envmap_reg'],#, 'normal_map'],
                         focal=focal, output_alpha=alpha_train, chunk=params.batch_size, white_bg = white_bg, is_train=True, ndc_ray=ndc_ray)
 
                 # loss = torch.mean((rgb_map[:, 1, 1] - rgb_train[:, 1, 1]) ** 2)
                 normal_loss = data['normal_loss'].mean()
                 floater_loss = data['floater_loss'].mean()
                 diffuse_reg = data['diffuse_reg'].mean()
+                envmap_reg = data['envmap_reg'].mean()
                 rgb_map = data['rgb_map']
                 if not train_dataset.hdr:
                     rgb_map = rgb_map.clip(max=1)
@@ -347,11 +348,9 @@ def reconstruction(args):
                 total_loss = loss + \
                     params.floater_lambda*floater_loss + \
                     params.backwards_rays_lambda*backwards_rays_loss + \
-                    params.diffuse_lambda * diffuse_reg# + \
-                    # 1.0 * norm_err
-                # ic(total_loss, params.normal_lambda*normal_loss, params.floater_lambda*floater_loss, params.backwards_rays_lambda*backwards_rays_loss, params.diffuse_lambda*diffuse_reg)
-                if iteration > 0000:
-                    total_loss += params.normal_lambda*normal_loss
+                    params.envmap_lambda * envmap_reg + \
+                    params.diffuse_lambda * diffuse_reg + \
+                    params.normal_lambda*normal_loss
 
                 # params.backwards_rays_lambda *= ori_decay
                 params.normal_lambda *= normal_decay

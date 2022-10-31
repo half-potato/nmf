@@ -509,7 +509,7 @@ class MLPNormal(torch.nn.Module):
         #     -torch.sin(ele),
         # ], dim=1)
 
-        normals = normalize(self.mlp(mlp_in).clip(min=-10, max=10))
+        normals = normalize(self.mlp(mlp_in))
 
         return normals
 
