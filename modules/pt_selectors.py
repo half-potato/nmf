@@ -30,7 +30,7 @@ class Selector:
         n_weight = weight
         pt_limit = n_weight * self.bounces_per_ray + 0.5
         nopt_mask = pt_limit.max(dim=1).values < 1
-        pt_limit[nopt_mask] = pt_limit[nopt_mask] / pt_limit.max(dim=1, keepdim=True).values.clamp(min=0.1)[nopt_mask]# + 0.01
+        pt_limit[nopt_mask] = pt_limit[nopt_mask] / pt_limit.max(dim=1, keepdim=True).values.clamp(min=0.1, max=1)[nopt_mask]# + 0.01
         # num_missing = (self.bounces_per_ray - pt_limit.int().sum(dim=1, keepdim=True))
         # b = num_missing - torch.rand_like(weight) * app_mask.sum(dim=1, keepdim=True)
         # pt_limit[full_bounce_mask] += (b < 0)[full_bounce_mask]

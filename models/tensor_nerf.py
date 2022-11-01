@@ -46,9 +46,9 @@ class TensorNeRF(torch.nn.Module):
                  visibility_module=None, grid_size=None, bright_sampler=None,
                  alphaMask=None, specularity_threshold=0.005, max_recurs=0, use_diffuse=True, transmittance_thres=1, recur_weight_thres=1e-3,
                  max_normal_similarity=1, infinity_border=False, min_refraction=1.1, enable_refraction=True, transmit_iter=500,
-                 rayMarch_weight_thres=0.0001, detach_inter=False, attach_normal_iter=0, percent_bright=0.1, 
+                 rayMarch_weight_thres=0.0001, detach_inter=False, attach_normal_iter=0, percent_bright=0.1, bg_noise=0,
                  max_bounce_rays=4000, roughness_rays=3, bounce_min_weight=0.001, appdim_noise_std=0.0, noise_decay=1, normalize_brdf=True,
-                 world_bounces=0, selector=None, cold_start_bg_iters = 0, back_clip=0.2, max_recur_rays=5, eval_batch_size=512,
+                 world_bounces=0, selector=None, cold_start_bg_iters = 0, back_clip=0.2, max_recur_rays=5, eval_batch_size=512, rough_light=False,
                  update_sampler_list=[5000], max_floater_loss=6, **kwargs):
         super(TensorNeRF, self).__init__()
         self.rf = rf(aabb=aabb, grid_size=grid_size)
@@ -73,6 +73,7 @@ class TensorNeRF(torch.nn.Module):
             self.tonemap = tonemap
 
         self.normalize_brdf = normalize_brdf
+        self.bg_noise = bg_noise
         self.max_recur_rays = max_recur_rays
         self.world_bounces = world_bounces
         self.back_clip = back_clip
@@ -88,6 +89,7 @@ class TensorNeRF(torch.nn.Module):
         self.transmittance_thres = transmittance_thres
         self.recur_weight_thres = recur_weight_thres
         self.eval_batch_size = eval_batch_size
+        self.rough_light = rough_light
 
         self.bounce_min_weight = bounce_min_weight
         self.min_refraction = min_refraction
@@ -733,24 +735,29 @@ class TensorNeRF(torch.nn.Module):
                     # debug[full_bounce_mask] += bright_mask.sum(dim=1, keepdim=True)
                     # reflect_rgb[~bounce_mask] = E[~bounce_mask].detach()
 
-                # if (~bounce_mask).any():
-                #     nb_efeatures = app_features[~bounce_mask]
-                #     nb_eroughness = roughness[~bounce_mask]
-                #     nb_halfvec = normalize(V[~bounce_mask] + N[~bounce_mask])
-                #     nb_diffvec = torch.zeros((nb_efeatures.shape[0], 3), device=device)
-                #     nb_diffvec[:, 2] = 1
-                #     nb_brdf_weight = self.brdf(V[~bounce_mask], N[~bounce_mask].detach(), N[~bounce_mask].detach(), nb_halfvec.detach(), nb_diffvec.detach(), nb_efeatures, nb_eroughness)
-                #     nb_ref_col = nb_brdf_weight * E[~bounce_mask].detach()
-                #     # if self.detach_bg:
-                #     #     nb_ref_col.detach_()
-                #     reflect_rgb[~bounce_mask] = nb_ref_col
-                #     brdf_rgb[inv_full_bounce_mask] = nb_brdf_weight
+                if (~bounce_mask).any() and self.rough_light:
+                    nb_efeatures = app_features[~bounce_mask]
+                    nb_eroughness = roughness[~bounce_mask]
+                    nb_L = normalize(N[~bounce_mask] + normalize(2*torch.rand((nb_efeatures.shape[0], 3), device=device)-1))
+                    # nb_halfvec = normalize(V[~bounce_mask] + N[~bounce_mask])
+                    nb_halfvec = normalize(V[~bounce_mask] + nb_L)
+                    nb_diffvec = torch.zeros((nb_efeatures.shape[0], 3), device=device)
+                    nb_diffvec[:, 2] = 1
+                    # nb_diffvec = torch.matmul(row_world_basis.permute(0, 2, 1), L.unsqueeze(-1)).squeeze(-1)
+                    nb_brdf_weight = self.brdf(V[~bounce_mask], nb_L.detach(), N[~bounce_mask].detach(), nb_halfvec.detach(), nb_diffvec.detach(), nb_efeatures, nb_eroughness)
+                    nb_ref_col = tint[~bounce_mask].detach() * nb_brdf_weight.detach() * E[~bounce_mask].detach()
+                    # nb_ref_col = nb_brdf_weight.detach() * E[~bounce_mask].detach()
+                    reflect_rgb[~bounce_mask] = nb_ref_col
+                    inv_full_bounce_mask = torch.zeros_like(app_mask)
+                    ainds, ajinds = torch.where(app_mask)
+                    inv_full_bounce_mask[ainds[~bounce_mask], ajinds[~bounce_mask]] = 1
+                    brdf_rgb[inv_full_bounce_mask] = nb_brdf_weight
 
                 bad_mask = VdotN < 0
                 vdotn = VdotN[bad_mask].reshape(-1, 1)
                 # reflect_rgb[bad_mask.squeeze(-1)] = tint[bad_mask.squeeze(-1)]*((-vdotn).clip(min=0)**2*torch.rand_like(vdotn))
-                reflect_rgb[bad_mask.squeeze(-1)] = ((-vdotn).clip(min=0)**2*torch.rand_like(vdotn))
-                # reflect_rgb[bad_mask.squeeze(-1)] = ((-vdotn).clip(min=0)**2*torch.randn_like(vdotn))
+                # reflect_rgb[bad_mask.squeeze(-1)] = ((-vdotn).clip(min=0)**2*torch.rand((vdotn.shape[0], 1), device=device))
+                reflect_rgb[bad_mask.squeeze(-1)] = ((-vdotn).clip(min=0)**2*torch.randn((vdotn.shape[0], 3), device=device))
                 # debug[full_bounce_mask] += 1
                 debug[app_mask] = (-VdotN).clip(min=0)**2
                 if self.use_diffuse:
@@ -953,7 +960,8 @@ class TensorNeRF(torch.nn.Module):
                 (1 - acc_map[..., None]) * bg
         else:
             if white_bg or (is_train and torch.rand((1,)) < 0.5):
-                rgb_map = rgb_map + (1 - acc_map[..., None])
+                noise = 1-torch.rand((*acc_map.shape, 3), device=device)*self.bg_noise
+                rgb_map = rgb_map + (1 - acc_map[..., None]) * noise
             # if white_bg:
             #     if True:
             #         bg_col = torch.rand((1, 3), device=device).clip(min=torch.finfo(torch.float32).eps).sqrt()

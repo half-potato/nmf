@@ -286,7 +286,7 @@ def reconstruction(args):
     optimizer, scheduler = init_optimizer(grad_vars)
     # x**params.n_iters = init/final
     ori_decay = math.exp(math.log(params.final_ori_lambda / params.backwards_rays_lambda) / params.n_iters)
-    normal_decay = math.exp(math.log(params.final_normal_lambda / params.normal_lambda) / params.n_iters)
+    normal_decay = math.exp(math.log(params.final_normal_lambda / params.normal_lambda) / params.n_iters) if params.normal_lambda > 0 else 0
     ic(ori_decay, ori_decay**params.n_iters * params.backwards_rays_lambda)
     ic(normal_decay)
     if True:
@@ -294,9 +294,9 @@ def reconstruction(args):
     # with torch.autograd.detect_anomaly():
         for iteration in pbar:
 
-            # if iteration < 250:
-            #     ray_idx, rgb_idx = trainingSampler.nextids(batch=params.batch_size//8)
-            if iteration < 500:
+            if iteration < 150:
+                ray_idx, rgb_idx = trainingSampler.nextids(batch=params.batch_size//8)
+            elif iteration < 500:
                 ray_idx, rgb_idx = trainingSampler.nextids(batch=params.batch_size//4)
             else:
                 ray_idx, rgb_idx = trainingSampler.nextids()
