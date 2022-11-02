@@ -46,7 +46,7 @@ class TensorNeRF(torch.nn.Module):
                  visibility_module=None, grid_size=None, bright_sampler=None,
                  alphaMask=None, specularity_threshold=0.005, max_recurs=0, use_diffuse=True, transmittance_thres=1, recur_weight_thres=1e-3,
                  max_normal_similarity=1, infinity_border=False, min_refraction=1.1, enable_refraction=True, transmit_iter=500,
-                 rayMarch_weight_thres=0.0001, detach_inter=False, attach_normal_iter=0, percent_bright=0.1, bg_noise=0,
+                 rayMarch_weight_thres=0.0001, detach_inter=False, attach_normal_iter=0, percent_bright=0.1, bg_noise=0, use_predicted_normals=True,
                  max_bounce_rays=4000, roughness_rays=3, bounce_min_weight=0.001, appdim_noise_std=0.0, noise_decay=1, normalize_brdf=True,
                  world_bounces=0, selector=None, cold_start_bg_iters = 0, back_clip=0.2, max_recur_rays=5, eval_batch_size=512, rough_light=False,
                  update_sampler_list=[5000], max_floater_loss=6, **kwargs):
@@ -113,7 +113,7 @@ class TensorNeRF(torch.nn.Module):
         self.register_buffer('f_edge', f_edge)
 
         self.max_normal_similarity = max_normal_similarity
-        self.N = 0
+        self.use_predicted_normals = use_predicted_normals
         # self.sampler.update(self.rf, init=True)
         # self.sampler2.update(self.rf, init=True)
 
@@ -562,8 +562,7 @@ class TensorNeRF(torch.nn.Module):
             if self.normal_module is not None:
                 p_world_normal = torch.zeros_like(p_world_normal)
                 p_world_normal[papp_mask] = self.normal_module(app_norm_xyz, app_features)
-                N = self.N
-                v_world_normal = p_world_normal # normalize((1-N)*p_world_normal + N*world_normal)
+                v_world_normal = p_world_normal if self.use_predicted_normals else world_normal
                 # TODO REMOVE
                 if FIXED_SPHERE:
                     v_world_normal = normalize(xyz_sampled[..., :3])
@@ -846,7 +845,7 @@ class TensorNeRF(torch.nn.Module):
 
                 # TODO REMOVE
                 LOGGER.log_norms_n_rays(xyz_sampled[papp_mask], v_world_normal[papp_mask], weight[app_mask])
-                backwards_rays_loss = torch.matmul(viewdirs[ray_valid].reshape(-1, 1, 3).detach(), p_world_normal.reshape(-1, 3, 1)).reshape(pweight.shape).clamp(min=0)**2
+                backwards_rays_loss = torch.matmul(viewdirs[ray_valid].reshape(-1, 1, 3).detach(), v_world_normal.reshape(-1, 3, 1)).reshape(pweight.shape).clamp(min=0)**2
                 # debug[ray_valid] = backwards_rays_loss.reshape(-1, 1).expand(-1, 3)
                 debug_map = (weight[..., None]*debug).sum(dim=1)
                 # calculate cross section
@@ -905,7 +904,7 @@ class TensorNeRF(torch.nn.Module):
         elif recur == 0:
             # viewdirs point inward. -viewdirs aligns with p_world_normal. So we want it below 0
             backwards_rays_loss = ((
-                torch.matmul(viewdirs[ray_valid].reshape(-1, 1, 3).detach(), p_world_normal.reshape(-1, 3, 1))
+                torch.matmul(viewdirs[ray_valid].reshape(-1, 1, 3).detach(), v_world_normal.reshape(-1, 3, 1))
                      .reshape(pweight.shape) - self.back_clip)
                 .clamp(min=0))**2
             # debug[ray_valid] = backwards_rays_loss.reshape(-1, 1).expand(-1, 3)

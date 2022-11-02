@@ -15,7 +15,7 @@ arch:
   # world_bounces: 0
   world_bounces: 2048000
   max_normal_similarity: 1 #0.87
-  cold_start_bg_iters: 500
+  cold_start_bg_iters: 100
   attach_normal_iter: 0
   transmittance_thres: 1.0
   back_clip: 0.0
@@ -23,6 +23,7 @@ arch:
   transmit_iter: 1000
   normalize_brdf: False
   noise_decay: 1.0
+  use_predicted_normals: True
 
   detach_inter: True
   selector:
