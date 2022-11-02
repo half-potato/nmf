@@ -119,8 +119,9 @@ arch:
   bg_module:
     _target_: models.bg_modules.HierarchicalCubeMap
     bg_resolution: 512
-    mipbias: 3
+    mipbias: 0
     num_levels: 1
+    TV_max_scale: 1
     activation: 'exp'
     power: 2
     stds: []
@@ -146,7 +147,7 @@ arch:
     featureC: 128
     num_layers: 3
     lr: 1e-4
-    tint_offset: 2
+    tint_offset: -4
     # allocation: 7
 
   normal_module:
@@ -197,8 +198,8 @@ params:
 
   TV_weight_density: 0.0
   TV_weight_app: 0.0
-  TV_weight_bg: 0.0
-  envmap_lambda: 0
+  TV_weight_bg: 5e-5
+  envmap_lambda: 5e-5
   normal_lambda: 1e-2
   final_normal_lambda: 1e-2
   diffuse_lambda: 0
@@ -214,7 +215,7 @@ params:
 
   n_iters: 30000
   charbonier_loss: false
-  start_density: 1e-3
+  start_density: 1e-2
   lr_init: 0.02
   batch_size: 4096
 

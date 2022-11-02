@@ -690,9 +690,10 @@ class TensorNeRF(torch.nn.Module):
                         incoming_light = self.render_just_bg(bounce_rays.reshape(-1, D), mipval.reshape(-1))
 
                     n, m = ray_mask.shape
-                    efeatures = app_features[bounce_mask].reshape(n, 1, -1).expand(n, m, -1)[ray_mask]
+                    efeatures = noise_app_features[bounce_mask].reshape(n, 1, -1).expand(n, m, -1)[ray_mask]
                     eroughness = roughness[bounce_mask].reshape(-1, 1).expand(n, m)[ray_mask].reshape(-1, 1)
-                    brdf_weight = self.brdf(eV, L, eN, halfvec, diffvec, efeatures, eroughness)
+                    # brdf_weight = self.brdf(eV, L, eN, halfvec, diffvec, efeatures, eroughness)
+                    brdf_weight = self.brdf(eV, L.detach(), eN.detach(), halfvec.detach(), diffvec.detach(), efeatures, eroughness.detach())
                     if self.normalize_brdf:
                         norm = row_mask_sum(brdf_weight, ray_mask).clip(min=1.0) #.mean(dim=-1, keepdim=True)
                     else:
@@ -755,9 +756,9 @@ class TensorNeRF(torch.nn.Module):
 
                 bad_mask = VdotN < 0
                 vdotn = VdotN[bad_mask].reshape(-1, 1)
-                # reflect_rgb[bad_mask.squeeze(-1)] = tint[bad_mask.squeeze(-1)]*((-vdotn).clip(min=0)**2*torch.rand_like(vdotn))
+                reflect_rgb[bad_mask.squeeze(-1)] = tint[bad_mask.squeeze(-1)].detach()*((-vdotn).clip(min=0)**2*torch.rand_like(vdotn))
                 # reflect_rgb[bad_mask.squeeze(-1)] = ((-vdotn).clip(min=0)**2*torch.rand((vdotn.shape[0], 1), device=device))
-                reflect_rgb[bad_mask.squeeze(-1)] = ((-vdotn).clip(min=0)**2*torch.randn((vdotn.shape[0], 3), device=device))
+                # reflect_rgb[bad_mask.squeeze(-1)] = ((-vdotn).clip(min=0)**2*torch.randn((vdotn.shape[0], 3), device=device))
                 # debug[full_bounce_mask] += 1
                 debug[app_mask] = (-VdotN).clip(min=0)**2
                 if self.use_diffuse:

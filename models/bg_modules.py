@@ -90,7 +90,7 @@ def Al(l):
 
 class HierarchicalCubeMap(torch.nn.Module):
     def __init__(self, bg_resolution=512, num_levels=1, featureC=128, activation='identity', power=4, brightness_lr=0.01, mul_lr=0.01, mul_betas=[0.9, 0.999],
-                 stds = [1, 2, 4, 8], betas=[0.9, 0.99], mipbias=+0.5, init_val=-2, interp_pyramid=True, lr=0.15, mipbias_lr=1e-3, mipnoise=0.5, learnable_bias=True):
+                 stds = [1, 2, 4, 8], betas=[0.9, 0.99], TV_max_scale=1, mipbias=+0.5, init_val=-2, interp_pyramid=True, lr=0.15, mipbias_lr=1e-3, mipnoise=0.5, learnable_bias=True):
         super().__init__()
         self.num_levels = num_levels
         self.interp_pyramid = interp_pyramid
@@ -103,6 +103,7 @@ class HierarchicalCubeMap(torch.nn.Module):
         self.mul_lr = mul_lr
         self.mul_betas = mul_betas
         start_mip = self.num_levels - 1
+        self.TV_max_scale = TV_max_scale
         self.mipnoise = mipnoise
         self.betas = betas
         self.max_mip = start_mip
@@ -148,23 +149,24 @@ class HierarchicalCubeMap(torch.nn.Module):
         imgs = self.bg_mats[0]
         loss = 0
         max_scale_i = max(int(math.log2(self.bg_resolution)) - 2, 1)
-        max_scale_i = 1
-        for i in range(max_scale_i):
+        for i in range(self.TV_max_scale):
             scale = 2 ** i
             res = self.bg_resolution // scale
             if scale > 1:
                 imgs_resize = F.interpolate(imgs.permute(0, 3, 1, 2, 4)[0], size=(res, res), mode='bilinear', align_corners=self.align_corners)
             else:
                 imgs_resize = imgs
-            for i in range(6):
+            _loss = 0
+            for j in range(6):
                 # img = self.activation_fn(imgs[0, i])
                 # img = img / (img.mean(dim=-1, keepdim=True)+1e-8)
-                img = imgs_resize[0, i]
+                img = imgs_resize[0, j]
                 # img.shape: h, w, 3
                 tv_h = (img[1:, :-1] - img[:-1, :-1]).abs()
                 tv_w = (img[:-1, 1:] - img[:-1, :-1]).abs()
                 loss_c = (tv_h + tv_w+1e-8).mean()
-                loss = loss + loss_c
+                _loss = _loss + loss_c
+            loss = loss + _loss
         return loss
 
 
