@@ -285,7 +285,7 @@ def reconstruction(args):
         return optimizer, scheduler
     optimizer, scheduler = init_optimizer(grad_vars)
     # x**params.n_iters = init/final
-    ori_decay = math.exp(math.log(params.final_ori_lambda / params.backwards_rays_lambda) / params.n_iters)
+    ori_decay = math.exp(math.log(params.final_ori_lambda / params.backwards_rays_lambda) / params.n_iters) if params.backwards_rays_lambda > 0 else 0
     normal_decay = math.exp(math.log(params.final_normal_lambda / params.normal_lambda) / params.n_iters) if params.normal_lambda > 0 else 0
     ic(ori_decay, ori_decay**params.n_iters * params.backwards_rays_lambda)
     ic(normal_decay)
@@ -318,7 +318,7 @@ def reconstruction(args):
             with torch.cuda.amp.autocast(enabled=args.fp16):
             # if True:
                 data = renderer(rays_train, tensorf,
-                        keys = ['rgb_map', 'floater_loss', 'normal_loss', 'backwards_rays_loss', 'diffuse_reg', 'roughness', 'whole_valid', 'envmap_reg'],#, 'normal_map'],
+                        keys = ['rgb_map', 'floater_loss', 'normal_loss', 'backwards_rays_loss', 'diffuse_reg', 'roughness', 'whole_valid', 'envmap_reg', 'brdf_reg'],#, 'normal_map'],
                         focal=focal, output_alpha=alpha_train, chunk=params.batch_size, white_bg = white_bg, is_train=True, ndc_ray=ndc_ray)
 
                 # loss = torch.mean((rgb_map[:, 1, 1] - rgb_train[:, 1, 1]) ** 2)
@@ -326,6 +326,7 @@ def reconstruction(args):
                 floater_loss = data['floater_loss'].mean()
                 diffuse_reg = data['diffuse_reg'].mean()
                 envmap_reg = data['envmap_reg'].mean()
+                brdf_reg = data['brdf_reg'].mean()
                 rgb_map = data['rgb_map']
                 if not train_dataset.hdr:
                     rgb_map = rgb_map.clip(max=1)
@@ -350,6 +351,7 @@ def reconstruction(args):
                     params.backwards_rays_lambda*backwards_rays_loss + \
                     params.envmap_lambda * envmap_reg + \
                     params.diffuse_lambda * diffuse_reg + \
+                    params.brdf_lambda * brdf_reg + \
                     params.normal_lambda*normal_loss
 
                 # params.backwards_rays_lambda *= ori_decay

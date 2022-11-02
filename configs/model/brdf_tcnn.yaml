@@ -205,6 +205,7 @@ params:
   diffuse_lambda: 0
   backwards_rays_lambda: 0.05
   final_ori_lambda: 0.05
+  brdf_lambda: 0
   
   floater_lambda: 0 # 1e-3
   visibility_lambda: 0

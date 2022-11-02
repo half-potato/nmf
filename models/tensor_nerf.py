@@ -698,8 +698,9 @@ class TensorNeRF(torch.nn.Module):
                         norm = row_mask_sum(brdf_weight, ray_mask).clip(min=1.0) #.mean(dim=-1, keepdim=True)
                     else:
                         norm = (ray_mask.sum(dim=1)+1e-8)[..., None]
-                    with torch.no_grad():
-                        brdf_rgb[full_bounce_mask] = row_mask_sum(brdf_weight, ray_mask) / norm
+                    _brdf_rgb = row_mask_sum(brdf_weight, ray_mask) / norm
+                    brdf_rgb[full_bounce_mask] = 
+                    brdf_brightness = _brdf_rgb.mean()
                     f0 = matprop['f0'][bounce_mask].reshape(-1, 1, 1).expand(-1, ray_mask.shape[1], 1)[ray_mask]
                     LdotN = (L * eN).sum(dim=-1, keepdim=True).clip(min=0, max=1-1e-8)
                     R0 = f0 + (1-f0) * (1-LdotN)**5
@@ -798,6 +799,7 @@ class TensorNeRF(torch.nn.Module):
 
         acc_map = torch.sum(weight, 1)
         rgb_map = torch.sum(weight[..., None] * rgb.clip(min=0, max=1), -2)
+        brdf_brightness = torch.tensor(0.0)
         # v_world_normal_map = row_mask_sum(p_world_normal*pweight[..., None], ray_valid)
         # v_world_normal_map = acc_map[..., None] * v_world_normal_map + (1 - acc_map[..., None])
         if not is_train and draw_debug:
@@ -938,6 +940,7 @@ class TensorNeRF(torch.nn.Module):
             else:
                 output['envmap_reg'] = torch.tensor(0.0)
 
+            output['brdf_reg'] = -brdf_brightness
             output['diffuse_reg'] = diffuse.mean()-tint.mean()
             output['normal_loss'] = normal_loss
             output['backwards_rays_loss'] = backwards_rays_loss
