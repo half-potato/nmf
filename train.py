@@ -237,6 +237,7 @@ def reconstruction(args):
         # tensorf.bg_module.save('test.png')
 
     # TODO REMOVE
+    tensorf.sampler.update(tensorf.rf, init=True)
     if args.ckpt is None:
         # dparams = tensorf.parameters()
         # space_optim = torch.optim.Adam(tensorf.rf.dbasis_mat.parameters(), lr=0.5, betas=(0.9,0.99))
@@ -246,7 +247,9 @@ def reconstruction(args):
             xyz = torch.rand(20000, 3, device=device)*2-1
             sigma_feat = tensorf.rf.compute_densityfeature(xyz)
 
-            alpha = 1-torch.exp(-sigma_feat * 0.015 * tensorf.rf.distance_scale)
+            # step_size = 0.015
+            step_size = tensorf.sampler.stepsize
+            alpha = 1-torch.exp(-sigma_feat * step_size * tensorf.rf.distance_scale)
             # ic(alpha.mean(), sigma_feat.mean(), tensorf.rf.distance_scale)
             # sigma = 1-torch.exp(-sigma_feat)
             # loss = (sigma-torch.rand_like(sigma)*args.start_density).abs().mean()

@@ -510,6 +510,7 @@ class TensorNeRF(torch.nn.Module):
             sigma[at_infinity] = 100
 
         # weight: [N_rays, N_samples]
+        # ic((dists * self.rf.distance_scale).mean())
         alpha, weight, bg_weight = raw2alpha(sigma, dists * self.rf.distance_scale)
 
         # app stands for appearance
@@ -699,7 +700,7 @@ class TensorNeRF(torch.nn.Module):
                     else:
                         norm = (ray_mask.sum(dim=1)+1e-8)[..., None]
                     _brdf_rgb = row_mask_sum(brdf_weight, ray_mask) / norm
-                    brdf_rgb[full_bounce_mask] = 
+                    brdf_rgb[full_bounce_mask] = _brdf_rgb
                     brdf_brightness = _brdf_rgb.mean()
                     f0 = matprop['f0'][bounce_mask].reshape(-1, 1, 1).expand(-1, ray_mask.shape[1], 1)[ray_mask]
                     LdotN = (L * eN).sum(dim=-1, keepdim=True).clip(min=0, max=1-1e-8)

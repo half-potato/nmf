@@ -45,7 +45,7 @@ arch:
   sampler:
     _target_: samplers.continuous_alphagrid.ContinuousAlphagrid
     _partial_: True
-    multiplier: 2
+    multiplier: 1
     shrink_iters: [2000, 4000]
     dynamic_batchsize: False
     # sample_mode: multi_jitter

@@ -112,7 +112,6 @@ class ContinuousAlphagrid(torch.nn.Module):
         self.threshold = threshold
         self.active_density_thresh = threshold
         self.max_samples = max_samples 
-        self.stepsize = 0.003383
         self.shrink_iters = shrink_iters
 
         self.sample_mode = sample_mode
@@ -153,7 +152,7 @@ class ContinuousAlphagrid(torch.nn.Module):
         # N_env_samples = N_env_samples if N_env_samples > 0 else self.nEnvSamples
         N_env_samples = 0
         device = rays_o.device
-        stepsize = self.stepSize
+        stepsize = self.stepsize
         near, far = self.near_far
         if override_near is not None:
             near = override_near
@@ -161,7 +160,9 @@ class ContinuousAlphagrid(torch.nn.Module):
         rate_a = (self.aabb[1].to(rays_o) - rays_o) / vec
         rate_b = (self.aabb[0].to(rays_o) - rays_o) / vec
         t_min = torch.minimum(rate_a, rate_b).amax(-1).clamp(min=near, max=far)
-        # t_min = near * torch.ones_like(t_min)
+
+        # TESTING
+        t_min = near * torch.ones_like(t_min)
 
         rng = torch.arange(N_samples, device=rays_o.device)[None].float()
         # extend rng to sample towards infinity
@@ -417,11 +418,14 @@ class ContinuousAlphagrid(torch.nn.Module):
         # TODO REMOVE
         self.aabb = rf.aabb# if self.aabb is None else self.aabb
         self.contract_space = rf.contract_space
+
+        self.nSamples = rf.nSamples*self.multiplier
+        # self.stepsize = rf.stepSize/self.multiplier
+        near, far = self.near_far
+        self.stepsize = (far - near) / self.nSamples
         # reso_mask = reso_cur
         self.update_density(rf, decay, S=S)
-        self.nSamples = rf.nSamples*self.multiplier
-        self.stepSize = rf.stepSize/self.multiplier
-        # ic(self.nSamples, self.stepSize)
+
         if init:
             self.iter_density = 0
 
