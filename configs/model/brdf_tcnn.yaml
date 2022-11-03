@@ -24,6 +24,7 @@ arch:
   normalize_brdf: False
   noise_decay: 1.0
   use_predicted_normals: True
+  orient_world_normals: False
 
   detach_inter: True
   selector:

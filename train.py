@@ -297,9 +297,9 @@ def reconstruction(args):
     # with torch.autograd.detect_anomaly():
         for iteration in pbar:
 
-            if iteration < 150:
+            if iteration < 150*batch_mul:
                 ray_idx, rgb_idx = trainingSampler.nextids(batch=params.batch_size//8)
-            elif iteration < 500:
+            elif iteration < 500*batch_mul:
                 ray_idx, rgb_idx = trainingSampler.nextids(batch=params.batch_size//4)
             else:
                 ray_idx, rgb_idx = trainingSampler.nextids()
@@ -422,8 +422,9 @@ def reconstruction(args):
                     # + f' float = {floater_loss:.1e}'
                     # + f' tv = {loss_tv:.4e}'
                     + f' mipbias = {float(tensorf.bg_module.mipbias):.1e}'
-                    + f' mul = {float(torch.tanh(tensorf.bg_module.mul)+1):.1e}'
-                    + f' bright = {float(torch.tanh(tensorf.bg_module.brightness)):.1e}'
+                    + f' mul = {float(tensorf.bg_module.mul):.1e}'
+                    + f' bright = {float(tensorf.bg_module.brightness):.1e}'
+                    + f' brdf_bright = {float(-brdf_reg):.1e}'
                     # + f' mse = {photo_loss:.6f}'
                 )
                 PSNRs = []

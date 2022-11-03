@@ -46,8 +46,8 @@ class TensorNeRF(torch.nn.Module):
                  visibility_module=None, grid_size=None, bright_sampler=None,
                  alphaMask=None, specularity_threshold=0.005, max_recurs=0, use_diffuse=True, transmittance_thres=1, recur_weight_thres=1e-3,
                  max_normal_similarity=1, infinity_border=False, min_refraction=1.1, enable_refraction=True, transmit_iter=500,
-                 rayMarch_weight_thres=0.0001, detach_inter=False, attach_normal_iter=0, percent_bright=0.1, bg_noise=0, use_predicted_normals=True,
-                 max_bounce_rays=4000, roughness_rays=3, bounce_min_weight=0.001, appdim_noise_std=0.0, noise_decay=1, normalize_brdf=True,
+                 rayMarch_weight_thres=0.0001, detach_inter=False, attach_normal_iter=0, percent_bright=0.1, bg_noise=0, bg_noise_decay=0.999, use_predicted_normals=True,
+                 max_bounce_rays=4000, roughness_rays=3, bounce_min_weight=0.001, appdim_noise_std=0.0, noise_decay=1, normalize_brdf=True, orient_world_normals=False,
                  world_bounces=0, selector=None, cold_start_bg_iters = 0, back_clip=0.2, max_recur_rays=5, eval_batch_size=512, rough_light=False,
                  update_sampler_list=[5000], max_floater_loss=6, **kwargs):
         super(TensorNeRF, self).__init__()
@@ -74,6 +74,7 @@ class TensorNeRF(torch.nn.Module):
 
         self.normalize_brdf = normalize_brdf
         self.bg_noise = bg_noise
+        self.bg_noise_decay = bg_noise_decay
         self.max_recur_rays = max_recur_rays
         self.world_bounces = world_bounces
         self.back_clip = back_clip
@@ -114,6 +115,7 @@ class TensorNeRF(torch.nn.Module):
 
         self.max_normal_similarity = max_normal_similarity
         self.use_predicted_normals = use_predicted_normals
+        self.orient_world_normals = orient_world_normals | (not use_predicted_normals)
         # self.sampler.update(self.rf, init=True)
         # self.sampler2.update(self.rf, init=True)
 
@@ -234,6 +236,7 @@ class TensorNeRF(torch.nn.Module):
         self.allow_transmit = batch_mul*self.transmit_iter <= iter
         self.attach_normal = batch_mul*self.attach_normal_iter <= iter
         self.appdim_noise_std *= self.noise_decay
+        self.bg_noise *= self.bg_noise_decay
         return require_reassignment
 
     def render_env_sparse(self, ray_origins, env_dirs, roughness: float):
@@ -528,6 +531,7 @@ class TensorNeRF(torch.nn.Module):
 
         rgb = torch.zeros((*full_shape[:2], 3), device=device, dtype=weight.dtype)
         bounce_mask = torch.zeros((1), dtype=bool)
+        brdf_brightness = torch.tensor(0.0)
 
         if app_mask.any():
             #  Compute normals for app mask
@@ -799,7 +803,6 @@ class TensorNeRF(torch.nn.Module):
 
         acc_map = torch.sum(weight, 1)
         rgb_map = torch.sum(weight[..., None] * rgb.clip(min=0, max=1), -2)
-        brdf_brightness = torch.tensor(0.0)
         # v_world_normal_map = row_mask_sum(p_world_normal*pweight[..., None], ray_valid)
         # v_world_normal_map = acc_map[..., None] * v_world_normal_map + (1 - acc_map[..., None])
         if not is_train and draw_debug:
@@ -845,7 +848,8 @@ class TensorNeRF(torch.nn.Module):
 
                 # TODO REMOVE
                 LOGGER.log_norms_n_rays(xyz_sampled[papp_mask], v_world_normal[papp_mask], weight[app_mask])
-                backwards_rays_loss = torch.matmul(viewdirs[ray_valid].reshape(-1, 1, 3).detach(), v_world_normal.reshape(-1, 3, 1)).reshape(pweight.shape).clamp(min=0)**2
+                # o_world_normal = world_normal if self.orient_world_normals else p_world_normal
+                # backwards_rays_loss = torch.matmul(viewdirs[ray_valid].reshape(-1, 1, 3).detach(), o_world_normal.reshape(-1, 3, 1)).reshape(pweight.shape).clamp(min=0)**2
                 # debug[ray_valid] = backwards_rays_loss.reshape(-1, 1).expand(-1, 3)
                 debug_map = (weight[..., None]*debug).sum(dim=1)
                 # calculate cross section
@@ -903,8 +907,9 @@ class TensorNeRF(torch.nn.Module):
             output['roughness_map'] = roughness_map
         elif recur == 0:
             # viewdirs point inward. -viewdirs aligns with p_world_normal. So we want it below 0
+            o_world_normal = world_normal if self.orient_world_normals else p_world_normal
             backwards_rays_loss = ((
-                torch.matmul(viewdirs[ray_valid].reshape(-1, 1, 3).detach(), v_world_normal.reshape(-1, 3, 1))
+                torch.matmul(viewdirs[ray_valid].reshape(-1, 1, 3).detach(), o_world_normal.reshape(-1, 3, 1))
                      .reshape(pweight.shape) - self.back_clip)
                 .clamp(min=0))**2
             # debug[ray_valid] = backwards_rays_loss.reshape(-1, 1).expand(-1, 3)
@@ -926,9 +931,12 @@ class TensorNeRF(torch.nn.Module):
             # floater_loss = torch.tensor(0.0, device=device) 
 
             # target = world_normal if self.attach_normal else world_normal.detach()
-            align_world_loss = 2*(1-(p_world_normal * world_normal).sum(dim=-1))#**0.5
-            # align_world_loss = torch.linalg.norm(p_world_normal - world_normal, dim=-1)**2
-            normal_loss = (pweight * align_world_loss).sum() / B
+            if self.use_predicted_normals:
+                align_world_loss = 2*(1-(p_world_normal * world_normal).sum(dim=-1))#**0.5
+                # align_world_loss = torch.linalg.norm(p_world_normal - world_normal, dim=-1)**2
+                normal_loss = (pweight * align_world_loss).sum() / B
+            else:
+                normal_loss = torch.tensor(0.0)
 
             # output['diffuse_reg'] = (roughness-0.5).clip(min=0).mean() + tint.clip(min=1e-3).mean()
             # output['diffuse_reg'] = tint.clip(min=1e-3).mean()
@@ -940,7 +948,7 @@ class TensorNeRF(torch.nn.Module):
             else:
                 output['envmap_reg'] = torch.tensor(0.0)
 
-            output['brdf_reg'] = -brdf_brightness
+            output['brdf_reg'] = -brdf_brightness-tint.mean()
             output['diffuse_reg'] = diffuse.mean()-tint.mean()
             output['normal_loss'] = normal_loss
             output['backwards_rays_loss'] = backwards_rays_loss
