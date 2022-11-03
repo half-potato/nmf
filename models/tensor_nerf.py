@@ -944,7 +944,7 @@ class TensorNeRF(torch.nn.Module):
                 envmap_brightness = self.bg_module.mean_color().mean()
                 if self.detach_bg:
                     envmap_brightness.detach_()
-                output['envmap_reg'] = envmap_brightness
+                output['envmap_reg'] = (envmap_brightness-0.05).clip(min=0)
             else:
                 output['envmap_reg'] = torch.tensor(0.0)
 

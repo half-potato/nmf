@@ -159,7 +159,7 @@ arch:
     # pospe: -1
     # feape: 2
     # pospe: 0
-    pospe: 12
+    pospe: 0
     feape: 0
     featureC: 128
     num_layers: 4
@@ -205,7 +205,7 @@ params:
   normal_lambda: 1e-2
   final_normal_lambda: 1e-2
   diffuse_lambda: 0
-  backwards_rays_lambda: 0.05
+  backwards_rays_lambda: 0.2
   final_ori_lambda: 0.05
   brdf_lambda: 0
   
