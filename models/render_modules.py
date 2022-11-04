@@ -340,7 +340,7 @@ class MLPDiffuse(torch.nn.Module):
     refpe: int
     featureC: int
     num_layers: int
-    def __init__(self, in_channels, pospe=12, view_encoder=None, feape=6, featureC=128, num_layers=0, allocation=0, unlit_tint=False, lr=1e-4, tint_offset=-1):
+    def __init__(self, in_channels, pospe=12, view_encoder=None, feape=6, featureC=128, num_layers=0, allocation=0, unlit_tint=False, lr=1e-4, tint_offset=-1, diffuse_offset=-2):
         super().__init__()
 
         in_channels = in_channels if allocation <= 0 else allocation
@@ -349,6 +349,7 @@ class MLPDiffuse(torch.nn.Module):
             self.in_mlpC += 2*pospe*3 + 3 
         self.unlit_tint = unlit_tint
         self.tint_offset = tint_offset
+        self.diffuse_offset = diffuse_offset
         self.lr = lr
         self.allocation = allocation
 
@@ -430,7 +431,7 @@ class MLPDiffuse(torch.nn.Module):
         f0 = (torch.sigmoid((mlp_out[..., 9:10]+3).clip(min=-10, max=10))+0.001).clip(max=1)
         # diffuse = rgb[..., :3]
         # tint = F.softplus(mlp_out[..., 3:6])
-        diffuse = torch.sigmoid((mlp_out[..., :3]-2))
+        diffuse = torch.sigmoid((mlp_out[..., :3]+self.diffuse_offset))
 
         # ic(f0)
         return diffuse, tint, dict(

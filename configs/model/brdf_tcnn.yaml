@@ -22,7 +22,7 @@ arch:
   percent_bright: 0.1
   transmit_iter: 1000
   normalize_brdf: False
-  noise_decay: 1.0
+  noise_decay: 0.999
   use_predicted_normals: True
   orient_world_normals: False
 
@@ -150,6 +150,7 @@ arch:
     num_layers: 3
     lr: 1e-4
     tint_offset: -4
+    diffuse_offset: -2
     # allocation: 7
 
   normal_module:
@@ -218,7 +219,7 @@ params:
 
   n_iters: 30000
   charbonier_loss: false
-  start_density: 1e-2
+  start_density: 0.01
   lr_init: 0.02
   batch_size: 4096
 

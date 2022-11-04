@@ -761,7 +761,7 @@ class TensorNeRF(torch.nn.Module):
 
                 bad_mask = VdotN < 0
                 vdotn = VdotN[bad_mask].reshape(-1, 1)
-                reflect_rgb[bad_mask.squeeze(-1)] = tint[bad_mask.squeeze(-1)].detach()*((-vdotn).clip(min=0)**2*torch.rand_like(vdotn))
+                # reflect_rgb[bad_mask.squeeze(-1)] = tint[bad_mask.squeeze(-1)].detach()*((-vdotn).clip(min=0)**2*torch.rand_like(vdotn))
                 # reflect_rgb[bad_mask.squeeze(-1)] = ((-vdotn).clip(min=0)**2*torch.rand((vdotn.shape[0], 1), device=device))
                 # reflect_rgb[bad_mask.squeeze(-1)] = ((-vdotn).clip(min=0)**2*torch.randn((vdotn.shape[0], 3), device=device))
                 # debug[full_bounce_mask] += 1
@@ -944,7 +944,7 @@ class TensorNeRF(torch.nn.Module):
                 envmap_brightness = self.bg_module.mean_color().mean()
                 if self.detach_bg:
                     envmap_brightness.detach_()
-                output['envmap_reg'] = (envmap_brightness-0.05).clip(min=0)
+                output['envmap_reg'] = (envmap_brightness).clip(min=0)
             else:
                 output['envmap_reg'] = torch.tensor(0.0)
 
@@ -972,7 +972,10 @@ class TensorNeRF(torch.nn.Module):
                 (1 - acc_map[..., None]) * bg
         else:
             if white_bg or (is_train and torch.rand((1,)) < 0.5):
-                noise = 1-torch.rand((*acc_map.shape, 3), device=device)*self.bg_noise
+                if output_alpha is not None:
+                    noise = torch.rand((1, 3), device=device)*output_alpha[:, None] + (1-output_alpha[:, None])
+                else:
+                    noise = 1-torch.rand((*acc_map.shape, 3), device=device)*self.bg_noise
                 rgb_map = rgb_map + (1 - acc_map[..., None]) * noise
             # if white_bg:
             #     if True:

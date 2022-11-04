@@ -128,7 +128,7 @@ class BlenderDataset(Dataset):
             rays = torch.cat([rays_o, rays_d], 1)
 
             c = img.shape[1]
-            if c == 4:
+            if c == 4 and self.split == 'test':
                 img[:, :3] = img[:, :3] * img[:, -1:] + (1 - img[:, -1:])  # blend A to RGB
             if img.max() > 1:
                 self.hdr = True

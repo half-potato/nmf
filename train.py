@@ -311,10 +311,11 @@ def reconstruction(args):
             # plt.show()
 
             rays_train, rgba_train = allrays[ray_idx], allrgbs[rgb_idx].reshape(-1, allrgbs.shape[-1])
-            rgb_train = rgba_train[..., :3]
             if rgba_train.shape[-1] == 4:
+                rgb_train = rgba_train[:, :3] * rgba_train[:, -1:] + (1 - rgba_train[:, -1:])  # blend A to RGB
                 alpha_train = rgba_train[..., 3]
             else:
+                rgb_train = rgba_train
                 alpha_train = None
 
             #rgb_map, alphas_map, depth_map, weights, uncertainty
@@ -352,7 +353,7 @@ def reconstruction(args):
                 total_loss = loss + \
                     params.floater_lambda*floater_loss + \
                     params.backwards_rays_lambda*backwards_rays_loss + \
-                    params.envmap_lambda * envmap_reg + \
+                    params.envmap_lambda * (envmap_reg-0.05).clip(min=0) + \
                     params.diffuse_lambda * diffuse_reg + \
                     params.brdf_lambda * brdf_reg + \
                     params.normal_lambda*normal_loss
@@ -424,6 +425,7 @@ def reconstruction(args):
                     + f' mipbias = {float(tensorf.bg_module.mipbias):.1e}'
                     + f' mul = {float(tensorf.bg_module.mul):.1e}'
                     + f' bright = {float(tensorf.bg_module.brightness):.1e}'
+                    + f' envmap = {float(envmap_reg):.1e}'
                     + f' brdf_bright = {float(-brdf_reg):.1e}'
                     # + f' mse = {photo_loss:.6f}'
                 )

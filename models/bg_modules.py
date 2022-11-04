@@ -171,13 +171,14 @@ class HierarchicalCubeMap(torch.nn.Module):
 
 
     def activation_fn(self, x):
-        x = self.brightness.clip(min=-1, max=2) + self.mul*x
+        # x = torch.exp(self.brightness.clip(max=2)) + x
+        x = self.brightness + self.mul*x
         if self.activation == 'softplus':
             return F.softplus(x, beta=6)
         elif self.activation == 'clip':
             return x.clip(min=1e-3)
         else:
-            return torch.exp(x).clip(min=0.01, max=1000)
+            return torch.exp(x.clip(max=20)) + 1e-2
 
     def get_spherical_harmonics(self, G, mipval=0):
         device = self.get_device()
