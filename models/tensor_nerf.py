@@ -697,7 +697,7 @@ class TensorNeRF(torch.nn.Module):
                     efeatures = noise_app_features[bounce_mask].reshape(n, 1, -1).expand(n, m, -1)[ray_mask]
                     eroughness = roughness[bounce_mask].reshape(-1, 1).expand(n, m)[ray_mask].reshape(-1, 1)
                     # brdf_weight = self.brdf(eV, L, eN, halfvec, diffvec, efeatures, eroughness)
-                    brdf_weight = self.brdf(eV, L.detach(), eN.detach(), halfvec.detach(), diffvec.detach(), efeatures, eroughness.detach())
+                    brdf_weight = self.brdf(eV, L.detach(), eN.detach(), halfvec.detach(), diffvec.detach(), efeatures, eroughness.detach())*(1-1e-2) + 1e-2
                     if self.normalize_brdf:
                         norm = row_mask_sum(brdf_weight, ray_mask).clip(min=1.0) #.mean(dim=-1, keepdim=True)
                     else:
@@ -949,7 +949,7 @@ class TensorNeRF(torch.nn.Module):
                 output['envmap_reg'] = torch.tensor(0.0)
 
             output['brdf_reg'] = -brdf_brightness-tint.mean()
-            output['diffuse_reg'] = diffuse.mean()-tint.mean()
+            output['diffuse_reg'] = diffuse.mean() #-tint.mean()
             output['normal_loss'] = normal_loss
             output['backwards_rays_loss'] = backwards_rays_loss
             output['floater_loss'] = floater_loss
@@ -973,7 +973,10 @@ class TensorNeRF(torch.nn.Module):
         else:
             if white_bg or (is_train and torch.rand((1,)) < 0.5):
                 if output_alpha is not None:
-                    noise = torch.rand((1, 3), device=device)*output_alpha[:, None] + (1-output_alpha[:, None])
+                    if torch.rand((1,)) < 0.5:
+                        noise = (torch.rand((1, 1), device=device) > 0.5).float()*output_alpha[:, None] + (1-output_alpha[:, None])
+                    else:
+                        noise = torch.rand((1, 3), device=device)*output_alpha[:, None] + (1-output_alpha[:, None])
                 else:
                     noise = 1-torch.rand((*acc_map.shape, 3), device=device)*self.bg_noise
                 rgb_map = rgb_map + (1 - acc_map[..., None]) * noise

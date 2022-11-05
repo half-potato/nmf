@@ -15,3 +15,9 @@ encoder_conf:
 lr: 1e-2
 lr_net: 1e-3
 num_pretrain: 1000
+# n_samples_iters: [7500, 12500]
+# n_samples_list: [512, 1024, 2048]
+n_samples_iters: [1500, 3500]
+n_samples_list: [512, 1024, 2048]
+# n_samples_iters: [3500]
+# n_samples_list: [1024, 2048]

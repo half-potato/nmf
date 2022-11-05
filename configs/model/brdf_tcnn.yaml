@@ -113,7 +113,7 @@ arch:
     # dotpe: 6
     # featureC: 128
     # activation: 'sigexp'
-    bias: 0
+    bias: 1
     activation: 'sigmoid'
     # activation: 'sigmoid'
     lr: 1e-4
@@ -149,8 +149,8 @@ arch:
     featureC: 128
     num_layers: 3
     lr: 1e-4
-    tint_offset: -4
-    diffuse_offset: -2
+    tint_offset: 0
+    diffuse_offset: -1
     # allocation: 7
 
   normal_module:
@@ -163,7 +163,7 @@ arch:
     pospe: 0
     feape: 0
     featureC: 128
-    num_layers: 4
+    num_layers: 3
     size_multi: 2.5e-3
     # allocation: 3
 
@@ -204,7 +204,7 @@ params:
   TV_weight_bg: 5e-5
   envmap_lambda: 5e-5
   normal_lambda: 1e-2
-  final_normal_lambda: 1e-2
+  final_normal_lambda: 6e-2
   diffuse_lambda: 0
   backwards_rays_lambda: 0.2
   final_ori_lambda: 0.05
@@ -219,7 +219,7 @@ params:
 
   n_iters: 30000
   charbonier_loss: false
-  start_density: 0.01
+  start_density: 0.02
   lr_init: 0.02
   batch_size: 4096
 

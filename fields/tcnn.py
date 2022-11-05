@@ -6,12 +6,15 @@ from icecream import ic
 from mutils import normalize
 
 class TCNNRF(TensorBase):
-    def __init__(self, aabb, encoder_conf, grid_size, featureC=128, num_layers=4, **kwargs):
+    def __init__(self, aabb, encoder_conf, grid_size, featureC=128, num_layers=4, n_samples_list=[512], n_samples_iters=[], **kwargs):
         super().__init__(aabb, **kwargs)
 
         # self.nSamples = 1024                                                                                                                                                                                        
         # self.nSamples = 512                                                                                                                                                                                        
-        self.nSamples = 512                                                                                                                                                                                        
+        self.n_samples_list = n_samples_list
+        self.n_samples_iters = n_samples_iters
+        self.nSamples = self.n_samples_list.pop(0)
+        ic(self.n_samples_list)
         diag = (aabb**2).sum().sqrt()
         self.stepSize = diag / self.nSamples
         g = self.nSamples
@@ -48,6 +51,12 @@ class TCNNRF(TensorBase):
         return torch.tensor(0.0, device=self.get_device())
 
     def check_schedule(self, iter, batch_mul):
+        n_samples_iters = [i*batch_mul for i in self.n_samples_iters]
+        if iter in n_samples_iters:
+            i = n_samples_iters.index(iter)
+            self.nSamples = self.n_samples_list[i]
+            diag = (self.aabb**2).sum().sqrt()
+            self.stepSize = diag / self.nSamples
         return False
 
     def coords2input(self, xyz_normed):
