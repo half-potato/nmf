@@ -111,6 +111,7 @@ def render_test(args):
 
 def reconstruction(args):
     params = args.model.params
+    ic(params)
 
     # init dataset
     dataset = dataset_dict[args.dataset.dataset_name]
@@ -271,7 +272,7 @@ def reconstruction(args):
     pbar = tqdm(range(params.n_iters * batch_mul), miniters=args.progress_refresh_rate, file=sys.stdout)
     def init_optimizer(grad_vars):
         # optimizer = torch.optim.Adam(grad_vars, betas=(0.9, 0.999), weight_decay=0, eps=1e-6)
-        optimizer = torch.optim.Adam(grad_vars, betas=(0.9, 0.99))
+        optimizer = torch.optim.Adam(grad_vars, betas=params.betas, eps=params.eps)
         # optimizer = torch.optim.SGD(grad_vars, momentum=0.9, weight_decay=0)
         # optimizer = torch.optim.RMSprop(grad_vars, alpha=0.99, eps=1e-08, weight_decay=0, momentum=0)
         # smoothing_vals = torch.linspace(0.5, 0.5, len(upsamp_list)+1).tolist()[1:]
@@ -395,7 +396,8 @@ def reconstruction(args):
 
                 optimizer.zero_grad()
                 total_loss.backward()
-                # torch.nn.utils.clip_grad_norm_(tensorf.parameters(), 1e-3)
+                if params.clip_grad is not None:
+                    torch.nn.utils.clip_grad_norm_(tensorf.parameters(), params.clip_grad)
                 optimizer.step()
                 scheduler.step()
 
@@ -413,22 +415,19 @@ def reconstruction(args):
 
             # logger.info the current values of the losses.
             if iteration % args.progress_refresh_rate == 0:
-                pbar.set_description(
-                    f'psnr = {float(np.mean(PSNRs)):.2f}'
-                    + f' test_psnr = {float(np.mean(PSNRs_test)):.2f}'
-                    + f' loss = {total_loss.detach().item():.5f}'
-                    + f' rough = {data["roughness"].mean().item():.5f}'
-                    # + f' nerr = {float(normal_loss):.1e}'
-                    # + f' back = {backwards_rays_loss:.5e}'
-                    # + f' float = {floater_loss:.1e}'
-                    # + f' tv = {loss_tv:.4e}'
-                    + f' mipbias = {float(tensorf.bg_module.mipbias):.1e}'
-                    + f' mul = {float(tensorf.bg_module.mul):.1e}'
-                    + f' bright = {float(tensorf.bg_module.brightness):.1e}'
-                    + f' envmap = {float(envmap_reg):.1e}'
-                    + f' brdf_bright = {float(-brdf_reg):.1e}'
+                desc = f'psnr = {float(np.mean(PSNRs)):.2f}' + \
+                    f' test_psnr = {float(np.mean(PSNRs_test)):.2f}' + \
+                    f' loss = {total_loss.detach().item():.5f}' + \
+                    f' rough = {data["roughness"].mean().item():.5f}' + \
+                    f' envmap = {float(envmap_reg):.1e}' + \
+                    f' brdf_bright = {float(-brdf_reg):.1e}'
                     # + f' mse = {photo_loss:.6f}'
-                )
+                if tensorf.bg_module is not None:
+                    desc = desc + \
+                    f' mipbias = {float(tensorf.bg_module.mipbias):.1e}' + \
+                    f' mul = {float(tensorf.bg_module.mul):.1e}' + \
+                    f' bright = {float(tensorf.bg_module.brightness):.1e}'
+                pbar.set_description(desc)
                 PSNRs = []
                 
 

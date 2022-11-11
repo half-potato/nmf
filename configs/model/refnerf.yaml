@@ -8,7 +8,7 @@ arch:
   max_recurs: 0
   infinity_border: False
   enable_alpha_mask: false
-  appdim_noise_std: 0.0
+  appdim_noise_std: 1.0
   max_normal_similarity: 1.0
   max_floater_loss: 1
   
@@ -49,42 +49,42 @@ arch:
     lr: 0.05
     mipbias_lr: 1e-4
 
-  diffuse_module:
-    _partial_: True
-    _target_: models.render_modules.MLPDiffuse
-    pospe: 0
-    feape: 0
-    # view_encoder:
-    #   _target_: models.ish.FullISH
-    #   max_degree: 4
-    featureC: 128
-    num_layers: 3
-
-  # ref_module:
+  # diffuse_module:
   #   _partial_: True
-  #   _target_: models.render_modules.MLPRender_FP
+  #   _target_: models.render_modules.MLPDiffuse
+  #   pospe: 0
   #   feape: 0
-  #   lr: 1e-4
   #   # view_encoder:
   #   #   _target_: models.ish.FullISH
   #   #   max_degree: 4
-  #   ref_encoder:
-  #     _target_: models.ish.ListISH
-  #     degs: [0,1,2,4,8,16]
-  #   # ref_encoder:
-  #   #   _target_: models.render_modules.PE
-  #   #   max_degree: 4
-  #   # ref_encoder:
-  #   #   _target_: models.ish.ISH
-  #   #   max_degree: 6
-  #   # ref_encoder:
-  #   #   _target_: models.ish.RandISH
-  #   #   rand_n: 64
-  #   #   std: 5
-  #   # activation: 'softplus'
-  #   activation: 'sigmoid'
-  #   featureC: 256
-  #   num_layers: 8
+  #   featureC: 128
+  #   num_layers: 3
+
+  ref_module:
+    _partial_: True
+    _target_: models.render_modules.MLPRender_FP
+    feape: 0
+    lr: 1e-4
+    # view_encoder:
+    #   _target_: models.ish.FullISH
+    #   max_degree: 4
+    ref_encoder:
+      _target_: models.ish.ListISH
+      degs: [0,1,2,4,8,16]
+    # ref_encoder:
+    #   _target_: models.render_modules.PE
+    #   max_degree: 4
+    # ref_encoder:
+    #   _target_: models.ish.ISH
+    #   max_degree: 6
+    # ref_encoder:
+    #   _target_: models.ish.RandISH
+    #   rand_n: 64
+    #   std: 5
+    # activation: 'softplus'
+    activation: 'sigmoid'
+    featureC: 256
+    num_layers: 8
 
   # normal_module:
   #   _partial_: True
@@ -93,14 +93,14 @@ arch:
   #   featureC: 128
   #   num_layers: 5
   #   lr: 1e-3
-  normal_module:
-    _partial_: True
-    _target_: models.render_modules.MLPNormal
-    lr: 3e-3
-    pospe: 0
-    feape: 0
-    featureC: 128
-    num_layers: 5
+  # normal_module:
+  #   _partial_: True
+  #   _target_: models.render_modules.MLPNormal
+  #   lr: 3e-3
+  #   pospe: 0
+  #   feape: 0
+  #   featureC: 128
+  #   num_layers: 5
 
 params:
   lambda_start: 0.0
@@ -141,9 +141,14 @@ params:
 
   TV_weight_density: 0.0
   TV_weight_app: 0.0
+  TV_weight_bg: 0
   normal_lambda: 3e-4
+  final_normal_lambda: 3e-4
   diffuse_lambda: 0
   backwards_rays_lambda: 0.1
+  final_ori_lambda: 0.1
+  envmap_lambda: 0
+  brdf_lambda: 0
   floater_lambda: 0.00001
   charbonier_eps: 0.001
   ortho_weight: 0

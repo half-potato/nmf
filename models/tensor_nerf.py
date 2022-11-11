@@ -42,7 +42,7 @@ def raw2alpha(sigma, dist):
 
 class TensorNeRF(torch.nn.Module):
     def __init__(self, rf, aabb, near_far,
-                 diffuse_module, sampler, brdf_sampler=None, brdf=None, tonemap=None, normal_module=None, ref_module=None, bg_module=None,
+                 sampler, diffuse_module=None, brdf_sampler=None, brdf=None, tonemap=None, normal_module=None, ref_module=None, bg_module=None,
                  visibility_module=None, grid_size=None, bright_sampler=None,
                  alphaMask=None, specularity_threshold=0.005, max_recurs=0, use_diffuse=True, transmittance_thres=1, recur_weight_thres=1e-3,
                  max_normal_similarity=1, infinity_border=False, min_refraction=1.1, enable_refraction=True, transmit_iter=500,
@@ -55,8 +55,8 @@ class TensorNeRF(torch.nn.Module):
         self.ref_module = ref_module(in_channels=self.rf.app_dim) if ref_module is not None else None
         self.normal_module = normal_module(in_channels=self.rf.app_dim) if normal_module is not None else None
         bound = aabb.abs().max()
-        self.diffuse_module = diffuse_module(in_channels=self.rf.app_dim)
-        al = self.diffuse_module.allocation
+        self.diffuse_module = diffuse_module(in_channels=self.rf.app_dim) if diffuse_module is not None else None
+        al = self.diffuse_module.allocation if self.diffuse_module is not None else 0
         self.normal_module = normal_module(in_channels=self.rf.app_dim-al) if normal_module is not None else None
         al += self.normal_module.allocation if self.normal_module is not None else 0
         self.ref_module = ref_module(in_channels=self.rf.app_dim-al) if ref_module is not None else None
@@ -281,16 +281,19 @@ class TensorNeRF(torch.nn.Module):
             -torch.sin(ele_grid),
         ], dim=-1).to(device)
 
-        color, tint, matprop = self.diffuse_module(xyz_samp, ang_vecs.reshape(-1, 3), app_features)
         if self.ref_module is not None:
             roughness = 1/np.pi*torch.ones((app_features.shape[0], 1), dtype=xyz.dtype, device=xyz.device)
             # roughness = matprop['roughness'] if roughness is None else roughness * torch.ones((app_features.shape[0], 1), dtype=xyz.dtype, device=xyz.device)
             viewdotnorm = torch.ones((app_features.shape[0], 1), dtype=xyz.dtype, device=xyz.device)
-            envmap = (tint.reshape(-1, 3) * self.ref_module(xyz_samp, staticdir, app_features, refdirs=ang_vecs.reshape(
+            envmap = (self.ref_module(xyz_samp, staticdir, app_features, refdirs=ang_vecs.reshape(
                 -1, 3), roughness=roughness, viewdotnorm=viewdotnorm)).reshape(res, 2*res, 3)
         else:
             envmap = torch.zeros(res, 2*res, 3)
-        color = (color).reshape(res, 2*res, 3)/2
+        if self.diffuse_module is not None:
+            color, tint, matprop = self.diffuse_module(xyz_samp, ang_vecs.reshape(-1, 3), app_features)
+            color = (color).reshape(res, 2*res, 3)/2
+        else:
+            color = torch.zeros(res, 2*res, 3)
         
         return self.tonemap(envmap).clamp(0, 1), self.tonemap(color).clamp(0, 1)
 
@@ -504,7 +507,7 @@ class TensorNeRF(torch.nn.Module):
                 if self.rf.separate_appgrid:
                     psigma = self.rf.compute_densityfeature(xyz_sampled)
                 else:
-                    psigma, p_world_normal, all_app_features = self.rf.compute_feature(xyz_sampled)
+                    psigma, p_world_normal, all_app_features, matprop = self.rf.compute_feature(xyz_sampled)
                 sigma[ray_valid] = psigma
 
 
@@ -553,12 +556,23 @@ class TensorNeRF(torch.nn.Module):
             noise_app_features = (app_features + torch.randn_like(app_features) * self.appdim_noise_std)
 
             # get base color of the point
-            diffuse, tint, matprop = self.diffuse_module(
-                app_norm_xyz, viewdirs[app_mask], noise_app_features)
+            if self.diffuse_module is not None:
+                diffuse, tint, matprop = self.diffuse_module(
+                    app_norm_xyz, viewdirs[app_mask], noise_app_features)
+                f0 = matprop['f0']
+                r1 = matprop['r1']
+                r2 = matprop['r2']
+            else:
+                diffuse = matprop['diffuse'][papp_mask]
+                tint = matprop['tint'][papp_mask]
+                f0 = matprop['f0'][papp_mask]
+                r1 = matprop['r1'][papp_mask]
+                r2 = matprop['r2'][papp_mask]
 
             # ic(diffuse.mean(dim=0))
-            app_features = app_features[..., self.diffuse_module.allocation:]
-            noise_app_features = noise_app_features[..., self.diffuse_module.allocation:]
+            if self.diffuse_module is not None:
+                app_features = app_features[..., self.diffuse_module.allocation:]
+                noise_app_features = noise_app_features[..., self.diffuse_module.allocation:]
             # diffuse = diffuse * bg_color
             # diffuse = diffuse.type(rgb.dtype)
 
@@ -607,7 +621,7 @@ class TensorNeRF(torch.nn.Module):
 
 
             reflect_rgb = torch.zeros_like(diffuse)
-            roughness = torch.min(matprop['r1'], matprop['r2']).squeeze(-1)
+            roughness = torch.min(r1, r2).squeeze(-1)
             # roughness = 1e-3*torch.ones_like(roughness)
             # roughness = torch.where((xyz_sampled[..., 0].abs() < 0.15) | (xyz_sampled[..., 1].abs() < 0.15), 0.30, 0.15)[papp_mask]
             if self.ref_module is not None and (self.max_recurs == recur):
@@ -636,8 +650,8 @@ class TensorNeRF(torch.nn.Module):
                     brefdirs = refdirs[bounce_mask].reshape(-1, 1, 3)
                     bN = N[bounce_mask]
                     bV = V[bounce_mask]
-                    r1 = matprop['r1'][bounce_mask]
-                    r2 = matprop['r2'][bounce_mask]
+                    r1 = r1[bounce_mask]
+                    r2 = r2[bounce_mask]
                     L, row_world_basis = self.brdf_sampler.sample(
                             num_roughness_rays,
                             brefdirs, bV, bN,
@@ -697,7 +711,7 @@ class TensorNeRF(torch.nn.Module):
                     efeatures = noise_app_features[bounce_mask].reshape(n, 1, -1).expand(n, m, -1)[ray_mask]
                     eroughness = roughness[bounce_mask].reshape(-1, 1).expand(n, m)[ray_mask].reshape(-1, 1)
                     # brdf_weight = self.brdf(eV, L, eN, halfvec, diffvec, efeatures, eroughness)
-                    brdf_weight = self.brdf(eV, L.detach(), eN.detach(), halfvec.detach(), diffvec.detach(), efeatures, eroughness.detach())
+                    brdf_weight = self.brdf(eV, L.detach(), eN.detach(), halfvec.detach(), diffvec.detach(), efeatures, eroughness.detach()) #*(1-1e-2) + 1e-2
                     if self.normalize_brdf:
                         norm = row_mask_sum(brdf_weight, ray_mask).clip(min=1.0) #.mean(dim=-1, keepdim=True)
                     else:
@@ -705,7 +719,7 @@ class TensorNeRF(torch.nn.Module):
                     _brdf_rgb = row_mask_sum(brdf_weight, ray_mask) / norm
                     brdf_rgb[full_bounce_mask] = _brdf_rgb
                     brdf_brightness = _brdf_rgb.mean()
-                    f0 = matprop['f0'][bounce_mask].reshape(-1, 1, 1).expand(-1, ray_mask.shape[1], 1)[ray_mask]
+                    f0 = f0[bounce_mask].reshape(-1, 1, 1).expand(-1, ray_mask.shape[1], 1)[ray_mask]
                     LdotN = (L * eN).sum(dim=-1, keepdim=True).clip(min=0, max=1-1e-8)
                     R0 = f0 + (1-f0) * (1-LdotN)**5
                     meanR0 = row_mask_sum(R0, ray_mask) / (ray_mask.sum(dim=1)+1e-8)[..., None]
@@ -871,7 +885,7 @@ class TensorNeRF(torch.nn.Module):
                 # t = tint[..., 0:1].expand(-1, 3)
                 t = tint
                 tint_map = row_mask_sum(t.detach()*eweight, app_mask).cpu()
-                diffuse_map = row_mask_sum(matprop['diffuse'].detach()*eweight, app_mask).cpu()
+                diffuse_map = row_mask_sum(diffuse.detach()*eweight, app_mask).cpu()
                 roughness_map = row_mask_sum(roughness.reshape(-1, 1).detach()*eweight, app_mask).cpu()
             else:
                 tint_map = torch.zeros(rgb_map.shape)
@@ -882,6 +896,8 @@ class TensorNeRF(torch.nn.Module):
             diffuse_light_map = torch.zeros(rgb_map.shape)
             transmit_map = torch.zeros(rgb_map.shape)
             brdf_map = (weight[..., None]*brdf_rgb).sum(dim=1)
+            if app_mask.any():
+                spec_map = row_mask_sum(reflect_rgb*weight[app_mask][..., None], app_mask).cpu()
             if app_mask.any() and self.bg_module is not None:
                 diffuse_light_map = row_mask_sum(E*weight[app_mask][..., None], app_mask).cpu()
             if app_mask.any() and self.brdf is not None and bounce_mask.any() and ray_mask.any():
@@ -973,9 +989,11 @@ class TensorNeRF(torch.nn.Module):
         else:
             if white_bg or (is_train and torch.rand((1,)) < 0.5):
                 if output_alpha is not None:
-                    noise = torch.rand((1, 3), device=device)*output_alpha[:, None] + (1-output_alpha[:, None])
+                    noise = (torch.rand((1, 1), device=device) > 0.5).float()*output_alpha[:, None] + (1-output_alpha[:, None])
+                    # noise = (torch.rand((*acc_map.shape, 1), device=device) > 0.5).float()*output_alpha[:, None] + (1-output_alpha[:, None])
                 else:
                     noise = 1-torch.rand((*acc_map.shape, 3), device=device)*self.bg_noise
+                # noise = 1-torch.rand((*acc_map.shape, 3), device=device)*self.bg_noise
                 rgb_map = rgb_map + (1 - acc_map[..., None]) * noise
             # if white_bg:
             #     if True:

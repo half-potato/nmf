@@ -6,7 +6,7 @@ from icecream import ic
 from mutils import normalize
 
 class TCNNRF(TensorBase):
-    def __init__(self, aabb, encoder_conf, grid_size, featureC=128, num_layers=4, **kwargs):
+    def __init__(self, aabb, encoder_conf, grid_size, featureC=128, num_layers=4, tint_offset=0, diffuse_offset=-1, **kwargs):
         super().__init__(aabb, **kwargs)
 
         # self.nSamples = 1024                                                                                                                                                                                        
@@ -17,7 +17,8 @@ class TCNNRF(TensorBase):
         g = self.nSamples
         self.grid_size = torch.tensor([g, g, g])
         self.units = self.stepSize
-
+        self.tint_offset = tint_offset
+        self.diffuse_offset = diffuse_offset
 
         self.separate_appgrid = False
 
@@ -34,7 +35,7 @@ class TCNNRF(TensorBase):
                     torch.nn.Linear(featureC, featureC),
                 ] for _ in range(num_layers-2)], []),
             torch.nn.ReLU(inplace=True),
-            torch.nn.Linear(featureC, 4)
+            torch.nn.Linear(featureC, 14)
         )
 
     def get_optparam_groups(self):
@@ -58,7 +59,25 @@ class TCNNRF(TensorBase):
         mlp_out = self.sigma_net(feat)
         sigfeat = mlp_out[:, 0]
         normals = normalize(mlp_out[:, 1:4])
-        return self.feature2density(sigfeat).reshape(-1), normals, feat
+        mlp_out = mlp_out[:, 4:]
+
+        r1 = torch.sigmoid(mlp_out[..., 7:8]).clip(min=1e-2)
+        r2 = torch.sigmoid(mlp_out[..., 8:9]).clip(min=1e-2)
+        # ic(mlp_out[..., 0:6])
+        tint = torch.sigmoid((mlp_out[..., 3:6]+self.tint_offset).clip(min=-10, max=10))
+        # ic(tint.mean())
+        f0 = (torch.sigmoid((mlp_out[..., 9:10]+3).clip(min=-10, max=10))+0.001).clip(max=1)
+        # diffuse = rgb[..., :3]
+        # tint = F.softplus(mlp_out[..., 3:6])
+        diffuse = torch.sigmoid((mlp_out[..., :3]+self.diffuse_offset))
+
+        return self.feature2density(sigfeat).reshape(-1), normals, feat, dict(
+            diffuse = diffuse,
+            r1 = r1,
+            r2 = r2,
+            f0 = f0,
+            tint=tint,
+        )
 
     def compute_appfeature(self, xyz_normed):
         feat = self.encoding(xyz_normed[..., :3].reshape(-1, 3).contiguous()).type(xyz_normed.dtype)

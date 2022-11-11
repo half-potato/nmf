@@ -2,7 +2,7 @@ import torch
 from icecream import ic
 
 class Selector:
-    def __init__(self, percent_bright, bounces_per_ray=10, max_selected=99999999, val_thres=0, weight_thres=0, **kwargs):
+    def __init__(self, percent_bright=0, bounces_per_ray=10, max_selected=99999999, val_thres=0, weight_thres=0, **kwargs):
         self.max_selected = max_selected
         self.val_thres = val_thres
         self.weight_thres = weight_thres

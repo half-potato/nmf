@@ -211,7 +211,7 @@ class MLPRender_FP(torch.nn.Module):
         if self.feape > 0:
             indata += [positional_encoding(features, self.feape)]
         if self.view_encoder is not None:
-            ise_enc = self.view_encoder(viewdirs, torch.tensor(20, device=pts.device)).reshape(B, -1)
+            ise_enc = self.view_encoder(viewdirs).reshape(B, -1)
             indata += [ise_enc]
         if self.ref_encoder is not None:
             ise_enc = self.ref_encoder(refdirs, roughness).reshape(B, -1)

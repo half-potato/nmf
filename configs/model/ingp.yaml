@@ -4,7 +4,7 @@ arch:
 
   alphaMask_thres: 0.0001
   rayMarch_weight_thres: 0.0001
-  max_recurs: 2
+  max_recurs: 0
   roughness_rays: 1
   infinity_border: False
   appdim_noise_std: 0.1
@@ -12,17 +12,12 @@ arch:
   max_normal_similarity: 0.99
   max_floater_loss: 1
   bounces_per_ray: 10
-  selector:
-    _target_: modules.pt_selectors.TopNWeight
-    _partial_: True
-    max_selected: 25000000
-    weight_thres: 1e-3
 
   sampler:
     _target_: samplers.continuous_alphagrid.ContinuousAlphagrid
     _partial_: True
     multiplier: 1
-    shrink_iters: [2000, 4000]
+    shrink_iters: []
     dynamic_batchsize: False
     # sample_mode: multi_jitter
     sample_mode: single_jitter
@@ -61,13 +56,13 @@ arch:
     _partial_: True
     _target_: models.render_modules.MLPRender_FP
     feape: 0
-    lr: 1e-4
-    # view_encoder:
-    #   _target_: models.ish.FullISH
-    #   max_degree: 4
-    ref_encoder:
+    lr: 1e-2
+    view_encoder:
       _target_: models.ish.ListISH
-      degs: [0,1,2,4,8,16]
+      degs: [0,1,2,4]
+    # ref_encoder:
+    #   _target_: models.ish.ListISH
+    #   degs: [0,1,2,4,8,16]
     # ref_encoder:
     #   _target_: models.render_modules.PE
     #   max_degree: 4
@@ -80,8 +75,8 @@ arch:
     #   std: 5
     # activation: 'softplus'
     activation: 'sigmoid'
-    featureC: 256
-    num_layers: 8
+    featureC: 64
+    num_layers: 4
 
   # diffuse_module:
   #   _partial_: True
@@ -109,23 +104,15 @@ arch:
 params:
   lambda_start: 0.0
   lambda_end: 0.0
-  clip_grad: 1e-3
-  eps: 1e-6
-  betas: [0.9, 0.999]
+  clip_grad: Null
+  eps: 1e-15
+  betas: [0.9, 0.99]
 
   # bounce_n_list: [100, 1000, 10000, 20000]
   # bounce_iter_list: [9000, 12000, 14000]
 
-  bounce_n_list: [0, 100000]
-  # bounce_iter_list: [4500]
-  bounce_iter_list: [0]
-
   num_bw_iters: 0
 
-  #upsamp_list: [2000,3000,4000,5500,7000]
-  #uplambda_list: [7000, 12000, 17000, 21000]
-  #uplambda_list: [7000, 12000, 17000]
-  uplambda_list: [7000, 10000, 12000]
   L1_weight_inital: 0
   L1_weight_rest: 0
 
@@ -134,11 +121,11 @@ params:
   TV_weight_bg: 0
   envmap_lambda: 0
   brdf_lambda: 0
-  normal_lambda: 3e-4
-  final_normal_lambda: 3e-4
+  normal_lambda: 0
+  final_normal_lambda: 0
   diffuse_lambda: 0
-  backwards_rays_lambda: 0.1
-  final_ori_lambda: 0.1
+  backwards_rays_lambda: 0
+  final_ori_lambda: 0
   floater_lambda: 0
   charbonier_eps: 1e-3
   ortho_weight: 0
@@ -152,3 +139,4 @@ params:
   start_density: 1e-3
   lr_init: 0.02
   batch_size: 4096
+

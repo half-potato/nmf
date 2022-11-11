@@ -15,3 +15,5 @@ encoder_conf:
 lr: 1e-2
 lr_net: 1e-3
 num_pretrain: 1000
+tint_offset: 0
+diffuse_offset: -2
