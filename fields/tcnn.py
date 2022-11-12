@@ -4,9 +4,15 @@ from .tensor_base import TensorBase
 import numpy as np
 from icecream import ic
 from mutils import normalize
+import torch.nn.functional as F
+
+def init_weights(m):
+    if isinstance(m, torch.nn.Linear):
+        # torch.nn.init.xavier_uniform_(m.weight, gain=np.sqrt(2))
+        torch.nn.init.kaiming_uniform_(m.weight)
 
 class TCNNRF(TensorBase):
-    def __init__(self, aabb, encoder_conf, grid_size, featureC=128, num_layers=4, tint_offset=0, diffuse_offset=-1, **kwargs):
+    def __init__(self, aabb, encoder_conf, grid_size, enc_dim, roughness_bias=-1, featureC=128, num_layers=4, tint_offset=0, diffuse_offset=-1, **kwargs):
         super().__init__(aabb, **kwargs)
 
         # self.nSamples = 1024                                                                                                                                                                                        
@@ -19,6 +25,7 @@ class TCNNRF(TensorBase):
         self.units = self.stepSize
         self.tint_offset = tint_offset
         self.diffuse_offset = diffuse_offset
+        self.roughness_bias = roughness_bias
 
         self.separate_appgrid = False
 
@@ -35,13 +42,28 @@ class TCNNRF(TensorBase):
                     torch.nn.Linear(featureC, featureC),
                 ] for _ in range(num_layers-2)], []),
             torch.nn.ReLU(inplace=True),
-            torch.nn.Linear(featureC, 14)
+            torch.nn.Linear(featureC, enc_dim)
         )
+        self.tint_head = torch.nn.Linear(enc_dim, 3)
+        self.diffuse_head = torch.nn.Linear(enc_dim, 3)
+        self.roughness_head = torch.nn.Linear(enc_dim, 1)
+        # self.normal_head = torch.nn.Linear(enc_dim, 3, bias=False)
+        self.normal_head = torch.nn.Sequential(
+            torch.nn.Linear(enc_dim, featureC),
+            torch.nn.ReLU(inplace=True),
+            # torch.nn.Linear(hdim, hdim),
+            # torch.nn.ReLU(inplace=True),
+            torch.nn.Linear(featureC, 3, bias=False),
+        )
+        self.tint_head.apply(init_weights)
+        self.diffuse_head.apply(init_weights)
+        self.roughness_head.apply(init_weights)
+        self.normal_head.apply(init_weights)
 
-    def get_optparam_groups(self):
+    def get_optparam_groups(self, lr_scale=1):
         grad_vars = [
-            {'params': self.encoding.parameters(), 'lr': self.lr},
-            {'params': self.sigma_net.parameters(), 'lr': self.lr_net},
+            {'params': self.encoding.parameters(), 'lr': self.lr*lr_scale},
+            {'params': self.sigma_net.parameters(), 'lr': self.lr_net*lr_scale},
         ]
         return grad_vars
 
@@ -56,26 +78,19 @@ class TCNNRF(TensorBase):
 
     def compute_feature(self, xyz_normed):
         feat = self.encoding(self.coords2input(xyz_normed)).type(xyz_normed.dtype)
-        mlp_out = self.sigma_net(feat)
-        sigfeat = mlp_out[:, 0]
-        normals = normalize(mlp_out[:, 1:4])
-        mlp_out = mlp_out[:, 4:]
+        h = self.sigma_net(feat)
+        sigfeat = h[:, 0]
 
-        r1 = torch.sigmoid(mlp_out[..., 7:8]).clip(min=1e-2)
-        r2 = torch.sigmoid(mlp_out[..., 8:9]).clip(min=1e-2)
-        # ic(mlp_out[..., 0:6])
-        tint = torch.sigmoid((mlp_out[..., 3:6]+self.tint_offset).clip(min=-10, max=10))
-        # ic(tint.mean())
-        f0 = (torch.sigmoid((mlp_out[..., 9:10]+3).clip(min=-10, max=10))+0.001).clip(max=1)
-        # diffuse = rgb[..., :3]
-        # tint = F.softplus(mlp_out[..., 3:6])
-        diffuse = torch.sigmoid((mlp_out[..., :3]+self.diffuse_offset))
+        diffuse = torch.sigmoid(self.diffuse_head(h)+self.diffuse_offset)
+        tint = torch.sigmoid(self.tint_head(h))
+        roughness = F.softplus(self.roughness_head(h) + self.roughness_bias)
+        raw_norms = self.normal_head(h)
+        pred_norms = normalize(raw_norms)
 
-        return self.feature2density(sigfeat).reshape(-1), normals, feat, dict(
+        return self.feature2density(sigfeat).reshape(-1), pred_norms, feat, dict(
             diffuse = diffuse,
-            r1 = r1,
-            r2 = r2,
-            f0 = f0,
+            r1 = roughness,
+            r2 = roughness,
             tint=tint,
         )
 
@@ -85,8 +100,8 @@ class TCNNRF(TensorBase):
 
     def compute_densityfeature(self, xyz_normed, activate=True):
         feat = self.encoding(self.coords2input(xyz_normed)).type(xyz_normed.dtype)
-        mlp_out = self.sigma_net(feat)
-        sigfeat = mlp_out[:, 0]
+        x = self.sigma_net(feat)
+        sigfeat = x[:, 0]
         if activate:
             return self.feature2density(sigfeat).reshape(-1)
         else:

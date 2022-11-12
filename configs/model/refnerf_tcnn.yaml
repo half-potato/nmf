@@ -65,9 +65,12 @@ arch:
     # view_encoder:
     #   _target_: models.ish.FullISH
     #   max_degree: 4
+    # ref_encoder:
+    #   _target_: models.ish.ListISH
+    #   degs: [0,1,2,4,8,16]
     ref_encoder:
-      _target_: models.ish.ListISH
-      degs: [0,1,2,4,8,16]
+      _target_: modules.refsh.RefSH
+      deg_view: 5
     # ref_encoder:
     #   _target_: models.render_modules.PE
     #   max_degree: 4
@@ -83,28 +86,30 @@ arch:
     featureC: 256
     num_layers: 8
 
-  # diffuse_module:
-  #   _partial_: True
-  #   _target_: models.render_modules.MLPDiffuse
-  #   pospe: 0
-  #   # feape: 2
-  #   # featureC: 128
-  #   feape: 0
-  #   featureC: 64
-  #   num_layers: 3
-  #   lr: 1e-4
-  #
-  # normal_module:
-  #   _partial_: True
-  #   _target_: models.render_modules.MLPNormal
-  #   lr: 1e-3
-  #   # pospe: 16
-  #   # feape: 2
-  #   # featureC: 128
-  #   pospe: 0
-  #   feape: 0
-  #   featureC: 64
-  #   num_layers: 3
+  diffuse_module:
+    _partial_: True
+    _target_: models.render_modules.MLPDiffuse
+    pospe: 0
+    # feape: 2
+    # featureC: 128
+    feape: 0
+    featureC: 64
+    num_layers: 3
+    lr: 1e-4
+    diffuse_offset: -0.477
+    tint_offset: 0
+
+  normal_module:
+    _partial_: True
+    _target_: models.render_modules.MLPNormal
+    lr: 1e-3
+    # pospe: 16
+    # feape: 2
+    # featureC: 128
+    pospe: 0
+    feape: 0
+    featureC: 64
+    num_layers: 3
 
 params:
   lambda_start: 0.0
@@ -134,8 +139,8 @@ params:
   TV_weight_bg: 0
   envmap_lambda: 0
   brdf_lambda: 0
-  normal_lambda: 3e-4
-  final_normal_lambda: 3e-4
+  normal_lambda: 3e-3
+  final_normal_lambda: 3e-3
   diffuse_lambda: 0
   backwards_rays_lambda: 0.1
   final_ori_lambda: 0.1

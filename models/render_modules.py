@@ -12,6 +12,7 @@ from typing import List
 import cv2
 from .grid_sample_Cinf import gkern
 from mutils import normalize
+import math
 
 def str2fn(name):
     if name == 'sigmoid':

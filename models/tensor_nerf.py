@@ -49,6 +49,7 @@ class TensorNeRF(torch.nn.Module):
                  rayMarch_weight_thres=0.0001, detach_inter=False, attach_normal_iter=0, percent_bright=0.1, bg_noise=0, bg_noise_decay=0.999, use_predicted_normals=True,
                  max_bounce_rays=4000, roughness_rays=3, bounce_min_weight=0.001, appdim_noise_std=0.0, noise_decay=1, normalize_brdf=True, orient_world_normals=False,
                  world_bounces=0, selector=None, cold_start_bg_iters = 0, back_clip=0.2, max_recur_rays=5, eval_batch_size=512, rough_light=False,
+                 lr_scale=1,
                  update_sampler_list=[5000], max_floater_loss=6, **kwargs):
         super(TensorNeRF, self).__init__()
         self.rf = rf(aabb=aabb, grid_size=grid_size)
@@ -72,6 +73,7 @@ class TensorNeRF(torch.nn.Module):
         else:
             self.tonemap = tonemap
 
+        self.lr_scale = lr_scale
         self.normalize_brdf = normalize_brdf
         self.bg_noise = bg_noise
         self.bg_noise_decay = bg_noise_decay
@@ -124,20 +126,20 @@ class TensorNeRF(torch.nn.Module):
 
     def get_optparam_groups(self, lr_bg=0.025, lr_scale=1):
         grad_vars = []
-        grad_vars += self.rf.get_optparam_groups()
+        grad_vars += self.rf.get_optparam_groups(self.lr_scale)
         if isinstance(self.normal_module, torch.nn.Module):
             grad_vars += [{'params': self.normal_module.parameters(),
-                           'lr': self.normal_module.lr*lr_scale}]
+                           'lr': self.normal_module.lr*self.lr_scale}]
         if self.ref_module is not None:
             grad_vars += [{'params': list(self.ref_module.parameters()), 'lr': lr_scale*self.ref_module.lr, 'beta': [0.9, 0.999]}]
         if isinstance(self.diffuse_module, torch.nn.Module):
             grad_vars += [{'params': self.diffuse_module.parameters(),
-                           'lr': self.diffuse_module.lr}]
+                           'lr': self.diffuse_module.lr*self.lr_scale}]
         if isinstance(self.brdf, torch.nn.Module):
             grad_vars += [{'params': self.brdf.parameters(),
-                           'lr': self.brdf.lr}]
+                           'lr': self.brdf.lr*self.lr_scale}]
         if isinstance(self.bg_module, torch.nn.Module):
-            grad_vars += self.bg_module.get_optparam_groups()
+            grad_vars += self.bg_module.get_optparam_groups(self.lr_scale)
         return grad_vars
 
     def save(self, path, config):
@@ -559,13 +561,13 @@ class TensorNeRF(torch.nn.Module):
             if self.diffuse_module is not None:
                 diffuse, tint, matprop = self.diffuse_module(
                     app_norm_xyz, viewdirs[app_mask], noise_app_features)
-                f0 = matprop['f0']
+                # f0 = matprop['f0']
                 r1 = matprop['r1']
                 r2 = matprop['r2']
             else:
                 diffuse = matprop['diffuse'][papp_mask]
                 tint = matprop['tint'][papp_mask]
-                f0 = matprop['f0'][papp_mask]
+                # f0 = matprop['f0'][papp_mask]
                 r1 = matprop['r1'][papp_mask]
                 r2 = matprop['r2'][papp_mask]
 
@@ -621,10 +623,11 @@ class TensorNeRF(torch.nn.Module):
 
 
             reflect_rgb = torch.zeros_like(diffuse)
-            roughness = torch.min(r1, r2).squeeze(-1)
+            # roughness = torch.min(r1, r2).squeeze(-1)
+            roughness = r1.squeeze(-1)
             # roughness = 1e-3*torch.ones_like(roughness)
             # roughness = torch.where((xyz_sampled[..., 0].abs() < 0.15) | (xyz_sampled[..., 1].abs() < 0.15), 0.30, 0.15)[papp_mask]
-            if self.ref_module is not None and (self.max_recurs == recur):
+            if self.ref_module is not None:
                 viewdotnorm = (viewdirs[app_mask]*N).sum(dim=-1, keepdim=True)
                 ref_col = self.ref_module(
                     app_norm_xyz, viewdirs[app_mask],
@@ -666,7 +669,7 @@ class TensorNeRF(torch.nn.Module):
 
                     eV = bV.reshape(-1, 1, 3).expand(-1, ray_mask.shape[1], 3)[ray_mask]
                     eN = bN.reshape(-1, 1, 3).expand(-1, ray_mask.shape[1], 3)[ray_mask]
-                    ea = torch.min(r1, r2).reshape(-1, 1).expand(ray_mask.shape)[ray_mask]
+                    ea = roughness.reshape(-1, 1)[bounce_mask].expand(ray_mask.shape)[ray_mask]
 
                     H = normalize((eV+L)/2)
                     mipval = calculate_mipval(H, eV, eN, ray_mask, ea**2)
@@ -719,10 +722,10 @@ class TensorNeRF(torch.nn.Module):
                     _brdf_rgb = row_mask_sum(brdf_weight, ray_mask) / norm
                     brdf_rgb[full_bounce_mask] = _brdf_rgb
                     brdf_brightness = _brdf_rgb.mean()
-                    f0 = f0[bounce_mask].reshape(-1, 1, 1).expand(-1, ray_mask.shape[1], 1)[ray_mask]
+                    # f0 = f0[bounce_mask].reshape(-1, 1, 1).expand(-1, ray_mask.shape[1], 1)[ray_mask]
                     LdotN = (L * eN).sum(dim=-1, keepdim=True).clip(min=0, max=1-1e-8)
-                    R0 = f0 + (1-f0) * (1-LdotN)**5
-                    meanR0 = row_mask_sum(R0, ray_mask) / (ray_mask.sum(dim=1)+1e-8)[..., None]
+                    # R0 = f0 + (1-f0) * (1-LdotN)**5
+                    # meanR0 = row_mask_sum(R0, ray_mask) / (ray_mask.sum(dim=1)+1e-8)[..., None]
 
                     if self.transmittance_thres < 1 and recur == 0 and self.allow_transmit:
                         tm_mask = pweight[papp_mask] > self.transmittance_thres
@@ -904,7 +907,7 @@ class TensorNeRF(torch.nn.Module):
                 s = row_mask_sum(incoming_light, ray_mask) / (ray_mask.sum(dim=1)+1e-16)[..., None]
                 # s = tinted_ref_rgb
                 # s = brdf_rgb
-                r0_map = row_mask_sum(meanR0.expand(-1, 3)*weight[full_bounce_mask][..., None], full_bounce_mask).cpu()
+                # r0_map = row_mask_sum(meanR0.expand(-1, 3)*weight[full_bounce_mask][..., None], full_bounce_mask).cpu()
                 # s2 = row_mask_sum(incoming_light[bright_mask[ray_mask]], bright_mask) / (bright_mask.sum(dim=1)+1e-16)[..., None]
                 # diffuse_light_map = row_mask_sum(s2*weight[full_bounce_mask][..., None], full_bounce_mask).cpu()
 

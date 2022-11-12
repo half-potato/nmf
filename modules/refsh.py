@@ -44,7 +44,7 @@ def get_ml_array(deg_view):
     return ml_array
 
 
-class RefListSH(torch.nn.Module):
+class RefSH(torch.nn.Module):
     def __init__(self, deg_view):
         super().__init__()
         """Generate integrated directional encoding (IDE) function.
@@ -86,7 +86,7 @@ class RefListSH(torch.nn.Module):
             An array with the resulting IDE.
         """
         xyz = xyz.double()
-        kappa_inv = kappa_inv.double()
+        kappa_inv = 1/(kappa_inv.double().reshape(-1, 1)+1e-5)
         x = xyz[..., 0:1]
         y = xyz[..., 1:2]
         z = xyz[..., 2:3]
