@@ -275,7 +275,7 @@ class PBR(torch.nn.Module):
 
 class MLPBRDF(torch.nn.Module):
     def __init__(self, in_channels, h_encoder=None, d_encoder=None, v_encoder=None, n_encoder=None, l_encoder=None, feape=6, featureC=128, num_layers=2, dotpe=0,
-                 activation='sigmoid', bias=0, lr=1e-4, shift=0):
+                 activation='sigmoid', mul_LdotN=True, bias=0, lr=1e-4, shift=0):
         super().__init__()
 
         self.in_channels = in_channels
@@ -289,6 +289,7 @@ class MLPBRDF(torch.nn.Module):
         self.l_encoder = l_encoder
         self.h_encoder = h_encoder
         self.d_encoder = d_encoder
+        self.mul_LdotN = mul_LdotN
         self.lr = lr
         self.activation_name = activation
         if h_encoder is not None:
@@ -413,7 +414,10 @@ class MLPBRDF(torch.nn.Module):
 
         LdotN = LdotN.clip(min=0)
 
-        weight = ref_weight * LdotN.detach()
+        if self.mul_LdotN:
+            weight = ref_weight * LdotN.detach()
+        else:
+            weight = ref_weight
 
         # plot it
         # splat_weight = torch.zeros((*ray_mask.shape, 3), dtype=weight.dtype, device=weight.device)

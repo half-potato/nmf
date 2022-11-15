@@ -9,7 +9,6 @@ arch:
   roughness_rays: 50
   max_recur_rays: 5
   infinity_border: False
-  use_diffuse: True
   appdim_noise_std: 0.0
   rough_light: False
   bg_noise: 0
@@ -26,6 +25,7 @@ arch:
   noise_decay: 0.999
   use_predicted_normals: True
   orient_world_normals: False
+  diffuse_dropout: 0
 
   detach_inter: True
   selector:
@@ -201,16 +201,16 @@ params:
   L1_weight_rest: 0
   clip_grad: Null
   eps: 1e-8
-  betas: [0.9, 0.99]
+  betas: [0.9, 0.999]
 
   TV_weight_density: 0.0
   TV_weight_app: 0.0
   TV_weight_bg: 5e-5
   envmap_lambda: 5e-5
   normal_lambda: 1e-2
-  final_normal_lambda: 1e-2
+  final_normal_lambda: Null
   diffuse_lambda: 0
-  backwards_rays_lambda: 0.2
+  ori_lambda: 0.2
   final_ori_lambda: 0.05
   brdf_lambda: 0
   
@@ -226,4 +226,5 @@ params:
   start_density: 0.01
   lr_init: 0.02
   batch_size: 4096
+  lr: Null
 

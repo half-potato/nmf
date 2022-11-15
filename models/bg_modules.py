@@ -128,6 +128,7 @@ class HierarchicalCubeMap(torch.nn.Module):
         return self.bg_mats[0].device
 
     def get_optparam_groups(self, lr_scale=1):
+        lr_scale = 1
         return [
             {'params': self.bg_mats,
              'betas': self.betas,

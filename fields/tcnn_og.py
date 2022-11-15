@@ -33,10 +33,10 @@ class TCNNRF(TensorBase):
         bound = 1
         per_level_scale = np.exp2(np.log2(2048 * bound / 16) / (16 - 1))
         self.encoding = tcnn.Encoding(3, encoding_config=dict(per_level_scale=per_level_scale, **encoder_conf))
-        self.app_dim = encoder_conf.n_features_per_level * encoder_conf.n_levels
+        app_dim = encoder_conf.n_features_per_level * encoder_conf.n_levels
         # self.sigma_net = tcnn.Network(n_input_dims=self.app_dim, n_output_dims=1, network_config=dict(**network_config))
         self.sigma_net = torch.nn.Sequential(
-            torch.nn.Linear(self.app_dim, featureC),
+            torch.nn.Linear(app_dim, featureC),
             *sum([[
                     torch.nn.ReLU(inplace=True),
                     torch.nn.Linear(featureC, featureC),
@@ -44,6 +44,7 @@ class TCNNRF(TensorBase):
             torch.nn.ReLU(inplace=True),
             torch.nn.Linear(featureC, enc_dim)
         )
+        self.app_dim = enc_dim
 
     def get_optparam_groups(self, lr_scale=1):
         grad_vars = [
@@ -66,11 +67,12 @@ class TCNNRF(TensorBase):
         h = self.sigma_net(feat)
         sigfeat = h[:, 0]
 
-        return self.feature2density(sigfeat).reshape(-1), feat
+        return self.feature2density(sigfeat).reshape(-1), h
 
     def compute_appfeature(self, xyz_normed):
         feat = self.encoding(xyz_normed[..., :3].reshape(-1, 3).contiguous()).type(xyz_normed.dtype)
-        return feat
+        h = self.sigma_net(feat)
+        return h
 
     def compute_densityfeature(self, xyz_normed, activate=True):
         feat = self.encoding(self.coords2input(xyz_normed)).type(xyz_normed.dtype)
@@ -83,3 +85,4 @@ class TCNNRF(TensorBase):
 
     def shrink(self, new_aabb, voxel_size):
         pass
+

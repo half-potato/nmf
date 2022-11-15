@@ -273,6 +273,10 @@ def reconstruction(args):
     def init_optimizer(grad_vars):
         # optimizer = torch.optim.Adam(grad_vars, betas=(0.9, 0.999), weight_decay=0, eps=1e-6)
         optimizer = torch.optim.Adam(grad_vars, betas=params.betas, eps=params.eps)
+        if params.lr is not None:
+            optimizer = torch.optim.Adam(tensorf.parameters(), lr=params.lr, betas=params.betas, eps=params.eps)
+        else:
+            optimizer = torch.optim.Adam(grad_vars, betas=params.betas, eps=params.eps)
         # optimizer = torch.optim.SGD(grad_vars, momentum=0.9, weight_decay=0)
         # optimizer = torch.optim.RMSprop(grad_vars, alpha=0.99, eps=1e-08, weight_decay=0, momentum=0)
         # smoothing_vals = torch.linspace(0.5, 0.5, len(upsamp_list)+1).tolist()[1:]
@@ -289,9 +293,9 @@ def reconstruction(args):
         return optimizer, scheduler
     optimizer, scheduler = init_optimizer(grad_vars)
     # x**params.n_iters = init/final
-    ori_decay = math.exp(math.log(params.final_ori_lambda / params.backwards_rays_lambda) / params.n_iters) if params.backwards_rays_lambda > 0 else 0
-    normal_decay = math.exp(math.log(params.final_normal_lambda / params.normal_lambda) / params.n_iters) if params.normal_lambda > 0 else 0
-    ic(ori_decay, ori_decay**params.n_iters * params.backwards_rays_lambda)
+    ori_decay = math.exp(math.log(params.final_ori_lambda / params.ori_lambda) / params.n_iters) if params.ori_lambda > 0 and params.final_ori_lambda is not None else 0
+    normal_decay = math.exp(math.log(params.final_normal_lambda / params.normal_lambda) / params.n_iters) if params.normal_lambda > 0 and params.final_normal_lambda is not None else 1
+    ic(ori_decay, ori_decay**params.n_iters * params.ori_lambda)
     ic(normal_decay)
     if True:
     # with torch.profiler.profile(record_shapes=True, schedule=torch.profiler.schedule(wait=1, warmup=1, active=20), with_stack=True) as p:
@@ -323,7 +327,7 @@ def reconstruction(args):
             with torch.cuda.amp.autocast(enabled=args.fp16):
             # if True:
                 data = renderer(rays_train, tensorf,
-                        keys = ['rgb_map', 'floater_loss', 'normal_loss', 'backwards_rays_loss', 'diffuse_reg', 'roughness', 'whole_valid', 'envmap_reg', 'brdf_reg'],#, 'normal_map'],
+                        keys = ['rgb_map', 'floater_loss', 'normal_loss', 'ori_loss', 'diffuse_reg', 'roughness', 'whole_valid', 'envmap_reg', 'brdf_reg'],#, 'normal_map'],
                         focal=focal, output_alpha=alpha_train, chunk=params.batch_size, white_bg = white_bg, is_train=True, ndc_ray=ndc_ray)
 
                 # loss = torch.mean((rgb_map[:, 1, 1] - rgb_train[:, 1, 1]) ** 2)
@@ -348,18 +352,18 @@ def reconstruction(args):
                 # loss = torch.sqrt(F.huber_loss(rgb_map, rgb_train, delta=1, reduction='none') + params.charbonier_eps**2).mean()
                 # photo_loss = ((rgb_map.clip(0, 1) - rgb_train[whole_valid].clip(0, 1)) ** 2).mean().detach()
                 photo_loss = loss.detach()
-                backwards_rays_loss = data['backwards_rays_loss']
+                ori_loss = data['ori_loss']
 
                 # loss
                 total_loss = loss + \
                     params.floater_lambda*floater_loss + \
-                    params.backwards_rays_lambda*backwards_rays_loss + \
+                    params.ori_lambda*ori_loss + \
                     params.envmap_lambda * (envmap_reg-0.05).clip(min=0) + \
                     params.diffuse_lambda * diffuse_reg + \
                     params.brdf_lambda * brdf_reg + \
                     params.normal_lambda*normal_loss
 
-                # params.backwards_rays_lambda *= ori_decay
+                # params.ori_lambda *= ori_decay
                 params.normal_lambda *= normal_decay
 
                 if tensorf.visibility_module is not None:
@@ -406,7 +410,7 @@ def reconstruction(args):
             PSNRs.append(-10.0 * np.log(photo_loss) / np.log(10.0))
             summary_writer.add_scalar('train/PSNR', PSNRs[-1], global_step=iteration)
             summary_writer.add_scalar('train/mse', photo_loss, global_step=iteration)
-            summary_writer.add_scalar('train/backwards_rays_loss', backwards_rays_loss.detach().item(), global_step=iteration)
+            summary_writer.add_scalar('train/ori_loss', ori_loss.detach().item(), global_step=iteration)
             summary_writer.add_scalar('train/floater_loss', floater_loss.detach().item(), global_step=iteration)
             summary_writer.add_scalar('train/normal_loss', normal_loss.detach().item(), global_step=iteration)
             summary_writer.add_scalar('train/diffuse_loss', diffuse_reg.detach().item(), global_step=iteration)
