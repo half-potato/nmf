@@ -1,21 +1,22 @@
 _partial_: True
 # _target_: fields.tcnn.TCNNRF
 _target_: fields.tcnn_og.TCNNRF
-distance_scale: 2
+distance_scale: 0.5
 density_shift: 0
 activation: 'exp'
 # activation: 'softplus'
-featureC: 64
+hidden_w: 64
 num_layers: 4
+initializer: 'kaiming'
 encoder_conf:
     otype: "HashGrid"
     n_levels: 16
     n_features_per_level: 2
     log2_hashmap_size: 19
     base_resolution: 16
-lr: 1e-2
+lr: 1e-3
 lr_net: 1e-3
-num_pretrain: 1000
+num_pretrain: 0
 tint_offset: 0
 diffuse_offset: -0.477
 # app_dim: 16

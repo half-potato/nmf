@@ -12,6 +12,7 @@ from typing import List
 import cv2
 from .grid_sample_Cinf import gkern
 from mutils import normalize
+from . import util
 import math
 
 def str2fn(name):
@@ -319,7 +320,7 @@ class MLPRender(torch.nn.Module):
         tint = torch.sigmoid((mlp_out[..., :3]).clip(min=-10, max=10))
         # diffuse = rgb[..., :3]
         # tint = F.softplus(mlp_out[..., 3:6])
-        diffuse = torch.sigmoid((mlp_out[..., :3]))
+        diffuse = torch.sigmoid((mlp_out[..., :3] - math.log(3)))
 
         # ic(f0)
         return diffuse, tint, dict(
@@ -341,7 +342,7 @@ class MLPDiffuse(torch.nn.Module):
     refpe: int
     featureC: int
     num_layers: int
-    def __init__(self, in_channels, pospe=12, view_encoder=None, feape=6, featureC=128, num_layers=0, allocation=0, unlit_tint=False, lr=1e-4, tint_offset=-1, diffuse_offset=-2):
+    def __init__(self, in_channels, pospe=12, view_encoder=None, feape=6, allocation=0, unlit_tint=False, lr=1e-4, tint_offset=-1, diffuse_offset=-2, roughness_offset=1, **kwargs):
         super().__init__()
 
         in_channels = in_channels if allocation <= 0 else allocation
@@ -351,6 +352,7 @@ class MLPDiffuse(torch.nn.Module):
         self.unlit_tint = unlit_tint
         self.tint_offset = tint_offset
         self.diffuse_offset = diffuse_offset
+        self.roughness_offset = roughness_offset
         self.lr = lr
         self.allocation = allocation
 
@@ -359,28 +361,7 @@ class MLPDiffuse(torch.nn.Module):
             self.in_mlpC += self.view_encoder.dim() + 3
         self.feape = feape
         self.pospe = pospe
-        if num_layers > 0:
-            self.mlp = torch.nn.Sequential(
-                torch.nn.Linear(self.in_mlpC, featureC),
-                # torch.nn.ReLU(inplace=True),
-                # torch.nn.Linear(featureC, featureC),
-                # torch.nn.BatchNorm1d(featureC),
-                *sum([[
-                        torch.nn.ReLU(inplace=True),
-                        torch.nn.Linear(featureC, featureC),
-                        # torch.nn.BatchNorm1d(featureC)
-                    ] for _ in range(num_layers-2)], []),
-                torch.nn.ReLU(inplace=True),
-                torch.nn.Linear(featureC, 10),
-            )
-            torch.nn.init.constant_(self.mlp[-1].bias, 0)
-            # self.mlp.apply(self.init_weights)
-        else:
-            self.mlp = torch.nn.Identity()
-        # to the neural network, roughness is unitless
-        self.max_roughness = 1
-        self.max_refraction_index = 2
-        self.min_refraction_index = 1
+        self.mlp = util.create_mlp(self.in_mlpC, 10, **kwargs)
 
     def init_weights(self, m):
         if isinstance(m, nn.Linear):
@@ -411,36 +392,18 @@ class MLPDiffuse(torch.nn.Module):
         mlp_in = torch.cat(indata, dim=-1)
         mlp_out = self.mlp(mlp_in)
 
-        """
-        # ambient = F.softplus(mlp_out[..., 6:7]-3)
-        refraction_index = F.softplus(mlp_out[..., 7:8]-1) + self.min_refraction_index
-        reflectivity = 50*F.softplus(mlp_out[..., 8:9])
-        # roughness = F.softplus(mlp_out[..., 10:11]-1)
-        # max 0.5 roughness
-        f0 = torch.sigmoid(mlp_out[..., 11:14])
-        # albedo = F.softplus(mlp_out[..., 14:17]-2)
-        albedo = torch.sigmoid(mlp_out[..., 14:17])
-        ratio_diffuse = rgb[..., 9:10]
-        """
-
         ambient = torch.sigmoid(mlp_out[..., 6:7]-2)
-        r1 = torch.sigmoid(mlp_out[..., 7:8]).clip(min=1e-2)
-        r2 = torch.sigmoid(mlp_out[..., 8:9]).clip(min=1e-2)
-        # ic(mlp_out[..., 0:6])
-        tint = torch.sigmoid((mlp_out[..., 3:6]+self.tint_offset).clip(min=-10, max=10))
-        # ic(tint.mean())
-        f0 = (torch.sigmoid((mlp_out[..., 9:10]+3).clip(min=-10, max=10))+0.001).clip(max=1)
-        # diffuse = rgb[..., :3]
-        # tint = F.softplus(mlp_out[..., 3:6])
+        # r1 = F.softplus(mlp_out[..., 7:8]+self.roughness_offset) + 1e-3
+        # r2 = F.softplus(mlp_out[..., 8:9]+self.roughness_offset) + 1e-3
+        r1 = torch.sigmoid(mlp_out[..., 7:8]+self.roughness_offset) + 1e-3
+        r2 = torch.sigmoid(mlp_out[..., 8:9]+self.roughness_offset) + 1e-3
+        tint = torch.sigmoid((mlp_out[..., 3:6]+self.tint_offset))
+        f0 = (torch.sigmoid((mlp_out[..., 9:10]+3))+0.001).clip(max=1)
         diffuse = torch.sigmoid((mlp_out[..., :3]+self.diffuse_offset))
 
         # ic(f0)
         return diffuse, tint, dict(
-            # refraction_index = refraction_index,
-            # ratio_diffuse = ratio_diffuse,
-            # reflectivity = reflectivity,
             ambient = ambient,
-            # albedo=albedo,
             diffuse = diffuse,
             r1 = r1,
             r2 = r2,
@@ -453,7 +416,7 @@ class MLPNormal(torch.nn.Module):
     feape: int
     featureC: int
     num_layers: int
-    def __init__(self, in_channels, pospe=6, feape=6, featureC=128, num_layers=2, allocation=0, lr=1e-4, size_multi=2.5e-3):
+    def __init__(self, in_channels, pospe=6, feape=6, allocation=0, lr=1e-4, size_multi=2.5e-3, **kwargs):
         super().__init__()
 
         in_channels = in_channels if allocation <= 0 else allocation
@@ -467,17 +430,7 @@ class MLPNormal(torch.nn.Module):
         self.lr = lr
         self.allocation = allocation
         self.size_multi = size_multi
-
-        self.mlp = torch.nn.Sequential(
-            torch.nn.Linear(self.in_mlpC, featureC),
-            *sum([[
-                    torch.nn.ReLU(inplace=True),
-                    torch.nn.Linear(featureC, featureC),
-                ] for _ in range(num_layers-2)], []),
-            torch.nn.ReLU(inplace=True),
-            # torch.nn.Tanh(),
-            torch.nn.Linear(featureC, 3, bias=False)
-        )
+        self.mlp = util.create_mlp(self.in_mlpC, 3, bias=False, **kwargs)
 
         # self.mlp.apply(self.init_weights)
 
@@ -502,16 +455,13 @@ class MLPNormal(torch.nn.Module):
         if self.feape > 0:
             indata += [positional_encoding(features, self.feape)]
         mlp_in = torch.cat(indata, dim=-1)
-        # angles = self.mlp(mlp_in)
-        # azi = angles[:, 0]
-        # ele = angles[:, 1]
-        # normals = torch.stack([
-        #     torch.cos(ele) * torch.cos(azi),
-        #     torch.cos(ele) * torch.sin(azi),
-        #     -torch.sin(ele),
-        # ], dim=1)
+        mlp_out = self.mlp(mlp_in)
+        # ic(indata, mlp_out)
+        # for layer in self.mlp.children():
+        #     if hasattr(layer, 'weight'):
+        #         ic(layer.weight.grad, layer.weight)
 
-        normals = normalize(self.mlp(mlp_in))
+        normals = normalize(mlp_out)
 
         return normals
 

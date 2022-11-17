@@ -8,6 +8,7 @@ from icecream import ic
 import matplotlib.pyplot as plt
 from . import safemath
 from modules import row_mask_sum
+from models import util
 
 import plotly.express as px
 import plotly.graph_objects as go
@@ -25,54 +26,19 @@ def ggx_dist(NdotH, roughness):
     # return a2 / np.pi / ((NdotH**2*(a2-1)+1)**2).clip(min=1e-8)
     return ((a2 / (NdotH.clip(min=0, max=1)**2*(a2-1)+1))**2).clip(min=0, max=1)
 
-class NormalSampler:
-    def __init__(self) -> None:
-        pass
-
-    def roughness2noisestd(self, roughness):
-        # return roughness
-        # slope = 6
-        # TODO REMOVE
-        return roughness
-
-    def sample(self, num_samples, refdirs, viewdir, normal, roughness):
-        device = normal.device
-        B = normal.shape[0]
-        ray_noise = torch.normal(0, 1, (B, num_samples, 3), device=device)
-        diffuse_noise = ray_noise / (torch.linalg.norm(ray_noise, dim=-1, keepdim=True)+1e-8)
-        diffuse_noise = self.roughness2noisestd(roughness.reshape(-1, 1, 1)) * diffuse_noise
-        outward = normal.reshape(-1, 1, 3)
-
-        # this formulation uses ratio diffuse and ratio reflected to do importance sampling
-        # diffuse_noise = ratio_diffuse[bounce_mask].reshape(-1, 1, 1) * (outward+diffuse_noise)
-        # diffuse_noise[:, 0] = 0
-        # noise_rays = ratio_reflected[bounce_mask].reshape(-1, 1, 1) * (brefdirs + reflect_noise) + diffuse_noise
-
-        # this formulation uses roughness to do importance sampling
-        # diffuse_noise = outward+diffuse_noise
-        diffuse_noise[:, 0] = 0
-        # noise_rays = (1-roughness[bounce_mask].reshape(-1, 1, 1)) * brefdirs + roughness[bounce_mask].reshape(-1, 1, 1) * diffuse_noise
-        noise_rays = refdirs + diffuse_noise
-
-        # noise_rays = ratio_reflected[bounce_mask].reshape(-1, 1, 1) * (bounce_rays[..., 3:6] + reflect_noise)
-        noise_rays = noise_rays / (torch.linalg.norm(noise_rays, dim=-1, keepdim=True)+1e-8)
-        # project into 
-        return noise_rays
-
-class GGXSampler(torch.nn.Module):
-    def __init__(self, num_samples, min_roughness) -> None:
+class PseudoRandomSampler(torch.nn.Module):
+    def __init__(self, max_samples) -> None:
         super().__init__()
         self.sampler = torch.quasirandom.SobolEngine(dimension=2, scramble=True)
-        self.num_samples = num_samples
-        angs = self.sampler.draw(num_samples)
+        self.max_samples = max_samples
+        angs = self.sampler.draw(max_samples)
         self.register_buffer('angs', angs)
-        self.min_roughness = min_roughness
-        # plt.scatter(self.angs[:, 0], self.angs[:, 1])
-        # plt.show()
 
     def draw(self, B, num_samples):
-        # self.angs = self.sampler.draw(self.num_samples)
-        angs = self.angs.reshape(1, self.num_samples, 2)[:, :num_samples, :].expand(B, num_samples, 2)
+        if num_samples > self.max_samples:
+            self.max_samples = num_samples
+            self.angs = self.sampler.draw(self.max_samples)
+        angs = self.angs.reshape(1, self.max_samples, 2)[:, :num_samples, :].expand(B, num_samples, 2)
         # self.sampler = torch.quasirandom.SobolEngine(dimension=2, scramble=True)
         # add random offset
         offset = torch.rand(B, 1, 2, device=angs.device)*0.25
@@ -82,7 +48,178 @@ class GGXSampler(torch.nn.Module):
     def update(self, *args, **kwargs):
         pass
 
-    def sample(self, num_samples, refdirs, viewdir, normal, r1, r2, ray_mask):
+class BeckmannSampler(PseudoRandomSampler):
+    def sample(self, viewdir, normal, r1, r2, ray_mask, eps=torch.finfo(torch.float32).eps):
+        num_samples = ray_mask.shape[1]
+        # viewdir: (B, 3)
+        # normal: (B, 3)
+        # r1, r2: B roughness values for anisotropic roughness
+        device = normal.device
+        B = normal.shape[0]
+
+        # establish basis for BRDF
+        z_up = torch.tensor([0.0, 0.0, 1.0], device=device).reshape(1, 3).expand(B, 3)
+        x_up = torch.tensor([-1.0, 0.0, 0.0], device=device).reshape(1, 3).expand(B, 3)
+        up = torch.where(normal[:, 2:3] < 0.9, z_up, x_up)
+        tangent = normalize(torch.linalg.cross(up, normal))
+        bitangent = normalize(torch.linalg.cross(normal, tangent))
+        # B, 3, 3
+        row_world_basis = torch.stack([tangent, bitangent, normal], dim=1).reshape(B, 3, 3)
+
+        r1_c = r1.squeeze(-1)
+        r2_c = r2.squeeze(-1)
+
+        angs = self.draw(B, num_samples).to(device)
+
+        # here is where things get really large
+        u1 = angs[..., 0]
+        u2 = angs[..., 1]
+
+        # stretch and mask stuff to reduce memory
+        r_mask1 = r1_c.reshape(-1, 1).expand(u1.shape)[ray_mask]
+        r_mask2 = r2_c.reshape(-1, 1).expand(u1.shape)[ray_mask]
+
+        u1_mask = u1[ray_mask]
+        u2_mask = u2[ray_mask]
+        row_world_basis_mask = row_world_basis.permute(0, 2, 1).reshape(B, 1, 3, 3).expand(B, num_samples, 3, 3)[ray_mask]
+
+        tan2theta = -r_mask1**2 * (1-u1_mask).clip(min=eps).log()
+        # ic(tan2theta, u1.min(), u2.max(), ray_mask.sum(dim=1).float().mean())
+        phi = 2 * u2_mask * math.pi
+        costheta = 1 / (1+tan2theta).sqrt()
+        sintheta = (1 - costheta**2).clip(min=eps).sqrt()
+
+        sphere_noise = torch.stack([
+            costheta * torch.cos(phi),
+            sintheta * torch.cos(phi),
+            -torch.sin(phi),
+        ], dim=-1)
+
+        H_l = normalize(r_mask1.reshape(-1, 1) * sphere_noise + torch.tensor([0.0, 0.0, 1.0], device=device).reshape(1, -1))
+
+        first = torch.zeros_like(ray_mask)
+        first[:, 0] = True
+        H_l[first[ray_mask], 0] = 0
+        H_l[first[ray_mask], 1] = 0
+        H_l[first[ray_mask], 2] = 1
+
+        H = torch.matmul(row_world_basis_mask, H_l.unsqueeze(-1)).squeeze(-1)
+        # H = torch.einsum('bni,bij->bnj', H_l, row_world_basis)
+
+        V = viewdir.unsqueeze(1).expand(-1, num_samples, 3)[ray_mask]
+        # N = normal.reshape(-1, 1, 3).expand(-1, num_samples, 3)[ray_mask]
+        L = (2.0 * (V * H).sum(dim=-1, keepdim=True) * H - V)
+
+        return L, row_world_basis_mask
+
+    def calculate_mipval(self, H, V, N, ray_mask, roughness, eps=torch.finfo(torch.float32).eps):
+        num_samples = ray_mask.shape[1]
+        NdotH = (H * N).sum(dim=-1).abs().clip(min=eps, max=1)
+        HdotV = (H * V).sum(dim=-1).abs().clip(min=eps, max=1)
+        NdotV = (N * V).sum(dim=-1).abs().clip(min=eps, max=1)
+        logD = 2*torch.log(roughness.clip(min=eps)) - 2*torch.log((NdotH**2*(roughness**2-1)+1).clip(min=eps))
+        # ic(NdotH.shape, NdotH, D, D.mean())
+        # px.scatter(x=NdotH[0].detach().cpu().flatten(), y=D[0].detach().cpu().flatten()).show()
+        # assert(False)
+        lpdf = logD + torch.log(HdotV) - torch.log(NdotV)
+        # pdf = D * HdotV / NdotV / roughness.reshape(-1, 1)
+        # pdf = NdotH / 4 / HdotV
+        # pdf = D# / NdotH
+        indiv_num_samples = ray_mask.sum(dim=1, keepdim=True).expand(-1, num_samples)[ray_mask]
+        mipval = -torch.log(indiv_num_samples.clip(min=1)) - lpdf
+        return mipval
+
+class CosineLobeSampler(PseudoRandomSampler):
+    def sample(self, viewdir, normal, r1, r2, ray_mask):
+        num_samples = ray_mask.shape[1]
+        # viewdir: (B, 3)
+        # normal: (B, 3)
+        # r1, r2: B roughness values for anisotropic roughness
+        device = normal.device
+        B = normal.shape[0]
+
+        # establish basis for BRDF
+        z_up = torch.tensor([0.0, 0.0, 1.0], device=device).reshape(1, 3).expand(B, 3)
+        x_up = torch.tensor([-1.0, 0.0, 0.0], device=device).reshape(1, 3).expand(B, 3)
+        up = torch.where(normal[:, 2:3] < 0.9, z_up, x_up)
+        tangent = normalize(torch.linalg.cross(up, normal))
+        bitangent = normalize(torch.linalg.cross(normal, tangent))
+        # B, 3, 3
+        row_world_basis = torch.stack([tangent, bitangent, normal], dim=1).reshape(B, 3, 3)
+
+        # GGXVNDF
+        # V_l = torch.matmul(torch.inverse(row_world_basis.permute(0, 2, 1)), viewdir.unsqueeze(-1)).squeeze(-1)
+        # ic((normal*viewdir).sum(dim=-1).min(), (normal*viewdir).sum(dim=-1).max())
+        # ic(1, V_l.min(dim=0), V_l.max(dim=0))
+        V_l = torch.matmul(row_world_basis, viewdir.unsqueeze(-1)).squeeze(-1)
+        # ic(2, V_l.min(dim=0), V_l.max(dim=0))
+        r1_c = r1.squeeze(-1)
+        r2_c = r2.squeeze(-1)
+
+        angs = self.draw(B, num_samples).to(device)
+
+        # here is where things get really large
+        u1 = angs[..., 0]
+        u2 = angs[..., 1]
+
+        # stretch and mask stuff to reduce memory
+        r_mask1 = r1_c.reshape(-1, 1).expand(u1.shape)[ray_mask]
+        r_mask2 = r2_c.reshape(-1, 1).expand(u1.shape)[ray_mask]
+
+        u1_mask = u1[ray_mask]
+        u2_mask = u2[ray_mask]
+        row_world_basis_mask = row_world_basis.permute(0, 2, 1).reshape(B, 1, 3, 3).expand(B, num_samples, 3, 3)[ray_mask]
+
+        theta = u1_mask * math.pi
+        phi = 2 * u2_mask * math.pi
+        sphere_noise = torch.stack([
+            torch.cos(theta) * torch.cos(phi),
+            torch.cos(theta) * torch.sin(phi),
+            -torch.sin(theta),
+        ], dim=-1)
+
+        # so this function is the inverse of the CDF
+        H_l = normalize(r_mask1.reshape(-1, 1) * sphere_noise + torch.tensor([0.0, 0.0, 1.0], device=device).reshape(1, -1))
+
+        first = torch.zeros_like(ray_mask)
+        first[:, 0] = True
+        H_l[first[ray_mask], 0] = 0
+        H_l[first[ray_mask], 1] = 0
+        H_l[first[ray_mask], 2] = 1
+
+        H = torch.matmul(row_world_basis_mask, H_l.unsqueeze(-1)).squeeze(-1)
+        # H = torch.einsum('bni,bij->bnj', H_l, row_world_basis)
+
+        V = viewdir.unsqueeze(1).expand(-1, num_samples, 3)[ray_mask]
+        # N = normal.reshape(-1, 1, 3).expand(-1, num_samples, 3)[ray_mask]
+        L = (2.0 * (V * H).sum(dim=-1, keepdim=True) * H - V)
+
+        return L, row_world_basis_mask
+
+    def calculate_mipval(self, H, V, N, ray_mask, roughness, eps=torch.finfo(torch.float32).eps):
+        num_samples = ray_mask.shape[1]
+        H_l = torch.matmul(row_world_basis.permute(0, 2, 1), H.unsqueeze(-1)).squeeze(-1)
+        sphere_noise = (H_l - torch.tensor([0.0, 0.0, 1.0], device=device).reshape(1, -1)) / roughness
+
+        NdotH = (H * N).sum(dim=-1).abs().clip(min=eps, max=1)
+        HdotV = (H * V).sum(dim=-1).abs().clip(min=eps, max=1)
+        NdotV = (N * V).sum(dim=-1).abs().clip(min=eps, max=1)
+        logD = 2*torch.log(roughness.clip(min=eps))# - 2*torch.log((NdotH**2*(roughness**2-1)+1).clip(min=eps))
+        # ic(NdotH.shape, NdotH, D, D.mean())
+        # px.scatter(x=NdotH[0].detach().cpu().flatten(), y=D[0].detach().cpu().flatten()).show()
+        # assert(False)
+        lpdf = logD# + torch.log(HdotV) - torch.log(NdotV)
+        # pdf = D * HdotV / NdotV / roughness.reshape(-1, 1)
+        # pdf = NdotH / 4 / HdotV
+        # pdf = D# / NdotH
+        indiv_num_samples = ray_mask.sum(dim=1, keepdim=True).expand(-1, num_samples)[ray_mask]
+        mipval = -torch.log(indiv_num_samples.clip(min=1)) - lpdf
+        return mipval
+
+class GGXSampler(PseudoRandomSampler):
+
+    def sample(self, viewdir, normal, r1, r2, ray_mask):
+        num_samples = ray_mask.shape[1]
         # viewdir: (B, 3)
         # normal: (B, 3)
         # r1, r2: B roughness values for anisotropic roughness
@@ -105,8 +242,8 @@ class GGXSampler(torch.nn.Module):
         # ic(1, V_l.min(dim=0), V_l.max(dim=0))
         V_l = torch.matmul(row_world_basis, viewdir.unsqueeze(-1)).squeeze(-1)
         # ic(2, V_l.min(dim=0), V_l.max(dim=0))
-        r1_c = r1.clip(min=self.min_roughness).squeeze(-1)
-        r2_c = r2.clip(min=self.min_roughness).squeeze(-1)
+        r1_c = r1.squeeze(-1)
+        r2_c = r2.squeeze(-1)
         V_stretch = normalize(torch.stack([r1_c*V_l[..., 0], r2_c*V_l[..., 1], V_l[..., 2]], dim=-1)).unsqueeze(1)
         T1 = torch.where(V_stretch[..., 2:3] < 0.999, normalize(torch.linalg.cross(V_stretch, z_up.unsqueeze(1), dim=-1)), x_up.unsqueeze(1))
         T2 = normalize(torch.linalg.cross(T1, V_stretch, dim=-1))
@@ -122,9 +259,9 @@ class GGXSampler(torch.nn.Module):
         a_mask = a.expand(u1.shape)[ray_mask]
 
         r_mask_u1 = r1_c.reshape(-1, 1).expand(u1.shape)[ray_mask]
-        r_mask1 = r_mask_u1.clip(min=self.min_roughness)
+        r_mask1 = r_mask_u1
         r_mask_u2 = r2_c.reshape(-1, 1).expand(u1.shape)[ray_mask]
-        r_mask2 = r_mask_u2.clip(min=self.min_roughness)
+        r_mask2 = r_mask_u2
 
         z_mask = z.expand(u1.shape)[ray_mask]
         u1_mask = u1[ray_mask]
@@ -140,7 +277,8 @@ class GGXSampler(torch.nn.Module):
         P2 = (r*safemath.safe_sin(phi)*torch.where(u2_mask < a_mask, torch.tensor(1.0, device=device), z_mask)).unsqueeze(-1)
         # ic((1-a).min(), a.min(), a.max(), phi.min(), phi.max(), (1-a).max())
         N_stretch = P1*T1_mask + P2*T2_mask + (1 - P1*P1 - P2*P2).clip(min=0).sqrt() * V_stretch_mask
-        H_l = normalize(torch.stack([r_mask1*N_stretch[..., 0], r_mask2*N_stretch[..., 1], N_stretch[..., 2].clip(min=0)], dim=-1))
+        # H_l = normalize(torch.stack([r_mask1*N_stretch[..., 0], r_mask2*N_stretch[..., 1], N_stretch[..., 2].clip(min=0)], dim=-1))
+        H_l = normalize(torch.stack([r_mask1*N_stretch[..., 0], r_mask2*N_stretch[..., 1], N_stretch[..., 2]], dim=-1))
 
         first = torch.zeros_like(ray_mask)
         first[:, 0] = True
@@ -155,32 +293,25 @@ class GGXSampler(torch.nn.Module):
         # N = normal.reshape(-1, 1, 3).expand(-1, num_samples, 3)[ray_mask]
         L = (2.0 * (V * H).sum(dim=-1, keepdim=True) * H - V)
 
-        # calculate mipval, which will be used to calculate the mip level
-        # half is considered to be the microfacet normal
-        # viewdir = incident direction
-
-        # H = normalize(L + viewdir.reshape(-1, 1, 3))
-
-
         return L, row_world_basis_mask
 
-def calculate_mipval(H, V, N, ray_mask, roughness, eps=torch.finfo(torch.float32).eps):
-    num_samples = ray_mask.shape[1]
-    NdotH = ((H * N).sum(dim=-1)).clip(min=eps, max=1)
-    HdotV = (H * V).sum(dim=-1).abs()
-    NdotV = (N * V).sum(dim=-1).abs().clip(min=eps, max=1)
-    logD = 2*torch.log(roughness.clip(min=eps)) - 2*torch.log((NdotH**2*(roughness**2-1)+1).clip(min=eps))
-    # ic(NdotH.shape, NdotH, D, D.mean())
-    # px.scatter(x=NdotH[0].detach().cpu().flatten(), y=D[0].detach().cpu().flatten()).show()
-    # assert(False)
-    # ic(NdotH.mean())
-    lpdf = logD + torch.log(HdotV.clip(min=eps)) - torch.log(NdotV)# - torch.log(roughness.clip(min=1e-5))
-    # pdf = D * HdotV / NdotV / roughness.reshape(-1, 1)
-    # pdf = NdotH / 4 / HdotV
-    # pdf = D# / NdotH
-    indiv_num_samples = ray_mask.sum(dim=1, keepdim=True).expand(-1, num_samples)[ray_mask]
-    mipval = -torch.log(indiv_num_samples.clip(min=1)) - lpdf
-    return mipval
+    def calculate_mipval(self, H, V, N, ray_mask, roughness, eps=torch.finfo(torch.float32).eps):
+        num_samples = ray_mask.shape[1]
+        NdotH = ((H * N).sum(dim=-1)).abs().clip(min=eps, max=1)
+        HdotV = (H * V).sum(dim=-1).abs().clip(min=eps, max=1)
+        NdotV = (N * V).sum(dim=-1).abs().clip(min=eps, max=1)
+        logD = 2*torch.log(roughness.clip(min=eps)) - 2*torch.log((NdotH**2*(roughness**2-1)+1).clip(min=eps))
+        # ic(NdotH.shape, NdotH, D, D.mean())
+        # px.scatter(x=NdotH[0].detach().cpu().flatten(), y=D[0].detach().cpu().flatten()).show()
+        # assert(False)
+        # ic(NdotH.mean())
+        lpdf = logD + torch.log(HdotV) - torch.log(NdotV)# - torch.log(roughness.clip(min=1e-5))
+        # pdf = D * HdotV / NdotV / roughness.reshape(-1, 1)
+        # pdf = NdotH / 4 / HdotV
+        # pdf = D# / NdotH
+        indiv_num_samples = ray_mask.sum(dim=1, keepdim=True).expand(-1, num_samples)[ray_mask]
+        mipval = -torch.log(indiv_num_samples.clip(min=1)) - lpdf
+        return mipval
 
 class Phong(torch.nn.Module):
     def __init__(self, in_channels):
@@ -274,8 +405,8 @@ class PBR(torch.nn.Module):
 
 
 class MLPBRDF(torch.nn.Module):
-    def __init__(self, in_channels, h_encoder=None, d_encoder=None, v_encoder=None, n_encoder=None, l_encoder=None, feape=6, featureC=128, num_layers=2, dotpe=0,
-                 activation='sigmoid', mul_LdotN=True, bias=0, lr=1e-4, shift=0):
+    def __init__(self, in_channels, h_encoder=None, d_encoder=None, v_encoder=None, n_encoder=None, l_encoder=None, feape=6, dotpe=0,
+                 activation='sigmoid', mul_LdotN=True, bias=0, lr=1e-4, shift=0, **kwargs):
         super().__init__()
 
         self.in_channels = in_channels
@@ -304,24 +435,7 @@ class MLPBRDF(torch.nn.Module):
             self.in_mlpC += self.l_encoder.dim() + 3
 
         self.feape = feape
-        if num_layers > 0:
-            self.mlp = torch.nn.Sequential(
-                torch.nn.Linear(self.in_mlpC, featureC),
-                # torch.nn.ReLU(inplace=True),
-                # torch.nn.Linear(featureC, featureC),
-                # torch.nn.BatchNorm1d(featureC),
-                *sum([[
-                        torch.nn.ReLU(inplace=True),
-                        torch.nn.Linear(featureC, featureC),
-                        # torch.nn.BatchNorm1d(featureC)
-                    ] for _ in range(num_layers-2)], []),
-                torch.nn.ReLU(inplace=True),
-                torch.nn.Linear(featureC, 4),
-            )
-            torch.nn.init.constant_(self.mlp[-1].bias, shift)
-            # self.mlp.apply(self.init_weights)
-        else:
-            self.mlp = torch.nn.Identity()
+        self.mlp = util.create_mlp(self.in_mlpC, 4, **kwargs)
         # self.activation = str2fn(activation)
 
     def init_weights(self, m):
@@ -412,10 +526,8 @@ class MLPBRDF(torch.nn.Module):
         # ic(f0.mean())
         ref_weight = mlp_out[..., :3]
 
-        LdotN = LdotN.clip(min=0)
-
         if self.mul_LdotN:
-            weight = ref_weight * LdotN.detach()
+            weight = ref_weight * LdotN.abs().detach()
         else:
             weight = ref_weight
 

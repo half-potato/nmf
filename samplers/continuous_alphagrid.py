@@ -83,6 +83,9 @@ class ContinuousAlphagrid(torch.nn.Module):
                  shrink_iters=[],
                  grid_size=128):
         super().__init__()
+        # I took this from ngp_pl It's some kind of stepsize calculation with a threshold of 0.01 I think
+        threshold = 0.01*1024/3**0.5
+
 
         # explanation
         # this stores and updates a cascade of masks for use in rejecting samples before they reach
@@ -103,7 +106,7 @@ class ContinuousAlphagrid(torch.nn.Module):
         self.disable_cascade = disable_cascade
         if self.disable_cascade:
             self.cascade = 1
-        ic(self.cascade, self.bound)
+        ic(self.cascade, self.bound, threshold)
         self.grid_size = grid_size
         self.multiplier = int(multiplier)
         # self.cascade = 1 + math.ceil(math.log2(bound))
@@ -522,12 +525,12 @@ class ContinuousAlphagrid(torch.nn.Module):
         # ema update
         valid_mask = (self.density_grid >= 0) & (tmp_grid >= 0)
         self.density_grid[valid_mask] = torch.maximum(self.density_grid[valid_mask] * decay, tmp_grid[valid_mask])
-        self.mean_density = torch.mean(self.density_grid.clamp(min=0)).item()
+        self.mean_density = torch.mean(self.density_grid[valid_mask]).item()
         self.iter_density += 1
 
         # convert to bitfield
-        self.active_density_thresh = min(self.mean_density*self.stepsize, self.threshold)
-        self.density_bitfield = raymarching.packbits(self.density_grid*self.stepsize, self.active_density_thresh, self.density_bitfield)
+        self.active_density_thresh = min(self.mean_density, self.threshold)
+        self.density_bitfield = raymarching.packbits(self.density_grid, self.active_density_thresh, self.density_bitfield)
 
         ### update step counter
 

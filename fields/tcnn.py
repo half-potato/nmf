@@ -5,14 +5,10 @@ import numpy as np
 from icecream import ic
 from mutils import normalize
 import torch.nn.functional as F
-
-def init_weights(m):
-    if isinstance(m, torch.nn.Linear):
-        # torch.nn.init.xavier_uniform_(m.weight, gain=np.sqrt(2))
-        torch.nn.init.kaiming_uniform_(m.weight)
+from models import util
 
 class TCNNRF(TensorBase):
-    def __init__(self, aabb, encoder_conf, grid_size, enc_dim, roughness_bias=-1, featureC=128, num_layers=4, tint_offset=0, diffuse_offset=-1, **kwargs):
+    def __init__(self, aabb, encoder_conf, grid_size, enc_dim, roughness_bias=-1, tint_offset=0, diffuse_offset=-1, **kwargs):
         super().__init__(aabb, **kwargs)
 
         # self.nSamples = 1024                                                                                                                                                                                        
@@ -35,15 +31,7 @@ class TCNNRF(TensorBase):
         self.encoding = tcnn.Encoding(3, encoding_config=dict(per_level_scale=per_level_scale, **encoder_conf))
         self.app_dim = encoder_conf.n_features_per_level * encoder_conf.n_levels
         # self.sigma_net = tcnn.Network(n_input_dims=self.app_dim, n_output_dims=1, network_config=dict(**network_config))
-        self.sigma_net = torch.nn.Sequential(
-            torch.nn.Linear(self.app_dim, featureC),
-            *sum([[
-                    torch.nn.ReLU(inplace=True),
-                    torch.nn.Linear(featureC, featureC),
-                ] for _ in range(num_layers-2)], []),
-            torch.nn.ReLU(inplace=True),
-            torch.nn.Linear(featureC, enc_dim)
-        )
+        self.sigma_net = util.create_mlp(self.app_dim, enc_dim, **kwargs)
 
     def get_optparam_groups(self, lr_scale=1):
         grad_vars = [

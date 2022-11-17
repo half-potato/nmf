@@ -139,12 +139,12 @@ params:
   TV_weight_bg: 0
   envmap_lambda: 0
   brdf_lambda: 0
-  normal_lambda: 3e-3
-  final_normal_lambda: 3e-3
+  pred_lambda: 3e-3
+  final_pred_lambda: 3e-3
   diffuse_lambda: 0
-  backwards_rays_lambda: 0.1
+  ori_lambda: 0.1
   final_ori_lambda: 0.1
-  floater_lambda: 0
+  distortion_lambda: 0
   charbonier_eps: 1e-3
   ortho_weight: 0
 

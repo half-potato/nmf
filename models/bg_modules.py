@@ -128,7 +128,7 @@ class HierarchicalCubeMap(torch.nn.Module):
         return self.bg_mats[0].device
 
     def get_optparam_groups(self, lr_scale=1):
-        lr_scale = 1
+        # lr_scale = 1
         return [
             {'params': self.bg_mats,
              'betas': self.betas,
@@ -280,7 +280,6 @@ class HierarchicalCubeMap(torch.nn.Module):
         max_level = self.num_levels if max_level is None else max_level
         V = viewdirs.reshape(1, -1, 1, 3).contiguous()
         miplevel = self.sa2mip(viewdirs, saSample)
-        # ic(viewdirs, miplevel)
 
         sumemb = 0
         for bg_mat in self.iter_levels():

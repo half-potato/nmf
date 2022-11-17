@@ -5,7 +5,7 @@ import numpy as np
 import utils
 
 class TensorBase(torch.nn.Module):
-    def __init__(self, aabb, density_shift, activation, lr, lr_net, contract_space=False, distance_scale=25, num_pretrain=0):
+    def __init__(self, aabb, density_shift, activation, lr, lr_net, contract_space=False, distance_scale=25, num_pretrain=0, **kwargs):
         super().__init__()
         self.lr = lr
         self.lr_net = lr_net

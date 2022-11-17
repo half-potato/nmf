@@ -144,7 +144,7 @@ class _DistortionLoss(torch.autograd.Function):
         dm, dw, dt = ctx.saved_tensors
         return daccum * dm, daccum * dw, daccum * dt
 
-distortion_loss = _DistortionLoss.apply
+calc_distortion_loss = _DistortionLoss.apply
 
 if __name__ == "__main__":
     B = 3
