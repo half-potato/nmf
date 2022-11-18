@@ -395,10 +395,10 @@ class MLPDiffuse(torch.nn.Module):
         ambient = torch.sigmoid(mlp_out[..., 6:7]-2)
         # r1 = F.softplus(mlp_out[..., 7:8]+self.roughness_offset) + 1e-3
         # r2 = F.softplus(mlp_out[..., 8:9]+self.roughness_offset) + 1e-3
-        r1 = torch.sigmoid(mlp_out[..., 7:8]+self.roughness_offset) + 1e-3
-        r2 = torch.sigmoid(mlp_out[..., 8:9]+self.roughness_offset) + 1e-3
+        r1 = torch.sigmoid(mlp_out[..., 7:8]+self.roughness_offset)*(1-1e-3) + 1e-3
+        r2 = torch.sigmoid(mlp_out[..., 8:9]+self.roughness_offset)*(1-1e-3) + 1e-3
         tint = torch.sigmoid((mlp_out[..., 3:6]+self.tint_offset))
-        f0 = (torch.sigmoid((mlp_out[..., 9:10]+3))+0.001).clip(max=1)
+        f0 = torch.sigmoid((mlp_out[..., 9:10]+3))*(1-0.001)+0.001
         diffuse = torch.sigmoid((mlp_out[..., :3]+self.diffuse_offset))
 
         # ic(f0)
@@ -431,12 +431,6 @@ class MLPNormal(torch.nn.Module):
         self.allocation = allocation
         self.size_multi = size_multi
         self.mlp = util.create_mlp(self.in_mlpC, 3, bias=False, **kwargs)
-
-        # self.mlp.apply(self.init_weights)
-
-    def init_weights(self, m):
-        if isinstance(m, nn.Linear):
-            torch.nn.init.xavier_uniform_(m.weight, gain=torch.nn.init.calculate_gain('relu'))
 
     def forward(self, pts, features, **kwargs):
         size = pts[..., 3:4].expand(pts[..., :3].shape)

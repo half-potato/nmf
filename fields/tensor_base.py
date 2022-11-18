@@ -41,16 +41,12 @@ class TensorBase(torch.nn.Module):
             return normed
 
     def feature2density(self, density_features):
-        if self.activation == "softplus_shift":
-            return F.softplus(density_features+self.density_shift)
-        elif self.activation == "softplus":
-            return F.softplus(density_features.clamp(-15, 60))
+        if self.activation == "softplus":
+            return F.softplus(density_features.clamp(-15, 60)+self.density_shift)
         elif self.activation == "relu":
-            return F.relu(density_features)
-        elif self.activation == "relu_shift":
             return F.relu(density_features+self.density_shift)
         elif self.activation == "exp":
-            return torch.exp(density_features.clamp(-15, 5))
+            return torch.exp(density_features.clamp(-15, 5)+self.density_shift)
         elif self.activation == "identity":
             return density_features
 

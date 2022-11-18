@@ -30,7 +30,7 @@ class Selector:
         # b = num_missing - torch.rand_like(weight) * app_mask.sum(dim=1, keepdim=True)
         # pt_limit[full_bounce_mask] += (b < 0)[full_bounce_mask]
 
-        num_samples = pt_limit.floor().max().int()
+        num_samples = pt_limit.floor().quantile(0.999).int()
         ray_mask = torch.arange(num_samples, device=device).reshape(1, -1) < pt_limit[app_mask].reshape(-1, 1).floor()
         bright_limit = pt_limit[app_mask].reshape(-1, 1)*(1-self.percent_bright)
         main_ray_mask = torch.arange(num_samples, device=device).reshape(1, -1) < bright_limit.floor()

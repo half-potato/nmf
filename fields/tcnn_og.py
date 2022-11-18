@@ -13,7 +13,7 @@ def init_weights(m):
         torch.nn.init.kaiming_uniform_(m.weight)
 
 class TCNNRF(TensorBase):
-    def __init__(self, aabb, encoder_conf, grid_size, enc_dim, roughness_bias=-1, tint_offset=0, diffuse_offset=-1, **kwargs):
+    def __init__(self, aabb, encoder_conf, grid_size, enc_dim, roughness_bias=-1, tint_offset=0, diffuse_offset=-1, enc_mul=1, **kwargs):
         super().__init__(aabb, **kwargs)
 
         # self.nSamples = 1024                                                                                                                                                                                        
@@ -27,6 +27,7 @@ class TCNNRF(TensorBase):
         self.tint_offset = tint_offset
         self.diffuse_offset = diffuse_offset
         self.roughness_bias = roughness_bias
+        self.enc_mul = enc_mul
 
         self.separate_appgrid = False
 
@@ -58,19 +59,19 @@ class TCNNRF(TensorBase):
 
     def compute_feature(self, xyz_normed):
         feat = self.encoding(self.coords2input(xyz_normed)).type(xyz_normed.dtype)
-        h = self.sigma_net(feat)
+        h = self.sigma_net(feat*self.enc_mul)
         sigfeat = h[:, 0]
 
         return self.feature2density(sigfeat).reshape(-1), h
 
     def compute_appfeature(self, xyz_normed):
         feat = self.encoding(xyz_normed[..., :3].reshape(-1, 3).contiguous()).type(xyz_normed.dtype)
-        h = self.sigma_net(feat)
+        h = self.sigma_net(feat*self.enc_mul)
         return h
 
     def compute_densityfeature(self, xyz_normed, activate=True):
         feat = self.encoding(self.coords2input(xyz_normed)).type(xyz_normed.dtype)
-        x = self.sigma_net(feat)
+        x = self.sigma_net(feat*self.enc_mul)
         sigfeat = x[:, 0]
         if activate:
             return self.feature2density(sigfeat).reshape(-1)

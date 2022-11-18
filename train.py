@@ -293,7 +293,7 @@ def reconstruction(args):
         return optimizer, scheduler
     optimizer, scheduler = init_optimizer(grad_vars)
     # x**params.n_iters = init/final
-    ori_decay = math.exp(math.log(params.final_ori_lambda / params.ori_lambda) / params.n_iters) if params.ori_lambda > 0 and params.final_ori_lambda is not None else 0
+    ori_decay = math.exp(math.log(params.final_ori_lambda / params.ori_lambda) / params.n_iters) if params.ori_lambda > 0 and params.final_ori_lambda is not None else 1
     normal_decay = math.exp(math.log(params.final_pred_lambda / params.pred_lambda) / params.n_iters) if params.pred_lambda > 0 and params.final_pred_lambda is not None else 1
     ic(ori_decay, ori_decay**params.n_iters * params.ori_lambda)
     ic(normal_decay)
@@ -361,9 +361,9 @@ def reconstruction(args):
                     params.envmap_lambda * (envmap_reg-0.05).clip(min=0) + \
                     params.diffuse_lambda * diffuse_reg + \
                     params.brdf_lambda * brdf_reg + \
-                    params.pred_lambda*prediction_loss
+                    params.pred_lambda * prediction_loss
 
-                # params.ori_lambda *= ori_decay
+                params.ori_lambda *= ori_decay
                 params.pred_lambda *= normal_decay
 
                 if tensorf.visibility_module is not None:

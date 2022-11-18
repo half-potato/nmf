@@ -98,6 +98,8 @@ class TensorNeRF(torch.nn.Module):
         # self.sampler.update(self.rf, init=True)
         # self.sampler2.update(self.rf, init=True)
 
+        self._test_var = False
+
     def get_device(self):
         return self.rf.units.device
 
@@ -212,6 +214,7 @@ class TensorNeRF(torch.nn.Module):
             self.sampler.update(self.rf, init=True)
         if iter > batch_mul*self.cold_start_bg_iters:
             self.detach_bg = False
+        self._test_var = iter > 400
         self.anoise *= self.anoise_decay
         self.bg_noise *= self.bg_noise_decay
         return require_reassignment
@@ -695,6 +698,7 @@ class TensorNeRF(torch.nn.Module):
                     if self.detach_bg:
                         tinted_ref_rgb.detach_()
                     reflect_rgb[bounce_mask] = tinted_ref_rgb
+                    # ic(_brdf_rgb.mean(dim=0), tinted_ref_rgb.mean(dim=0), incoming_light.mean(dim=0), diffuse.mean(dim=0))
 
                     # s = row_mask_sum(incoming_light.detach(), ray_mask) / (ray_mask.sum(dim=1)+1e-8)[..., None]
                     # debug[full_bounce_mask] += s# / (s+1)
@@ -866,12 +870,8 @@ class TensorNeRF(torch.nn.Module):
             # viewdirs point inward. -viewdirs aligns with pred_norms. So we want it below 0
             o_world_normal = world_normal if self.orient_world_normals else pred_norms
             aweight = pweight[papp_mask]
-            ori_loss = ((
-                torch.matmul(viewdirs[app_mask].reshape(-1, 1, 3).detach(), o_world_normal[papp_mask].reshape(-1, 3, 1))
-                     .reshape(aweight.shape))
-                .clamp(min=0))**2
-            # debug[ray_valid] = ori_loss.reshape(-1, 1).expand(-1, 3)
-            ori_loss = (aweight * ori_loss).sum() / aweight.sum().clip(min=1e-5)
+            NdotV = (-viewdirs[app_mask].reshape(-1, 3).detach() * o_world_normal[papp_mask].reshape(-1, 3)).sum(dim=-1)
+            ori_loss = (aweight * NdotV.clamp(max=0)**2).sum() / B
 
             midpoint = torch.cat([
                 z_vals,
@@ -888,9 +888,12 @@ class TensorNeRF(torch.nn.Module):
             # distortion_loss = torch.tensor(0.0, device=device) 
 
             if self.use_predicted_normals:
-                align_world_loss = 2*(1-(pred_norms * world_normal.detach()).sum(dim=-1))#**0.5
-                # align_world_loss = torch.linalg.norm(pred_norms - world_normal, dim=-1)**2
-                prediction_loss = (aweight.detach() * align_world_loss[papp_mask]).sum() / B
+                if self._test_var:
+                    align_world_loss = 2*(1-(pred_norms * world_normal).sum(dim=-1))#**0.5
+                    prediction_loss = (aweight * align_world_loss[papp_mask]).sum() / B
+                else:
+                    align_world_loss = 2*(1-(pred_norms * world_normal.detach()).sum(dim=-1))#**0.5
+                    prediction_loss = 1e3 * (aweight.detach() * align_world_loss[papp_mask]).sum() / B
             else:
                 prediction_loss = torch.tensor(0.0)
 
@@ -905,7 +908,7 @@ class TensorNeRF(torch.nn.Module):
                 output['envmap_reg'] = torch.tensor(0.0)
 
             output['brdf_reg'] = -brdf_brightness-tint.mean()
-            output['diffuse_reg'] = diffuse.mean()-tint.mean()
+            output['diffuse_reg'] = -roughness.mean()
             output['prediction_loss'] = prediction_loss
             output['ori_loss'] = ori_loss
             output['distortion_loss'] = distortion_loss

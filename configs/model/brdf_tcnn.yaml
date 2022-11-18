@@ -154,7 +154,8 @@ arch:
     initializer: 'kaiming'
     lr: 1e-3
     tint_offset: -4
-    diffuse_offset: -1.58
+    diffuse_offset: -1.1
+    roughness_offset: 3
     # allocation: 7
 
   normal_module:
@@ -168,7 +169,7 @@ arch:
     feape: 0
 
     hidden_w: 64
-    num_layers: 4
+    num_layers: 1
     initializer: 'kaiming'
     size_multi: 2.5e-3
     # allocation: 3
@@ -188,9 +189,9 @@ params:
   envmap_lambda: 5e-5
   pred_lambda: 1e-2
   final_pred_lambda: Null
-  diffuse_lambda: 0
+  diffuse_lambda: 0 #5e-5
   ori_lambda: 0.1
-  final_ori_lambda: 0.05
+  final_ori_lambda: Null
   brdf_lambda: 0
   
   distortion_lambda: 0 # 1e-3
