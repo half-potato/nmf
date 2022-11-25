@@ -132,7 +132,6 @@ def reconstruction(args):
     # init log file
     os.makedirs(logfolder, exist_ok=True)
     os.makedirs(f'{logfolder}/imgs_vis', exist_ok=True)
-    OmegaConf.save(config=args, f=f'{logfolder}/config.yaml')
     summary_writer = SummaryWriter(logfolder)
 
     aabb_scale = 1 if not hasattr(args.dataset, "aabb_scale") else args.dataset.aabb_scale
@@ -274,6 +273,16 @@ def reconstruction(args):
 
     # step_size = 0.015
     step_size = tensorf.sampler.stepsize
+    target_sigma = -math.log(1-params.start_density) / (step_size * tensorf.rf.distance_scale)
+
+    # compute density_shift assume exponential activation
+    density_shift = math.log(target_sigma) - math.log(sigma_feat.mean().item())
+    ic(target_sigma, sigma_feat.mean(), density_shift)
+    tensorf.rf.density_shift += density_shift
+    args.field.density_shift = tensorf.rf.density_shift
+
+    xyz = torch.rand(20000, 3, device=device)*2-1
+    sigma_feat = tensorf.rf.compute_densityfeature(xyz)
     alpha = 1-torch.exp(-sigma_feat * step_size * tensorf.rf.distance_scale)
     print(f"Mean alpha: {alpha.detach().mean().item():.06f}.")
 
@@ -311,6 +320,8 @@ def reconstruction(args):
     normal_decay = math.exp(math.log(params.final_pred_lambda / params.pred_lambda) / params.n_iters) if params.pred_lambda > 0 and params.final_pred_lambda is not None else 1
     ic(ori_decay, ori_decay**params.n_iters * params.ori_lambda)
     ic(normal_decay)
+
+    OmegaConf.save(config=args, f=f'{logfolder}/config.yaml')
     # if True:
     # with torch.profiler.profile(record_shapes=True, schedule=torch.profiler.schedule(wait=1, warmup=1, active=20), with_stack=True) as p:
     with torch.autograd.detect_anomaly():

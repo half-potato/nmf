@@ -205,7 +205,7 @@ params:
 
   n_iters: 30000
   charbonier_loss: false
-  start_density: 5e-3
+  start_density: 1e-2
   lr_init: 0.02
   batch_size: 4096
   lr: Null
