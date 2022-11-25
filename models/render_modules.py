@@ -411,12 +411,25 @@ class MLPDiffuse(torch.nn.Module):
             tint=tint,
         )
 
+def init_weights_multiply(m):
+    if isinstance(m, torch.nn.Linear):
+        # torch.nn.init.xavier_uniform_(m.weight, gain=np.sqrt(2))
+        m.weight.data *= 10
+
+def init_weights_kaiming_fan_out(m):
+    if isinstance(m, torch.nn.Linear):
+        # torch.nn.init.xavier_uniform_(m.weight, gain=np.sqrt(2))
+        torch.nn.init.kaiming_uniform_(m.weight, mode='fan_out')
+        m.weight.data *= 2
+        if m.bias is not None:
+            torch.nn.init.constant_(m.bias, 0)
+
 class MLPNormal(torch.nn.Module):
     in_channels: int
     feape: int
     featureC: int
     num_layers: int
-    def __init__(self, in_channels, pospe=6, feape=6, allocation=0, lr=1e-4, size_multi=2.5e-3, **kwargs):
+    def __init__(self, in_channels, pospe=6, feape=6, allocation=0, lr=1e-4, size_multi=2.5e-3, offset_geometry=False, **kwargs):
         super().__init__()
 
         in_channels = in_channels if allocation <= 0 else allocation
@@ -431,8 +444,11 @@ class MLPNormal(torch.nn.Module):
         self.allocation = allocation
         self.size_multi = size_multi
         self.mlp = util.create_mlp(self.in_mlpC, 3, bias=False, **kwargs)
+        # self.mlp[-1].apply(init_weights_kaiming_fan_out)
+        # self.mlp.apply(init_weights_multiply)
+        self.offset_geometry = offset_geometry
 
-    def forward(self, pts, features, **kwargs):
+    def forward(self, pts, features, geo_norms, **kwargs):
         size = pts[..., 3:4].expand(pts[..., :3].shape)
         pts = pts[..., :3]
         indata = []
@@ -450,10 +466,11 @@ class MLPNormal(torch.nn.Module):
             indata += [positional_encoding(features, self.feape)]
         mlp_in = torch.cat(indata, dim=-1)
         mlp_out = self.mlp(mlp_in)
+        # mlp_out = mlp_out + 1e-1*torch.randn_like(mlp_out)
         # ic(indata, mlp_out)
         # for layer in self.mlp.children():
         #     if hasattr(layer, 'weight'):
-        #         ic(layer.weight.grad, layer.weight)
+        #         ic(layer.weight, layer.bias)
 
         normals = normalize(mlp_out)
 

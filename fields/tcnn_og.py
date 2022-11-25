@@ -11,6 +11,7 @@ def init_weights(m):
     if isinstance(m, torch.nn.Linear):
         # torch.nn.init.xavier_uniform_(m.weight, gain=np.sqrt(2))
         torch.nn.init.kaiming_uniform_(m.weight)
+        torch.nn.init.constant_(m.bias, 0)
 
 class TCNNRF(TensorBase):
     def __init__(self, aabb, encoder_conf, grid_size, enc_dim, roughness_bias=-1, tint_offset=0, diffuse_offset=-1, enc_mul=1, **kwargs):
@@ -37,9 +38,9 @@ class TCNNRF(TensorBase):
         self.encoding = tcnn.Encoding(3, encoding_config=dict(per_level_scale=per_level_scale, **encoder_conf))
         app_dim = encoder_conf.n_features_per_level * encoder_conf.n_levels
         # self.sigma_net = tcnn.Network(n_input_dims=self.app_dim, n_output_dims=1, network_config=dict(**network_config))
-        self.sigma_net = util.create_mlp(app_dim, enc_dim, **kwargs)
+        self.sigma_net = util.create_mlp(app_dim, enc_dim+1, **kwargs)
         self.app_dim = enc_dim
-        self.sigma_net.apply(init_weights)
+        # self.sigma_net.apply(init_weights)
 
     def get_optparam_groups(self, lr_scale=1):
         grad_vars = [
@@ -60,13 +61,22 @@ class TCNNRF(TensorBase):
     def compute_feature(self, xyz_normed):
         feat = self.encoding(self.coords2input(xyz_normed)).type(xyz_normed.dtype)
         h = self.sigma_net(feat*self.enc_mul)
+        # x = feat
+        # for layer in self.sigma_net.children():
+        #     x = layer(x)
+        #     if hasattr(layer, 'weight'):
+        #         ic(layer.bias)
+        #     # ic(x)
+        # ic("hi")
         sigfeat = h[:, 0]
+        h = h[:, 1:]
 
         return self.feature2density(sigfeat).reshape(-1), h
 
     def compute_appfeature(self, xyz_normed):
         feat = self.encoding(xyz_normed[..., :3].reshape(-1, 3).contiguous()).type(xyz_normed.dtype)
         h = self.sigma_net(feat*self.enc_mul)
+        h = h[:, 1:]
         return h
 
     def compute_densityfeature(self, xyz_normed, activate=True):

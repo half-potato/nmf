@@ -8,7 +8,7 @@ arch:
   infinity_border: False
   eval_batch_size: 4096
 
-  anoise: 1.0
+  anoise: 0.0
   anoise_decay: 0.9995
 
   bg_noise: 0.0
@@ -17,6 +17,7 @@ arch:
 
   max_brdf_rays: [3194304]
   cold_start_bg_iters: 0
+  detach_N_iters: 100
   normalize_brdf: False
   use_predicted_normals: True
   orient_world_normals: False
@@ -93,7 +94,7 @@ arch:
     # num_layers: 4
     # feape: 0
     # featureC: 128
-    mul_LdotN: False
+    mul_LdotN: True
     feape: 0
     dotpe: -1
     h_encoder:
@@ -130,11 +131,11 @@ arch:
     activation: 'exp'
     power: 2
     stds: []
-    lr: 1
+    lr: 0.1
     init_val: -1.33
     mul_lr: 0
     brightness_lr: 0
-    betas: [0.9, 0.999]
+    betas: [0.0, 0.0]
     mul_betas: [0.9, 0.99]
     mipbias_lr: 1e-4
     mipnoise: 0.0
@@ -165,21 +166,22 @@ arch:
     # pospe: -1
     # feape: 2
     # pospe: 0
-    pospe: -1
+    pospe: 0
     feape: 0
 
     hidden_w: 64
-    num_layers: 1
-    initializer: 'kaiming'
+    num_layers: 3
+    initializer: 'kaiming_fanout'
     size_multi: 2.5e-3
     # allocation: 3
+    offset_geometry: False
 
   rf: 'placeholder'
 
 params:
   L1_weight_inital: 0
   L1_weight_rest: 0
-  clip_grad: Null
+  clip_grad: 1e-2
   eps: 1e-8
   betas: [0.9, 0.999]
 

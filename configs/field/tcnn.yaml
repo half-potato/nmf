@@ -7,9 +7,9 @@ activation: 'exp'
 # activation: 'softplus'
 hidden_w: 64
 num_layers: 4
-initializer: 'xavier'
+# initializer: 'xavier'
 enc_mul: 1
-# initializer: 'kaiming'
+initializer: 'kaiming_fanout'
 encoder_conf:
     otype: "HashGrid"
     n_levels: 16
@@ -18,7 +18,7 @@ encoder_conf:
     base_resolution: 16
 lr: 1e-3
 lr_net: 1e-3
-num_pretrain: 1
+num_pretrain: 0
 tint_offset: 0
 diffuse_offset: -0.477
 # app_dim: 16
