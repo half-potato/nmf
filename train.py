@@ -322,9 +322,9 @@ def reconstruction(args):
     ic(normal_decay)
 
     OmegaConf.save(config=args, f=f'{logfolder}/config.yaml')
-    # if True:
+    if True:
     # with torch.profiler.profile(record_shapes=True, schedule=torch.profiler.schedule(wait=1, warmup=1, active=20), with_stack=True) as p:
-    with torch.autograd.detect_anomaly():
+    # with torch.autograd.detect_anomaly():
         for iteration in pbar:
 
             # if iteration < 150*batch_mul:

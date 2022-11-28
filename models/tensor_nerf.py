@@ -698,11 +698,18 @@ class TensorNeRF(torch.nn.Module):
                     brdf_rgb[full_bounce_mask] = _brdf_rgb
                     brdf_brightness = _brdf_rgb.mean()
 
-                    spec_color = row_mask_sum(incoming_light * brdf_weight, ray_mask) / norm
-                    tinted_ref_rgb = spec_color
+                    # spec_color = row_mask_sum(incoming_light * brdf_weight, ray_mask) / norm
+                    # tinted_ref_rgb = spec_color
+                    # if self.detach_bg:
+                    #     tinted_ref_rgb.detach_()
+
+                    # TODO REMOVE
+                    spec_color = row_mask_sum(incoming_light, ray_mask) / norm
+                    tinted_ref_rgb = tint[bounce_mask] * spec_color
                     if self.detach_bg:
                         tinted_ref_rgb.detach_()
                     reflect_rgb[bounce_mask] = tinted_ref_rgb
+
                     # ic(_brdf_rgb.mean(dim=0), tinted_ref_rgb.mean(dim=0), incoming_light.mean(dim=0), diffuse.mean(dim=0))
 
                     # s = row_mask_sum(incoming_light.detach(), ray_mask) / (ray_mask.sum(dim=1)+1e-8)[..., None]
@@ -910,7 +917,7 @@ class TensorNeRF(torch.nn.Module):
             else:
                 output['envmap_reg'] = torch.tensor(0.0)
 
-            output['brdf_reg'] = -brdf_brightness-tint.mean()
+            output['brdf_reg'] = -brdf_brightness
             output['diffuse_reg'] = -roughness.mean()
             output['prediction_loss'] = prediction_loss
             output['ori_loss'] = ori_loss
