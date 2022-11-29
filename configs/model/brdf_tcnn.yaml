@@ -4,7 +4,7 @@ arch:
 
   rayMarch_weight_thres: 1e-4
   recur_weight_thres: 1e-4
-  lr_scale: 5
+  lr_scale: 1
   infinity_border: False
   eval_batch_size: 4096
 
@@ -17,7 +17,7 @@ arch:
 
   max_brdf_rays: [3194304]
   cold_start_bg_iters: 0
-  detach_N_iters: 500
+  detach_N_iters: 5000
   normalize_brdf: False
   use_predicted_normals: True
   orient_world_normals: False
@@ -132,7 +132,7 @@ arch:
     power: 2
     stds: []
     lr: 0.05
-    init_val: -1.33
+    init_val: 0
     mul_lr: 0
     brightness_lr: 0
     betas: [0.0, 0.0]
@@ -200,7 +200,7 @@ arch:
 params:
   L1_weight_inital: 0
   L1_weight_rest: 0
-  clip_grad: 1
+  clip_grad: 100
   eps: 1e-8
   betas: [0.9, 0.999]
 
@@ -208,10 +208,10 @@ params:
   TV_weight_app: 0.0
   TV_weight_bg: 0
   envmap_lambda: 5e-5
-  pred_lambda: 6e-3
+  pred_lambda: 2e-4
   final_pred_lambda: Null
-  diffuse_lambda: 0 #5e-5
-  ori_lambda: 0.1
+  diffuse_lambda: 1e-8
+  ori_lambda: 0.01
   final_ori_lambda: Null
   brdf_lambda: 0
   

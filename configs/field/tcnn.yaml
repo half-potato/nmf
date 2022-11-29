@@ -8,7 +8,7 @@ activation: 'exp'
 hidden_w: 64
 num_layers: 4
 # initializer: 'xavier'
-enc_mul: 1
+enc_mul: 100
 initializer: 'kaiming_fanout'
 encoder_conf:
     otype: "HashGrid"
