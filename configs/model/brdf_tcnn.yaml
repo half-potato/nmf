@@ -140,9 +140,28 @@ arch:
     mipbias_lr: 1e-4
     mipnoise: 0.0
 
+  # diffuse_module:
+  #   _partial_: True
+  #   _target_: models.render_modules.MLPDiffuse
+  #   pospe: -1
+  #   feape: 0
+  #   # pospe: 12
+  #   # feape: 0
+  #   # view_encoder:
+  #   #   _target_: models.render_modules.PE
+  #   #   max_degree: 2
+  #   hidden_w: 64
+  #   num_layers: 3
+  #   initializer: 'kaiming'
+  #   lr: 1e-3
+  #   tint_offset: -1.1
+  #   diffuse_offset: -1.1
+  #   roughness_offset: 3
+  #   # allocation: 7
+
   diffuse_module:
     _partial_: True
-    _target_: models.render_modules.MLPDiffuse
+    _target_: models.render_modules.HydraMLPDiffuse
     pospe: -1
     feape: 0
     # pospe: 12
@@ -151,10 +170,10 @@ arch:
     #   _target_: models.render_modules.PE
     #   max_degree: 2
     hidden_w: 64
-    num_layers: 3
+    num_layers: 1
     initializer: 'kaiming'
     lr: 1e-3
-    tint_offset: 0
+    tint_offset: -1.1
     diffuse_offset: -1.1
     roughness_offset: 3
     # allocation: 7

@@ -335,6 +335,76 @@ class MLPRender(torch.nn.Module):
             tint=tint,
         )
 
+class HydraMLPDiffuse(torch.nn.Module):
+    in_channels: int
+    viewpe: int
+    feape: int
+    refpe: int
+    featureC: int
+    num_layers: int
+    def __init__(self, in_channels, pospe=12, view_encoder=None, feape=6, allocation=0, unlit_tint=False, lr=1e-4, tint_offset=-1, diffuse_offset=-2, roughness_offset=1, **kwargs):
+        super().__init__()
+
+        in_channels = in_channels if allocation <= 0 else allocation
+        self.in_mlpC = + 2*max(feape, 0)*in_channels + in_channels if feape >= 0 else 0
+        if pospe >= 0:
+            self.in_mlpC += 2*pospe*3 + 3 
+        self.unlit_tint = unlit_tint
+        self.tint_offset = tint_offset
+        self.diffuse_offset = diffuse_offset
+        self.roughness_offset = roughness_offset
+        self.lr = lr
+        self.allocation = allocation
+
+        self.view_encoder = view_encoder
+        if view_encoder is not None:
+            self.in_mlpC += self.view_encoder.dim() + 3
+        self.feape = feape
+        self.pospe = pospe
+        self.diffuse_mlp = util.create_mlp(self.in_mlpC, 3, **kwargs)
+        self.tint_mlp = util.create_mlp(self.in_mlpC, 3, **kwargs)
+        self.roughness_mlp = util.create_mlp(self.in_mlpC, 1, **kwargs)
+
+    def init_weights(self, m):
+        if isinstance(m, nn.Linear):
+            # if m.weight.shape[0] <= 60:
+            #     torch.nn.init.constant_(m.weight, np.sqrt(2) / m.weight.shape[1])
+            # else:
+            #     torch.nn.init.xavier_uniform_(m.weight, gain=np.sqrt(2))
+            torch.nn.init.xavier_uniform_(m.weight, gain=torch.nn.init.calculate_gain('relu'))
+
+    def forward(self, pts, viewdirs, features, **kwargs):
+        if self.allocation > 0:
+            features = features[..., :self.allocation]
+        B = pts.shape[0]
+        size = pts[..., 3:4].expand(pts[..., :3].shape)
+        pts = pts[..., :3]
+        indata = []
+        if self.pospe >= 0:
+            indata.append(pts)
+        if self.pospe > 0:
+            indata += [safemath.integrated_pos_enc((pts, size), 0, self.pospe)]
+
+        if self.feape >= 0:
+            indata.append(features)
+        if self.feape > 0:
+            indata += [positional_encoding(features, self.feape)]
+        if self.view_encoder is not None:
+            indata += [self.view_encoder(viewdirs, torch.tensor(1e-3, device=pts.device).expand(B)).reshape(B, -1), viewdirs]
+        mlp_in = torch.cat(indata, dim=-1)
+        diffuse = torch.sigmoid(self.diffuse_mlp(mlp_in)+self.diffuse_offset)
+        r1 = torch.sigmoid(self.roughness_mlp(mlp_in)+self.roughness_offset)
+        tint = torch.sigmoid(self.tint_mlp(mlp_in)+self.tint_offset)
+
+        # ic(f0)
+        return diffuse, tint, dict(
+            diffuse = diffuse,
+            r1 = r1,
+            r2 = r1,
+            f0 = tint,
+            tint=tint,
+        )
+
 class MLPDiffuse(torch.nn.Module):
     in_channels: int
     viewpe: int
