@@ -344,7 +344,6 @@ class TensorNeRF(torch.nn.Module):
                     # whole_valid: mask into origin rays_chunk of which B rays where able to be fully sampled.
                     # """
                     B = ray_valid.shape[0]
-                    xyz_normed = self.rf.normalize_coord(xyz_sampled)
                     full_shape = (B, max_samps, 3)
                     sigma = torch.zeros(full_shape[:-1], device=device)
 
@@ -698,14 +697,13 @@ class TensorNeRF(torch.nn.Module):
                     brdf_rgb[full_bounce_mask] = _brdf_rgb
                     brdf_brightness = _brdf_rgb.mean()
 
-                    # spec_color = row_mask_sum(incoming_light * brdf_weight, ray_mask) / norm
-                    # tinted_ref_rgb = spec_color
-                    # if self.detach_bg:
-                    #     tinted_ref_rgb.detach_()
+                    spec_color = row_mask_sum(incoming_light * brdf_weight, ray_mask) / norm
+                    tinted_ref_rgb = spec_color
+                    # ic(spec_color.mean(), incoming_light.mean(), brdf_weight.mean())
+                    # # TODO REMOVE
+                    # spec_color = row_mask_sum(incoming_light, ray_mask) / norm
+                    # tinted_ref_rgb = tint[bounce_mask] * spec_color
 
-                    # TODO REMOVE
-                    spec_color = row_mask_sum(incoming_light, ray_mask) / norm
-                    tinted_ref_rgb = tint[bounce_mask] * spec_color
                     if self.detach_bg:
                         tinted_ref_rgb.detach_()
                     reflect_rgb[bounce_mask] = tinted_ref_rgb
@@ -742,7 +740,7 @@ class TensorNeRF(torch.nn.Module):
                 # reflect_rgb[bad_mask.squeeze(-1)] = ((-vdotn).clip(min=0)**2*torch.rand((vdotn.shape[0], 1), device=device))
                 # reflect_rgb[bad_mask.squeeze(-1)] = ((-vdotn).clip(min=0)**2*torch.randn((vdotn.shape[0], 3), device=device))
                 # debug[full_bounce_mask] += 1
-                debug[app_mask] = (-VdotN).clip(min=0)**2
+                # debug[app_mask] = (-VdotN).clip(min=0)**2
                 if self.diffuse_dropout > 0 and is_train:
                     dropout = torch.rand((diffuse.shape[0], 1), device=device) < self.diffuse_dropout
                     rgb[app_mask] = reflect_rgb + dropout * diffuse
@@ -775,7 +773,9 @@ class TensorNeRF(torch.nn.Module):
             bg_weight = bg_weight.detach()
 
         acc_map = torch.sum(weight, 1)
-        rgb_map = torch.sum(weight[..., None] * rgb.clip(min=0, max=1), -2)
+        # rgb_map = torch.sum(weight[..., None] * rgb.clip(min=0, max=1), -2)
+        rgb_map = torch.sum(weight[..., None] * self.tonemap(rgb.clip(min=0, max=1)), -2)
+        # ic(rgb_map.mean(dim=0), rgb.mean(dim=0))
         if not is_train and draw_debug:
             with torch.no_grad():
                 depth_map = torch.sum(weight * z_vals, 1)
@@ -884,7 +884,7 @@ class TensorNeRF(torch.nn.Module):
             o_world_normal = world_normal if self.orient_world_normals else pred_norms
             aweight = pweight[papp_mask]
             NdotV = (-viewdirs[app_mask].reshape(-1, 3).detach() * o_world_normal[papp_mask].reshape(-1, 3)).sum(dim=-1)
-            ori_loss = (aweight * NdotV.clamp(max=0)**2).sum() / B
+            ori_loss = (aweight * NdotV.clamp(max=0)**2).sum()# / B
 
             midpoint = torch.cat([
                 z_vals,
@@ -903,7 +903,7 @@ class TensorNeRF(torch.nn.Module):
             if self.use_predicted_normals:
                 align_world_loss = 2*(1-(pred_norms[papp_mask] * world_normal[papp_mask]).sum(dim=-1))#**0.5
                 # ic(pred_norms.mean(), world_normal.mean(), align_world_loss.mean(), align_world_loss.shape)
-                prediction_loss = (aweight * align_world_loss).sum() / B
+                prediction_loss = (aweight * align_world_loss).sum()# / B
             else:
                 prediction_loss = torch.tensor(0.0)
 
@@ -926,10 +926,9 @@ class TensorNeRF(torch.nn.Module):
         # if recur > 0:
         #     ic(weight.sum(), z_vals, xyz_sampled[..., :3], rgb_map.max())
 
-        if tonemap:
-            rgb_map = self.tonemap(rgb_map.clip(min=0), noclip=True)
         # ic(weight.mean(), rgb.mean(), rgb_map.mean(), v_world_normal.mean(), sigma.mean(), dists.mean(), alpha.mean())
 
+        # ic(rgb[app_mask].mean(dim=0), rgb_map[acc_map>0.1].mean(dim=0), weight.shape)
         if self.bg_module is not None and not white_bg:
             bg_roughness = -100*torch.ones(B, 1, device=device) if start_mipval is None else start_mipval
             bg = self.bg_module(viewdirs[:, 0, :], bg_roughness).reshape(-1, 3)

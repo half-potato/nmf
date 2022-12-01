@@ -179,7 +179,7 @@ class HierarchicalCubeMap(torch.nn.Module):
         elif self.activation == 'clip':
             return x.clip(min=1e-3)
         else:
-            return torch.exp(x.clip(max=20)) + 1e-2
+            return torch.exp(x.clip(max=20))
 
     def get_spherical_harmonics(self, G, mipval=0):
         device = self.get_device()

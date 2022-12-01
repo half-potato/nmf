@@ -19,7 +19,7 @@ add_timestamp: false
 nSamples: 1e6
 N_vis: 5
 vis_every: 5000
-progress_refresh_rate: 10
+progress_refresh_rate: 1
 
 rm_weight_mask_thre: 1e-4
 step_ratio: 0.5

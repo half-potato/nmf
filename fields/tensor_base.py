@@ -42,11 +42,11 @@ class TensorBase(torch.nn.Module):
 
     def feature2density(self, density_features):
         if self.activation == "softplus":
-            return F.softplus(density_features.clamp(-15, 60)+self.density_shift)
+            return F.softplus(density_features.clamp(-15, 1e3)+self.density_shift)
         elif self.activation == "relu":
             return F.relu(density_features+self.density_shift)
         elif self.activation == "exp":
-            return torch.exp(density_features.clamp(-15, 5)+self.density_shift)
+            return torch.exp(density_features.clamp(-15, 10)+self.density_shift)
         elif self.activation == "identity":
             return density_features
 
@@ -67,10 +67,16 @@ class TensorBase(torch.nn.Module):
         # traceback.print_stack()
         return self._compute_densityfeature(self.normalize_coord(xyz_sampled), activate=activate)
 
+    def compute_feature(self, xyz_sampled):
+        return self._compute_feature(self.normalize_coord(xyz_sampled))
+
     def compute_appfeature(self, xyz_sampled):
         return self._compute_appfeature(self.normalize_coord(xyz_sampled))
 
     def _compute_densityfeature(self, xyz_sampled, activate=True):
+        raise Exception("Not implemented")
+
+    def _compute_feature(self, xyz_sampled):
         raise Exception("Not implemented")
 
     def _compute_appfeature(self, xyz_sampled):

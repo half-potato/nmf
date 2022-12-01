@@ -108,7 +108,7 @@ class ContinuousAlphagrid(torch.nn.Module):
             self.cascade = 1
         ic(self.cascade, self.bound, threshold)
         self.grid_size = grid_size
-        self.multiplier = int(multiplier)
+        self.multiplier = multiplier
         # self.cascade = 1 + math.ceil(math.log2(bound))
         self.grid_size = grid_size
         self.near_far = near_far
@@ -422,7 +422,7 @@ class ContinuousAlphagrid(torch.nn.Module):
         self.aabb = rf.aabb# if self.aabb is None else self.aabb
         self.contract_space = rf.contract_space
 
-        self.nSamples = rf.nSamples*self.multiplier
+        self.nSamples = int(rf.nSamples*self.multiplier)
         # self.stepsize = rf.stepSize/self.multiplier
         near, far = self.near_far
         self.stepsize = (far - near) / self.nSamples

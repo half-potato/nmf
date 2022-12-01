@@ -117,7 +117,7 @@ arch:
     # dotpe: 6
     # featureC: 128
     # activation: 'sigexp'
-    bias: 3
+    bias: -1.68
     activation: 'sigmoid'
     # activation: 'sigmoid'
     lr: 1e-3
@@ -198,7 +198,7 @@ arch:
   rf: 'placeholder'
 
 params:
-  L1_weight_inital: 0
+  L1_weight_initial: 0
   L1_weight_rest: 0
   clip_grad: 100
   eps: 1e-8
@@ -225,7 +225,13 @@ params:
   n_iters: 30000
   charbonier_loss: false
   start_density: 1e-2
-  lr_init: 0.02
-  batch_size: 4096
+  # batch_size: 4096
+  batch_size: 16384
   lr: Null
+
+  # configure decay
+  lr_init: 1
+  lr_final: 1e-3
+  lr_delay_mult: 0.01
+  lr_delay_steps: 512
 

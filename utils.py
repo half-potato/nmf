@@ -315,3 +315,45 @@ class AlphaGridMask(torch.nn.Module):
         contracted = torch.where(dist > 1, (2-1/dist), dist) * direction
         return torch.cat([ contracted, xyz_sampled[..., 3:] ], dim=-1)
 
+def log_lerp(t, v0, v1):
+  """Interpolate log-linearly from `v0` (t=0) to `v1` (t=1)."""
+  if v0 <= 0 or v1 <= 0:
+    raise ValueError(f'Interpolants {v0} and {v1} must be positive.')
+  lv0 = np.log(v0)
+  lv1 = np.log(v1)
+  return np.exp(np.clip(t, 0, 1) * (lv1 - lv0) + lv0)
+
+
+def learning_rate_decay(step,
+                        lr_init,
+                        lr_final,
+                        max_steps,
+                        lr_delay_steps=0,
+                        lr_delay_mult=1):
+  """Continuous learning rate decay function.
+
+  The returned rate is lr_init when step=0 and lr_final when step=max_steps, and
+  is log-linearly interpolated elsewhere (equivalent to exponential decay).
+  If lr_delay_steps>0 then the learning rate will be scaled by some smooth
+  function of lr_delay_mult, such that the initial learning rate is
+  lr_init*lr_delay_mult at the beginning of optimization but will be eased back
+  to the normal learning rate when steps>lr_delay_steps.
+
+  Args:
+    step: int, the current optimization step.
+    lr_init: float, the initial learning rate.
+    lr_final: float, the final learning rate.
+    max_steps: int, the number of steps during optimization.
+    lr_delay_steps: int, the number of steps to delay the full learning rate.
+    lr_delay_mult: float, the multiplier on the rate when delaying it.
+
+  Returns:
+    lr: the learning for current step 'step'.
+  """
+  if lr_delay_steps > 0:
+    # A kind of reverse cosine decay.
+    delay_rate = lr_delay_mult + (1 - lr_delay_mult) * np.sin(
+        0.5 * np.pi * np.clip(step / lr_delay_steps, 0, 1))
+  else:
+    delay_rate = 1.
+  return delay_rate * log_lerp(step / max_steps, lr_init, lr_final)
