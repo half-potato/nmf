@@ -47,7 +47,7 @@ arch:
   sampler:
     _target_: samplers.continuous_alphagrid.ContinuousAlphagrid
     _partial_: True
-    multiplier: 2
+    multiplier: 1
     shrink_iters: []
     dynamic_batchsize: True
     # sample_mode: multi_jitter
@@ -94,21 +94,21 @@ arch:
     # num_layers: 4
     # feape: 0
     # featureC: 128
-    mul_LdotN: True
+    mul_LdotN: False
     feape: 0
     dotpe: -1
-    h_encoder:
-      _target_: models.render_modules.PE
-      max_degree: 2
-    d_encoder:
-      _target_: models.render_modules.PE
-      max_degree: 2
     # h_encoder:
-    #   _target_: models.ish.ListISH
-    #   degs: [0,1,2,4]
+    #   _target_: models.render_modules.PE
+    #   max_degree: 2
     # d_encoder:
-    #   _target_: models.ish.ListISH
-    #   degs: [0,1,2,4]
+    #   _target_: models.render_modules.PE
+    #   max_degree: 2
+    h_encoder:
+      _target_: models.ish.ListISH
+      degs: [0,1,2,4]
+    d_encoder:
+      _target_: models.ish.ListISH
+      degs: [0,1,2,4]
     hidden_w: 64
     num_layers: 4
     initializer: 'kaiming'
@@ -131,12 +131,12 @@ arch:
     activation: 'exp'
     power: 2
     stds: []
-    lr: 0.05
+    lr: 0.1
     init_val: 0
     mul_lr: 0
     brightness_lr: 0
     betas: [0.0, 0.0]
-    mul_betas: [0.9, 0.99]
+    mul_betas: [0.9, 0.9]
     mipbias_lr: 1e-4
     mipnoise: 0.0
 
@@ -175,7 +175,7 @@ arch:
     lr: 1e-3
     tint_offset: -1.1
     diffuse_offset: -1.1
-    roughness_offset: 3
+    roughness_offset: 0
     # allocation: 7
 
   normal_module:
@@ -185,7 +185,7 @@ arch:
     # pospe: -1
     # feape: 2
     # pospe: 0
-    pospe: 0
+    pospe: -1
     feape: 0
 
     hidden_w: 64
@@ -200,17 +200,17 @@ arch:
 params:
   L1_weight_initial: 0
   L1_weight_rest: 0
-  clip_grad: 100
+  clip_grad: 10
   eps: 1e-8
-  betas: [0.9, 0.999]
+  betas: [0.9, 0.99]
 
   TV_weight_density: 0.0
   TV_weight_app: 0.0
   TV_weight_bg: 0
   envmap_lambda: 5e-5
-  pred_lambda: 2e-4
+  pred_lambda: 3e-4
   final_pred_lambda: Null
-  diffuse_lambda: 1e-8
+  diffuse_lambda: 0
   ori_lambda: 0.01
   final_ori_lambda: Null
   brdf_lambda: 0
@@ -224,7 +224,7 @@ params:
 
   n_iters: 30000
   charbonier_loss: false
-  start_density: 1e-2
+  start_density: 2.5e-3
   # batch_size: 4096
   batch_size: 16384
   lr: Null
@@ -232,6 +232,6 @@ params:
   # configure decay
   lr_init: 1
   lr_final: 1e-3
-  lr_delay_mult: 0.01
+  lr_delay_mult: 0.1
   lr_delay_steps: 512
 

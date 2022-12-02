@@ -17,6 +17,7 @@ from pathlib import Path
 from loguru import logger
 import functools
 
+torch.autograd.set_detect_anomaly(True)
 
 # from torch.profiler import profile, record_function, ProfilerActivity
 
@@ -268,7 +269,8 @@ def reconstruction(args):
     tensorf.sampler.update(tensorf.rf, init=True)
 
     # calculate alpha mean
-    xyz = torch.rand(20000, 3, device=device)*2-1
+    xyz = torch.rand(20000, 4, device=device)*2-1
+    xyz[:, 3] *= 0
     sigma_feat = tensorf.rf.compute_densityfeature(xyz)
 
     # step_size = 0.015
@@ -281,7 +283,8 @@ def reconstruction(args):
     tensorf.rf.density_shift += density_shift
     args.field.density_shift = tensorf.rf.density_shift
 
-    xyz = torch.rand(20000, 3, device=device)*2-1
+    xyz = torch.rand(20000, 4, device=device)*2-1
+    xyz[:, 3] *= 0
     sigma_feat = tensorf.rf.compute_densityfeature(xyz)
     alpha = 1-torch.exp(-sigma_feat * step_size * tensorf.rf.distance_scale)
     print(f"Mean alpha: {alpha.detach().mean().item():.06f}.")

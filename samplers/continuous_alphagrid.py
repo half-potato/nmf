@@ -6,6 +6,7 @@ import numpy as np
 from icecream import ic
 import time
 from mutils import morton3D
+from samplers.util import conical_frustum_to_gaussian
 
 def expand_bits(v):
     v = (v * 0x00010001) & 0xFF0000FF
@@ -176,38 +177,47 @@ class ContinuousAlphagrid(torch.nn.Module):
             rng = torch.cat([rng, ext_rng], dim=1)
 
         sample_mode = self.sample_mode if is_train else self.test_sample_mode                                                                                                                                      
+        rng = rng.repeat(rays_d.shape[-2], 1).reshape(-1, N_samples+N_env_samples)
         match sample_mode:                                                                                                                                                                                         
             case 'multi_jitter':                                                                                                                                                                                   
-                rng = rng.repeat(rays_d.shape[-2], 1)                                                                                                                                                              
-                brng = rng.reshape(-1, N_samples+N_env_samples)                                                                                                                                                    
-                r = torch.rand_like(brng)                                                                                                                                                                          
-                brng = brng + r                                                                                                                                                                                    
-                rng = brng.reshape(-1, N_samples+N_env_samples)                                                                                                                                                    
-                step = stepsize * rng                                                                                                                                                                              
+                r = torch.rand_like(rng)
+                brng = rng + r                                                                                                                                                                                    
+                step = stepsize * brng                                                                                                                                                                              
 
             case 'single_jitter':                                                                                                                                                                                  
-                rng = rng.repeat(rays_d.shape[-2], 1)                                                                                                                                                              
-                brng = rng.reshape(-1, N_samples+N_env_samples)                                                                                                                                                    
-                r = torch.rand_like(brng[:, 0:1])                                                                                                                                                                  
-                r = torch.rand_like(brng)                                                                                                                                                                          
-                brng = brng + r                                                                                                                                                                                    
-                rng = brng.reshape(-1, N_samples+N_env_samples)                                                                                                                                                    
-                step = stepsize * rng                                                                                                                                                                              
+                r = torch.rand_like(rng[:, 0:1])                                                                                                                                                                  
+                brng = rng + r
+                step = stepsize * brng                                                                                                                                                                              
 
             case 'cumrand':                                                                                                                                                                                        
                 steps = torch.rand((rays_d.shape[-2], N_samples), device=device) * stepsize * 2                                                                                                                    
                 step = torch.cumsum(steps, dim=1)                                                                                                                                                                  
 
-            case 'midpoint':                                                                                                                                                                                       
+            case _:                                                                                                                                                                                       
                 step = stepsize * rng
-        # steps = torch.rand((rays_d.shape[-2], N_samples), device=device) * stepsize * 2
         interpx = (t_min[..., None] + step)
-
         rays_pts = rays_o[..., None, :] + rays_d[..., None, :] * interpx[..., None]
-        mask_outbbox = ((self.aabb[0] > rays_pts) | (rays_pts > self.aabb[1])).any(dim=-1)
 
         # add size
-        rays_pts = torch.cat([rays_pts, interpx.unsqueeze(-1)/focal], dim=-1)
+
+        # d: torch.float32 3-vector, the axis of the cone
+        # t0: float, the starting distance of the frustum.
+        # t1: float, the ending distance of the frustum.
+        # base_radius: float, the scale of the radius as a function of distance.
+        # diag: boolean, whether or the Gaussian will be diagonal or full-covariance.
+        # t0 = (t_min[..., None] + stepsize * rng)
+        t0 = interpx - stepsize/2
+        t1 = t0 + stepsize/2
+        dx_norm = 0.0008
+        # dx_norm = 0.01
+        base_radius = (dx_norm) * 2 / np.sqrt(12)
+        diffs, var = conical_frustum_to_gaussian(rays_d, t0, t1, base_radius, diag=True, stable=True)
+
+        rays_pts = rays_o[..., None, :] + diffs
+        mask_outbbox = ((self.aabb[0] > rays_pts) | (rays_pts > self.aabb[1])).any(dim=-1)
+
+        # ic(var, rays_pts)
+        rays_pts = torch.cat([rays_pts, var.max(dim=-1, keepdim=True).values], dim=-1)
         env_mask = torch.zeros_like(mask_outbbox)
         env_mask[:, N_samples:] = 1
 
@@ -338,6 +348,8 @@ class ContinuousAlphagrid(torch.nn.Module):
         # add noise in [-hgs, hgs]
         if randomize:
             cas_xyzs += (torch.randn_like(cas_xyzs)) * half_grid_size * conv / 2
+        size = torch.zeros_like(cas_xyzs[:, 0:1])
+        cas_xyzs = torch.cat([cas_xyzs, size], dim=1)
         return cas_xyzs
 
     @torch.no_grad()

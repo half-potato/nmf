@@ -4,6 +4,28 @@ from icecream import ic
 import numpy as np
 import utils
 
+from torch.cuda.amp import custom_fwd, custom_bwd
+
+class TruncExp(torch.autograd.Function):
+    @staticmethod
+    @custom_fwd(cast_inputs=torch.float32)
+    def forward(ctx, x):
+        ctx.save_for_backward(x)
+        return torch.exp(x)
+
+    @staticmethod
+    @custom_bwd
+    def backward(ctx, dL_dout):
+        x = ctx.saved_tensors[0]
+        return dL_dout * torch.exp(x.clamp(-15, 15))
+
+
+def normalize(v, ord=2, eps=torch.finfo(torch.float32).eps):
+    if ord == 2:
+        return v / (v**2).sum(axis=-1, keepdim=True).clip(min=eps).sqrt()
+    else:
+        return v / (torch.linalg.norm(v, dim=-1, keepdim=True, ord=ord)+1e-8)
+
 class TensorBase(torch.nn.Module):
     def __init__(self, aabb, density_shift, activation, lr, lr_net, contract_space=False, distance_scale=25, num_pretrain=0, **kwargs):
         super().__init__()
@@ -46,7 +68,7 @@ class TensorBase(torch.nn.Module):
         elif self.activation == "relu":
             return F.relu(density_features+self.density_shift)
         elif self.activation == "exp":
-            return torch.exp(density_features.clamp(-15, 10)+self.density_shift)
+            return TruncExp.apply(density_features+self.density_shift)
         elif self.activation == "identity":
             return density_features
 
@@ -62,24 +84,24 @@ class TensorBase(torch.nn.Module):
     def vector_comp_diffs(self):
         raise Exception("Not implemented")
 
-    def compute_densityfeature(self, xyz_sampled, activate=True):
+    def compute_densityfeature(self, xyz_sampled, variance=None, activate=True):
         # ic(xyz_sampled.min(), xyz_sampled.max())
         # traceback.print_stack()
         return self._compute_densityfeature(self.normalize_coord(xyz_sampled), activate=activate)
 
-    def compute_feature(self, xyz_sampled):
+    def compute_feature(self, xyz_sampled, variance=None):
         return self._compute_feature(self.normalize_coord(xyz_sampled))
 
-    def compute_appfeature(self, xyz_sampled):
+    def compute_appfeature(self, xyz_sampled, variance=None):
         return self._compute_appfeature(self.normalize_coord(xyz_sampled))
 
-    def _compute_densityfeature(self, xyz_sampled, activate=True):
+    def _compute_densityfeature(self, xyz_sampled, variance, activate=True):
         raise Exception("Not implemented")
 
-    def _compute_feature(self, xyz_sampled):
+    def _compute_feature(self, xyz_sampled, variance):
         raise Exception("Not implemented")
 
-    def _compute_appfeature(self, xyz_sampled):
+    def _compute_appfeature(self, xyz_sampled, variance):
         raise Exception("Not implemented")
 
 

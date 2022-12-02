@@ -87,9 +87,9 @@ class BundleRender:
         #  ind = [598,532]
         point = points[len(points)//2].to(device)
 
-        env_map, col_map = tensorf.recover_envmap(512, xyz=point, roughness=0.01)
-        env_map = (env_map.detach().cpu().numpy() * 255).astype('uint8')
-        col_map = (col_map.detach().cpu().numpy() * 255).astype('uint8')
+        # env_map, col_map = tensorf.recover_envmap(512, xyz=point, roughness=0.01)
+        # env_map = (env_map.detach().cpu().numpy() * 255).astype('uint8')
+        # col_map = (col_map.detach().cpu().numpy() * 255).astype('uint8')
 
         def reshape(val_map):
             val_map = val_map.reshape((height, width, -1))
@@ -98,8 +98,8 @@ class BundleRender:
 
         return dotdict(
             **{k: reshape(data[k].detach()).cpu() for k in map_keys},
-            env_map=env_map,
-            col_map=col_map,
+            # env_map=env_map,
+            # col_map=col_map,
         )
 
 
@@ -159,13 +159,13 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
     focal = (test_dataset.focal[0] if ndc_ray else test_dataset.focal)
     brender = BundleRender(renderer, H, W, focal)
 
-    if tensorf.ref_module is not None:
-        os.makedirs(savePath+"/envmaps", exist_ok=True)
-        env_map, col_map = tensorf.recover_envmap(512, xyz=torch.tensor([-0.3042,  0.8466,  0.8462,  0.0027], device='cuda:0'))
-        env_map = (env_map.clamp(0, 1).detach().cpu().numpy() * 255).astype('uint8')
-        col_map = (col_map.clamp(0, 1).detach().cpu().numpy() * 255).astype('uint8')
-        imageio.imwrite(f'{savePath}/envmaps/{prtx}view_map.png', col_map)
-        imageio.imwrite(f'{savePath}/envmaps/{prtx}ref_map.png', env_map)
+    # if tensorf.ref_module is not None:
+    #     os.makedirs(savePath+"/envmaps", exist_ok=True)
+    #     env_map, col_map = tensorf.recover_envmap(512, xyz=torch.tensor([-0.3042,  0.8466,  0.8462,  0.0027], device='cuda:0'))
+    #     env_map = (env_map.clamp(0, 1).detach().cpu().numpy() * 255).astype('uint8')
+    #     col_map = (col_map.clamp(0, 1).detach().cpu().numpy() * 255).astype('uint8')
+    #     imageio.imwrite(f'{savePath}/envmaps/{prtx}view_map.png', col_map)
+    #     imageio.imwrite(f'{savePath}/envmaps/{prtx}ref_map.png', env_map)
     if tensorf.visibility_module is not None:
         os.makedirs(savePath+"/viscache", exist_ok=True)
         tensorf.visibility_module.save(f'{savePath}/viscache/', prtx)
@@ -265,9 +265,9 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
             # debug = 255*data.debug_map.clamp(0, 1)
             debug = data.debug_map
             imageio.imwrite(f'{savePath}/debug/{prtx}{idx:03d}.exr', (debug.numpy()))
-            if tensorf.ref_module is not None:
-                imageio.imwrite(f'{savePath}/envmaps/{prtx}ref_map_{idx:03d}.png', env_map)
-                imageio.imwrite(f'{savePath}/envmaps/{prtx}view_map_{idx:03d}.png', col_map)
+            # if tensorf.ref_module is not None:
+            #     imageio.imwrite(f'{savePath}/envmaps/{prtx}ref_map_{idx:03d}.png', env_map)
+            #     imageio.imwrite(f'{savePath}/envmaps/{prtx}view_map_{idx:03d}.png', col_map)
 
     tensorf.train()
     imageio.mimwrite(f'{savePath}/{prtx}video.mp4', np.stack(rgb_maps), fps=10, quality=10)

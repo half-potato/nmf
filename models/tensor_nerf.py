@@ -494,10 +494,6 @@ class TensorNeRF(torch.nn.Module):
                 sigma[ray_valid] = psigma
 
 
-        if self.rf.contract_space and self.infinity_border:
-            at_infinity = self.at_infinity(xyz_normed)
-            sigma[at_infinity] = 100
-
         # weight: [N_rays, N_samples]
         # ic((dists * self.rf.distance_scale).mean())
         alpha, weight, bg_weight = raw2alpha(sigma, dists * self.rf.distance_scale)
@@ -540,7 +536,7 @@ class TensorNeRF(torch.nn.Module):
 
             # get base color of the point
             diffuse, tint, matprop = self.diffuse_module(
-                app_norm_xyz, viewdirs[app_mask], noise_app_features)
+                app_norm_xyz, viewdirs[app_mask], app_features)
             # f0 = matprop['f0']
             r1 = matprop['r1']
             r2 = matprop['r2']
