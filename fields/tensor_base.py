@@ -71,6 +71,8 @@ class TensorBase(torch.nn.Module):
             return TruncExp.apply(density_features+self.density_shift)
         elif self.activation == "identity":
             return density_features
+        else:
+            raise Exception (f"Unknown activation {self.activation}")
 
     def set_register(self, name, val):
         if hasattr(self, name):
@@ -84,24 +86,29 @@ class TensorBase(torch.nn.Module):
     def vector_comp_diffs(self):
         raise Exception("Not implemented")
 
-    def compute_densityfeature(self, xyz_sampled, variance=None, activate=True):
+    def compute_densityfeature(self, xyz_sampled, activate=True):
         # ic(xyz_sampled.min(), xyz_sampled.max())
         # traceback.print_stack()
-        return self._compute_densityfeature(self.normalize_coord(xyz_sampled), activate=activate)
+        sigfeat = self._compute_densityfeature(self.normalize_coord(xyz_sampled))
+        if activate:
+            return self.feature2density(sigfeat).reshape(-1)
+        else:
+            return sigfeat.reshape(-1)
 
-    def compute_feature(self, xyz_sampled, variance=None):
-        return self._compute_feature(self.normalize_coord(xyz_sampled))
+    def compute_feature(self, xyz_sampled):
+        sigfeat, feat = self._compute_feature(self.normalize_coord(xyz_sampled))
+        return self.feature2density(sigfeat).reshape(-1), feat
 
-    def compute_appfeature(self, xyz_sampled, variance=None):
+    def compute_appfeature(self, xyz_sampled):
         return self._compute_appfeature(self.normalize_coord(xyz_sampled))
 
-    def _compute_densityfeature(self, xyz_sampled, variance, activate=True):
+    def _compute_densityfeature(self, xyz_sampled):
         raise Exception("Not implemented")
 
-    def _compute_feature(self, xyz_sampled, variance):
+    def _compute_feature(self, xyz_sampled):
         raise Exception("Not implemented")
 
-    def _compute_appfeature(self, xyz_sampled, variance):
+    def _compute_appfeature(self, xyz_sampled):
         raise Exception("Not implemented")
 
 

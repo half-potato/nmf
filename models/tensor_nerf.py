@@ -42,7 +42,7 @@ def raw2alpha(sigma, dist):
 class TensorNeRF(torch.nn.Module):
     def __init__(self, rf, aabb, near_far,
                  sampler, diffuse_module=None, brdf_sampler=None, brdf=None, tonemap=None, normal_module=None, ref_module=None, bg_module=None,
-                 visibility_module=None, grid_size=None, bright_sampler=None,
+                 visibility_module=None, bright_sampler=None,
                  alphaMask=None, transmittance_thres=1, 
                  infinity_border=False, max_brdf_rays=[524288],
                  rayMarch_weight_thres=0.0001, recur_weight_thres=1e-3,detach_inter=False, percent_bright=0.1, bg_noise=0, bg_noise_decay=0.999, use_predicted_normals=True,
@@ -51,7 +51,7 @@ class TensorNeRF(torch.nn.Module):
                  lr_scale=1, diffuse_dropout=0, detach_N_iters=0,
                  **kwargs):
         super(TensorNeRF, self).__init__()
-        self.rf = rf(aabb=aabb, grid_size=grid_size)
+        self.rf = rf(aabb=aabb)
         self.ref_module = ref_module(in_channels=self.rf.app_dim) if ref_module is not None else None
         self.normal_module = normal_module(in_channels=self.rf.app_dim) if normal_module is not None else None
         bound = aabb.abs().max()
@@ -158,44 +158,6 @@ class TensorNeRF(torch.nn.Module):
         rf.load_state_dict(ckpt['state_dict'], **kwargs)
         return rf
 
-    # @torch.no_grad()
-    # def filtering_rays(self, all_rays, all_rgbs, focal, N_samples=256, chunk=10240*5, bbox_only=False):
-    #     print('========> filtering rays ...')
-    #     tt = time.time()
-    #
-    #     N = torch.tensor(all_rays.shape[:-1]).prod()
-    #
-    #     mask_filtered = []
-    #     idx_chunks = torch.split(torch.arange(N), chunk)
-    #     for idx_chunk in idx_chunks:
-    #         rays_chunk = all_rays[idx_chunk].to(self.get_device())
-    #
-    #         rays_o, rays_d = rays_chunk[..., :3], rays_chunk[..., 3:6]
-    #         if bbox_only:
-    #             vec = torch.where(
-    #                 rays_d == 0, torch.full_like(rays_d, 1e-6), rays_d)
-    #             rate_a = (self.rf.aabb[1].to(rays_o) - rays_o) / vec
-    #             rate_b = (self.rf.aabb[0].to(rays_o) - rays_o) / vec
-    #             # .clamp(min=near, max=far)
-    #             t_min = torch.minimum(rate_a, rate_b).amax(-1)
-    #             # .clamp(min=near, max=far)
-    #             t_max = torch.maximum(rate_a, rate_b).amin(-1)
-    #             mask_inbbox = t_max > t_min
-    #
-    #         else:
-    #             xyz_sampled, _, _, _ = self.sample_ray(
-    #                 rays_o, rays_d, focal, N_samples=N_samples, is_train=False)
-    #             # Issue: calculate size
-    #             mask_inbbox = self.alphaMask.sample_alpha(
-    #                     xyz_sampled).reshape(xyz_sampled.shape[:-1]).any(-1)
-    #
-    #         mask_filtered.append(mask_inbbox.cpu())
-    #
-    #     mask_filtered = torch.cat(mask_filtered).view(all_rgbs.shape[:-1])
-    #
-    #     print(f'Ray filtering done! takes {time.time()-tt} s. ray mask ratio: {torch.sum(mask_filtered) / N}')
-    #     return all_rays[mask_filtered], all_rgbs[mask_filtered], mask_filtered
-
     def sample_occupied(self):
         samps = torch.rand((10000, 4), device=self.get_device())*2 - 1
         validsigma = self.rf.compute_densityfeature(samps).squeeze()
@@ -297,7 +259,7 @@ class TensorNeRF(torch.nn.Module):
             grad_outputs = torch.ones_like(validsigma)
             g = grad(validsigma, xyz_g, grad_outputs=grad_outputs, create_graph=True, allow_unused=True)
             # n = torch.linalg.norm(g[0][:, :3], dim=-1)
-            # ic(g[0][:, :3].abs().max())
+            ic(g[0][:, :3].abs().max())
             norms = normalize(-g[0][:, :3])
             return norms
 

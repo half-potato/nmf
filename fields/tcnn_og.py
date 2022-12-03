@@ -14,7 +14,7 @@ def init_weights(m):
         torch.nn.init.constant_(m.bias, 0)
 
 class TCNNRF(TensorBase):
-    def __init__(self, aabb, encoder_conf, grid_size, enc_dim, roughness_bias=-1, tint_offset=0, diffuse_offset=-1, enc_mul=1, **kwargs):
+    def __init__(self, aabb, encoder_conf, enc_dim, roughness_bias=-1, tint_offset=0, diffuse_offset=-1, enc_mul=1, **kwargs):
         super().__init__(aabb, **kwargs)
 
         # self.nSamples = 1024                                                                                                                                                                                        
@@ -35,6 +35,7 @@ class TCNNRF(TensorBase):
         self.bound = torch.abs(aabb).max()
         bound = 1
         per_level_scale = np.exp2(np.log2(2048 * bound / 16) / (16 - 1))
+        ic(per_level_scale)
 
         self.encoding = tcnn.Encoding(3, encoding_config=dict(per_level_scale=per_level_scale, **encoder_conf))
         app_dim = encoder_conf.n_features_per_level * encoder_conf.n_levels
@@ -65,12 +66,11 @@ class TCNNRF(TensorBase):
 
     def calc_feat(self, xyz_normed):
         feat = self.encoding(self.coords2input(xyz_normed)).type(xyz_normed.dtype)
-        device = xyz_normed.device
-        scale = 2**torch.arange(0, self.n_levels, device=device).repeat_interleave(self.n_features_per_level)
-        # var = 0*xyz_normed[:, 2]+0.0001
-        var = xyz_normed[:, 3]
-        feat_scale = torch.exp(-(scale**2).reshape(1, -1) * var.reshape(-1, 1))
-        feat = feat_scale * feat * self.enc_mul
+        # device = xyz_normed.device
+        # scale = 2**torch.arange(0, self.n_levels, device=device).repeat_interleave(self.n_features_per_level)
+        # var = xyz_normed[:, 3]
+        # feat_scale = torch.exp(-(scale**2).reshape(1, -1) * var.reshape(-1, 1))
+        # feat = feat_scale * feat * self.enc_mul
         h = self.sigma_net(feat)
         # sigfeat = h[:, 0]
         # h = h[:, 1:]
@@ -85,7 +85,7 @@ class TCNNRF(TensorBase):
 
     def _compute_feature(self, xyz_normed):
         sigfeat, h = self.calc_feat(xyz_normed)
-        return self.feature2density(sigfeat).reshape(-1), h
+        return sigfeat, h
 
     def _compute_appfeature(self, xyz_normed):
         sigfeat, h = self.calc_feat(xyz_normed)
@@ -94,10 +94,7 @@ class TCNNRF(TensorBase):
 
     def _compute_densityfeature(self, xyz_normed, activate=True):
         sigfeat, h = self.calc_feat(xyz_normed)
-        if activate:
-            return self.feature2density(sigfeat).reshape(-1)
-        else:
-            return sigfeat.reshape(-1)
+        return sigfeat
 
     def shrink(self, new_aabb, voxel_size):
         pass

@@ -1,34 +1,36 @@
 _partial_: True
 _target_: fields.hybrid.HybridRF
-distance_scale: 25
-density_n_comp: 16
-appearance_n_comp: 24
-app_dim: 24
-step_ratio: 0.5
-density_res_multi: 1
-contract_space: False
-smoothing: 1.5
-# activation: 'softplus_shift'
-# activation: 'softplus'
+distance_scale: 1
+density_shift: 0
 activation: 'exp'
-# activation: 'relu_shift'
-density_shift: -10
-
-N_voxel_init: 2097156 # 128**3
-# N_voxel_init: 134217728 # 512**3
-# N_voxel_final: 27000000 # 300**3
-# N_voxel_init: 27000000 # 128**3
-N_voxel_final: 134217728 # 512**3
-upsamp_list: [4000,4000,5500,7000]
-
+# activation: 'softplus'
+hidden_w: 64
+num_layers: 2
+# initializer: 'xavier'
+enc_mul: 1
+initializer: 'kaiming'
 encoder_conf:
     otype: "HashGrid"
-    n_levels: 16
     n_features_per_level: 2
-    log2_hashmap_size: 19
-    base_resolution: 16
-
-lr: 1e-2
+    log2_hashmap_size: 17
+lr: 1e-3
 lr_net: 1e-3
-num_pretrain: 1000
+num_pretrain: 0
+tint_offset: -1.1
+diffuse_offset: -1.1
+# app_dim: 16
+enc_dim: 16
 
+# tensorf params
+n_levels: 20
+grid_levels: 8
+grid_size: 64
+
+grid:
+    _target_: fields.tensoRF.TensoRF
+    _partial_: True
+    init_mode: 'randplane'
+    interp_mode: 'bilinear'
+    init_val: 0.01
+    lr: 2e-2
+    smoothing: 0.5

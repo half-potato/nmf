@@ -1,12 +1,12 @@
 from tkinter import W
-from .tensor_base import TensorBase
+from .tensor_base import TensorVoxelBase
 import torch
 import torch.nn.functional as F
 from icecream import ic
 import time
 from .convolver import Convolver
 
-class Triplanar(TensorBase):
+class Triplanar(TensorVoxelBase):
     def __init__(self, aabb, grid_size, *args, hier_sizes, **kargs):
         super(Triplanar, self).__init__(aabb, grid_size, *args, **kargs)
 

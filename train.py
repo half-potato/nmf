@@ -240,48 +240,50 @@ def reconstruction(args):
     # TODO REMOVE
     tensorf.sampler.update(tensorf.rf, init=True)
     if args.ckpt is None:
-        # dparams = tensorf.parameters()
-        # space_optim = torch.optim.Adam(tensorf.rf.dbasis_mat.parameters(), lr=0.5, betas=(0.9,0.99))
-        space_optim = torch.optim.Adam(tensorf.parameters(), lr=0.005, betas=(0.9,0.99))
-        pbar = tqdm(range(tensorf.rf.num_pretrain))
-        for _ in pbar:
-            xyz = torch.rand(20000, 3, device=device)*2-1
+        if tensorf.rf.num_pretrain > 0:
+            # dparams = tensorf.parameters()
+            # space_optim = torch.optim.Adam(tensorf.rf.dbasis_mat.parameters(), lr=0.5, betas=(0.9,0.99))
+            space_optim = torch.optim.Adam(tensorf.parameters(), lr=0.005, betas=(0.9,0.99))
+            pbar = tqdm(range(tensorf.rf.num_pretrain))
+            for _ in pbar:
+                xyz = (torch.rand(20000, 3, device=device)*2-1) * tensorf.rf.aabb[1].reshape(1, 3)
+                sigma_feat = tensorf.rf.compute_densityfeature(xyz)
+
+                # step_size = 0.015
+                step_size = tensorf.sampler.stepsize
+                alpha = 1-torch.exp(-sigma_feat * step_size * tensorf.rf.distance_scale)
+                # ic(alpha.mean(), sigma_feat.mean(), tensorf.rf.distance_scale)
+                # sigma = 1-torch.exp(-sigma_feat)
+                # loss = (sigma-torch.rand_like(sigma)*args.start_density).abs().mean()
+                # target_alpha = (params.start_density+params.start_density*(2*torch.rand_like(alpha)-1))
+                target_alpha = (params.start_density + 0.1*params.start_density*torch.randn_like(alpha))
+                # target_alpha = target_alpha.clip(min=params.start_density/2, max=params.start_density*2)
+                # target_alpha = params.start_density
+                loss = (alpha-target_alpha).abs().mean()
+                # loss = (-sigma[mask].clip(max=1).sum() + sigma[~mask].clip(min=1e-8).sum())
+                space_optim.zero_grad()
+                loss.backward()
+                pbar.set_description(f"Mean alpha: {alpha.detach().mean().item():.06f}.")
+                space_optim.step()
+        else:
+            # calculate alpha mean
+            xyz = torch.rand(20000, 4, device=device)*2-1
+            xyz[:, 3] *= 0
             sigma_feat = tensorf.rf.compute_densityfeature(xyz)
 
             # step_size = 0.015
             step_size = tensorf.sampler.stepsize
-            alpha = 1-torch.exp(-sigma_feat * step_size * tensorf.rf.distance_scale)
-            # ic(alpha.mean(), sigma_feat.mean(), tensorf.rf.distance_scale)
-            # sigma = 1-torch.exp(-sigma_feat)
-            # loss = (sigma-torch.rand_like(sigma)*args.start_density).abs().mean()
-            # target_alpha = (params.start_density+params.start_density*(2*torch.rand_like(alpha)-1))
-            target_alpha = (params.start_density + 0.1*params.start_density*torch.randn_like(alpha))
-            # target_alpha = target_alpha.clip(min=params.start_density/2, max=params.start_density*2)
-            # target_alpha = params.start_density
-            loss = (alpha-target_alpha).abs().mean()
-            # loss = (-sigma[mask].clip(max=1).sum() + sigma[~mask].clip(min=1e-8).sum())
-            space_optim.zero_grad()
-            loss.backward()
-            pbar.set_description(f"Mean alpha: {alpha.detach().mean().item():.06f}.")
-            space_optim.step()
+            target_sigma = -math.log(1-params.start_density) / (step_size * tensorf.rf.distance_scale)
+
+            # compute density_shift assume exponential activation
+            density_shift = math.log(target_sigma) - math.log(sigma_feat.mean().item())
+            ic(target_sigma, sigma_feat.mean(), density_shift)
+            tensorf.rf.density_shift += density_shift
+            args.field.density_shift = tensorf.rf.density_shift
     # tensorf.sampler.mark_untrained_grid(train_dataset.poses, train_dataset.intrinsics)
     torch.cuda.empty_cache()
     tensorf.sampler.update(tensorf.rf, init=True)
 
-    # calculate alpha mean
-    xyz = torch.rand(20000, 4, device=device)*2-1
-    xyz[:, 3] *= 0
-    sigma_feat = tensorf.rf.compute_densityfeature(xyz)
-
-    # step_size = 0.015
-    step_size = tensorf.sampler.stepsize
-    target_sigma = -math.log(1-params.start_density) / (step_size * tensorf.rf.distance_scale)
-
-    # compute density_shift assume exponential activation
-    density_shift = math.log(target_sigma) - math.log(sigma_feat.mean().item())
-    ic(target_sigma, sigma_feat.mean(), density_shift)
-    tensorf.rf.density_shift += density_shift
-    args.field.density_shift = tensorf.rf.density_shift
 
     xyz = torch.rand(20000, 4, device=device)*2-1
     xyz[:, 3] *= 0

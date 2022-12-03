@@ -508,10 +508,8 @@ class ContinuousAlphagrid(torch.nn.Module):
                             tmp_grid[cas, indices] = sigmas
                             # tmp_grid[cas, indices] = torch.exp(-sigmas)
 
-        # partial update (half the computation)
-        # TODO: why no need of maxpool ?
         else:
-            N = self.grid_size ** 3 // 4 # H * H * H / 2
+            N = self.grid_size ** 3 // 8 # H * H * H / 2
             for cas in range(self.cascade):
                 # random sample some positions
                 coords = torch.randint(0, self.grid_size, (N, 3), device=self.density_grid.device) # [N, 3], in [0, 128)
