@@ -61,6 +61,7 @@ Thumbs.db
 
 *.pkl
 log/*
+log_old/*
 outputs/*
 multirun/*
 backgrounds/*

@@ -103,7 +103,7 @@ arch:
     # dotpe: 6
     # featureC: 128
     # activation: 'sigexp'
-    bias: -1.68
+    bias: -1.1
     activation: 'sigmoid'
     # activation: 'sigmoid'
     lr: 1e-3
@@ -140,9 +140,9 @@ arch:
     num_layers: 1
     initializer: 'kaiming'
     lr: 1e-3
-    tint_offset: -1.1
-    diffuse_offset: -1.1
-    roughness_offset: 0
+    tint_bias: -1.1
+    diffuse_bias: -1.1
+    roughness_bias: 0
     # allocation: 7
 
   normal_module:
@@ -168,7 +168,8 @@ params:
   L1_weight_initial: 0
   L1_weight_rest: 0
   clip_grad: 10
-  eps: 1e-8
+  weight_decay: 1e-6
+  eps: 1e-15
   betas: [0.9, 0.99]
 
   TV_weight_density: 0.0

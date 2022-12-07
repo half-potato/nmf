@@ -876,7 +876,7 @@ class TensorNeRF(torch.nn.Module):
                 output['envmap_reg'] = torch.tensor(0.0)
 
             output['brdf_reg'] = -brdf_brightness
-            output['diffuse_reg'] = -roughness.mean()
+            output['diffuse_reg'] = -roughness.sum()
             output['prediction_loss'] = prediction_loss
             output['ori_loss'] = ori_loss
             output['distortion_loss'] = distortion_loss
@@ -921,7 +921,6 @@ class TensorNeRF(torch.nn.Module):
             recur=recur,
             acc_map=acc_map.detach().cpu(),
             roughness=roughness.mean(),
-
             color_count=app_mask.detach().sum(),
             bounce_count=bounce_count,
             whole_valid=whole_valid, 

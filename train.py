@@ -298,7 +298,7 @@ def reconstruction(args):
         if params.lr is not None:
             optimizer = torch.optim.Adam(tensorf.parameters(), lr=params.lr, betas=params.betas, eps=params.eps)
         else:
-            optimizer = torch.optim.Adam(grad_vars, betas=params.betas, eps=params.eps)
+            optimizer = torch.optim.Adam(grad_vars, betas=params.betas, eps=params.eps, weight_decay=params.weight_decay)
         compute_lambda = functools.partial(
                 learning_rate_decay, lr_init=params.lr_init, lr_final=params.lr_final, max_steps=params.n_iters,
                 lr_delay_steps=params.lr_delay_steps, lr_delay_mult=params.lr_delay_mult)
@@ -364,9 +364,9 @@ def reconstruction(args):
 
                     # loss
                     ori_lambda = params.ori_lambda if iteration > 1000 else params.ori_lambda * iteration / 1000
-                    # pred_lambda = params.pred_lambda if iteration > 1000 else params.pred_lambda * iteration / 1000
+                    pred_lambda = params.pred_lambda if iteration > 500 else params.pred_lambda * iteration / 500
                     # ori_lambda = params.ori_lambda
-                    pred_lambda = params.pred_lambda
+                    # pred_lambda = params.pred_lambda
                     total_loss = loss + \
                         params.distortion_lambda*distortion_loss + \
                         ori_lambda*ori_loss + \
