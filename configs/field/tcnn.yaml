@@ -14,12 +14,13 @@ encoder_conf:
     otype: "HashGrid"
     n_levels: 16
     n_features_per_level: 2
-    log2_hashmap_size: 17
+    log2_hashmap_size: 19
     base_resolution: 16
+max_resolution: 1024
 lr: 1e-3
 lr_net: 1e-3
+lr_density: 1e-3
 num_pretrain: 0
 tint_offset: -1.1
 diffuse_offset: -1.1
-# app_dim: 16
 enc_dim: 16

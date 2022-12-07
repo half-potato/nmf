@@ -233,13 +233,13 @@ class TensorNeRF(torch.nn.Module):
                 -1, 3), roughness=roughness, viewdotnorm=viewdotnorm)).reshape(res, 2*res, 3)
         else:
             envmap = torch.zeros(res, 2*res, 3)
-        if self.diffuse_module is not None:
-            color, tint, matprop = self.diffuse_module(xyz_samp, ang_vecs.reshape(-1, 3), app_features)
-            color = (color).reshape(res, 2*res, 3)/2
-        else:
-            color = torch.zeros(res, 2*res, 3)
+        # if self.diffuse_module is not None:
+        #     color, tint, matprop = self.diffuse_module(xyz_samp, ang_vecs.reshape(-1, 3), app_features)
+        #     color = (color).reshape(res, 2*res, 3)/2
+        # else:
+        #     color = torch.zeros(res, 2*res, 3)
         
-        return self.tonemap(envmap).clamp(0, 1), self.tonemap(color).clamp(0, 1)
+        return self.tonemap(envmap).clamp(0, 1)#, self.tonemap(color).clamp(0, 1)
 
     def at_infinity(self, xyz_sampled, max_dist=10):
         margin = 1 - 1/max_dist/2
@@ -259,7 +259,7 @@ class TensorNeRF(torch.nn.Module):
             grad_outputs = torch.ones_like(validsigma)
             g = grad(validsigma, xyz_g, grad_outputs=grad_outputs, create_graph=True, allow_unused=True)
             # n = torch.linalg.norm(g[0][:, :3], dim=-1)
-            ic(g[0][:, :3].abs().max())
+            # ic(g[0][:, :3].abs().max())
             norms = normalize(-g[0][:, :3])
             return norms
 
@@ -568,8 +568,8 @@ class TensorNeRF(torch.nn.Module):
                 viewdotnorm = (viewdirs[app_mask]*N).sum(dim=-1, keepdim=True)
                 ref_col = self.ref_module(
                     app_norm_xyz, viewdirs[app_mask],
-                    noise_app_features, refdirs=refdirs,
-                    roughness=roughness, viewdotnorm=viewdotnorm)
+                    noise_app_features, refdirs=refdirs.detach(),
+                    roughness=roughness, viewdotnorm=viewdotnorm.detach())
                 reflect_rgb = tint * ref_col
                 debug[app_mask] += ref_col / (ref_col + 1)
                 rgb[app_mask] = (reflect_rgb + diffuse).clip(0, 1)

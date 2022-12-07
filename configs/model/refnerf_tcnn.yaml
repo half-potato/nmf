@@ -2,60 +2,100 @@ arch:
   _target_: models.tensor_nerf.TensorNeRF
   _partial_: True
 
-  alphaMask_thres: 0.0001
-  rayMarch_weight_thres: 0.0001
-  max_recurs: 2
-  roughness_rays: 1
+  rayMarch_weight_thres: 1e-4
+  recur_weight_thres: 1e-4
+  lr_scale: 1
   infinity_border: False
-  appdim_noise_std: 0.1
-  world_bounces: 0
-  max_normal_similarity: 0.99
-  max_floater_loss: 1
-  bounces_per_ray: 10
+  eval_batch_size: 4096
+
+  anoise: 0.1
+  anoise_decay: 1
+
+  bg_noise: 0.0
+  bg_noise_decay: 0.999
+  rough_light: False
+
+  max_brdf_rays: []
+  cold_start_bg_iters: 0
+  detach_N_iters: 0
+  normalize_brdf: False
+  use_predicted_normals: True
+  orient_world_normals: False
+  diffuse_dropout: 0
+
+  transmittance_thres: 1.0
+  percent_bright: 0.1
+
+  detach_inter: True
   selector:
-    _target_: modules.pt_selectors.TopNWeight
+    _target_: modules.pt_selectors.Selector
     _partial_: True
     max_selected: 25000000
     weight_thres: 1e-3
 
-  sampler:
-    _target_: samplers.continuous_alphagrid.ContinuousAlphagrid
-    _partial_: True
-    multiplier: 1
-    shrink_iters: [2000, 4000]
-    dynamic_batchsize: False
-    # sample_mode: multi_jitter
-    sample_mode: single_jitter
-    test_sample_mode: midpoint
-    # threshold: 5e-5
-    threshold: 1e-4
-    grid_size: 256
-    conv: 10
-    bound: 1.5
-
-  rf: "placeholder"
+  # bright_sampler:
+  #   _target_: modules.bright_sampler.BrightnessImportanceSampler
+  #   _partial_: True
+  #   scale: 10
+  #   update_freq: 50
 
   tonemap:
     # _target_: models.tonemap.HDRTonemap
     # _target_: models.tonemap.LinearTonemap
     _target_: models.tonemap.SRGBTonemap
 
-  # brdf:
-  #   _target_: models.brdf.PBR
-  #   _partial_: True
+  sampler:
+    _target_: samplers.continuous_alphagrid.ContinuousAlphagrid
+    _partial_: True
+    multiplier: 1
+    shrink_iters: []
+    dynamic_batchsize: True
+    # sample_mode: multi_jitter
+    sample_mode: single_jitter
+    test_sample_mode: midpoint
+    # threshold: 5e-5
+    threshold: 1e-4
+    grid_size: 256
+    max_samples: 200000
+    conv: 10
+    bound: 1.5
 
-  # bg_module:
-  #   _target_: models.bg_modules.HierarchicalCubeMap
-  #   bg_resolution: 1024
-  #   mipbias: -1
-  #   num_levels: 1
-  #   activation: 'softplus'
-  #   power: 2
-  #   stds: []
-  #   # lr: 0.30
-  #   lr: 0.025
-  #   mipbias_lr: 1e-4
-  #   # lr: 0.025
+  bg_module:
+    _target_: models.bg_modules.HierarchicalCubeMap
+    bg_resolution: 512
+    mipbias: 0
+    num_levels: 1
+    TV_max_scale: 1
+    activation: 'exp'
+    power: 2
+    stds: []
+    lr: 0.1
+    init_val: 0
+    mul_lr: 0
+    brightness_lr: 0
+    betas: [0.0, 0.0]
+    mul_betas: [0.9, 0.9]
+    mipbias_lr: 1e-4
+    mipnoise: 0.0
+
+  diffuse_module:
+    _partial_: True
+    _target_: models.render_modules.HydraMLPDiffuse
+    pospe: -1
+    feape: 0
+    # pospe: 12
+    # feape: 0
+    # view_encoder:
+    #   _target_: models.render_modules.PE
+    #   max_degree: 2
+    hidden_w: 64
+    num_layers: 1
+    initializer: 'kaiming'
+    lr: 1e-3
+    tint_offset: 0
+    diffuse_offset: -1.1
+    roughness_offset: 0
+    # allocation: 7
 
   ref_module:
     _partial_: True
@@ -83,77 +123,66 @@ arch:
     #   std: 5
     # activation: 'softplus'
     activation: 'sigmoid'
-    featureC: 256
+    initializer: 'kaiming'
+    hidden_w: 256
     num_layers: 8
-
-  diffuse_module:
-    _partial_: True
-    _target_: models.render_modules.MLPDiffuse
-    pospe: 0
-    # feape: 2
-    # featureC: 128
-    feape: 0
-    featureC: 64
-    num_layers: 3
-    lr: 1e-4
-    diffuse_offset: -0.477
-    tint_offset: 0
+    skip: 4
+    offset: 0
 
   normal_module:
     _partial_: True
     _target_: models.render_modules.MLPNormal
     lr: 1e-3
-    # pospe: 16
+    # pospe: -1
     # feape: 2
-    # featureC: 128
-    pospe: 0
+    # pospe: 0
+    pospe: -1
     feape: 0
-    featureC: 64
+
+    hidden_w: 64
     num_layers: 3
+    initializer: 'kaiming_fanout'
+    size_multi: 2.5e-3
+    # allocation: 3
+    offset_geometry: False
+
+  rf: 'placeholder'
 
 params:
-  lambda_start: 0.0
-  lambda_end: 0.0
-  clip_grad: 1e-3
-  eps: 1e-6
-  betas: [0.9, 0.999]
-
-  # bounce_n_list: [100, 1000, 10000, 20000]
-  # bounce_iter_list: [9000, 12000, 14000]
-
-  bounce_n_list: [0, 100000]
-  # bounce_iter_list: [4500]
-  bounce_iter_list: [0]
-
-  num_bw_iters: 0
-
-  #upsamp_list: [2000,3000,4000,5500,7000]
-  #uplambda_list: [7000, 12000, 17000, 21000]
-  #uplambda_list: [7000, 12000, 17000]
-  uplambda_list: [7000, 10000, 12000]
-  L1_weight_inital: 0
+  L1_weight_initial: 0
   L1_weight_rest: 0
+  clip_grad: 10
+  eps: 1e-8
+  betas: [0.9, 0.99]
 
   TV_weight_density: 0.0
   TV_weight_app: 0.0
   TV_weight_bg: 0
-  envmap_lambda: 0
-  brdf_lambda: 0
-  pred_lambda: 3e-3
-  final_pred_lambda: 3e-3
+  envmap_lambda: 5e-5
+  pred_lambda: 3e-4
+  final_pred_lambda: Null
   diffuse_lambda: 0
-  ori_lambda: 0.1
-  final_ori_lambda: 0.1
-  distortion_lambda: 0
+  ori_lambda: 0.01
+  final_ori_lambda: Null
+  brdf_lambda: 0
+  
+  distortion_lambda: 0 # 1e-3
+  visibility_lambda: 0
+  # distortion_lambda: 0.00001
   charbonier_eps: 1e-3
   ortho_weight: 0
+  N_visibility_rays: 128
 
-  envmap_train_start: 20
-  # num_rays_per_envmap: 512
-  num_rays_per_envmap: 64
-  num_env_train_iters: 0
   n_iters: 30000
   charbonier_loss: false
-  start_density: 1e-3
-  lr_init: 0.02
-  batch_size: 4096
+  start_density: 2.5e-3
+  # batch_size: 4096
+  batch_size: 16384
+  lr: Null
+
+  # configure decay
+  lr_init: 1
+  lr_final: 1e-3
+  lr_delay_mult: 0.1
+  lr_delay_steps: 100
+

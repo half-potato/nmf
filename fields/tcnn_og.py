@@ -14,7 +14,7 @@ def init_weights(m):
         torch.nn.init.constant_(m.bias, 0)
 
 class TCNNRF(TensorBase):
-    def __init__(self, aabb, encoder_conf, enc_dim, roughness_bias=-1, tint_offset=0, diffuse_offset=-1, enc_mul=1, **kwargs):
+    def __init__(self, aabb, encoder_conf, enc_dim, max_resolution, lr_density, roughness_bias=-1, tint_offset=0, diffuse_offset=-1, enc_mul=1, **kwargs):
         super().__init__(aabb, **kwargs)
 
         # self.nSamples = 1024                                                                                                                                                                                        
@@ -29,12 +29,13 @@ class TCNNRF(TensorBase):
         self.diffuse_offset = diffuse_offset
         self.roughness_bias = roughness_bias
         self.enc_mul = enc_mul
+        self.lr_density = lr_density
 
         self.separate_appgrid = False
 
         self.bound = torch.abs(aabb).max()
         bound = 1
-        per_level_scale = np.exp2(np.log2(2048 * bound / 16) / (16 - 1))
+        per_level_scale = np.exp2(np.log2(max_resolution * bound / encoder_conf.base_resolution) / (encoder_conf.n_levels - 1))
         ic(per_level_scale)
 
         self.encoding = tcnn.Encoding(3, encoding_config=dict(per_level_scale=per_level_scale, **encoder_conf))
@@ -42,6 +43,7 @@ class TCNNRF(TensorBase):
         self.n_features_per_level = encoder_conf.n_features_per_level
         self.n_levels = encoder_conf.n_levels
         # self.sigma_net = tcnn.Network(n_input_dims=self.app_dim, n_output_dims=1, network_config=dict(**network_config))
+        torch.nn.init.uniform_(list(self.encoding.parameters())[0], -1e-2, 1e-2)
         self.sigma_net = util.create_mlp(app_dim, enc_dim, **kwargs)
         self.density_layer = util.create_mlp(enc_dim, 1, 1, initializer='kaiming')
         self.app_dim = enc_dim
@@ -51,7 +53,7 @@ class TCNNRF(TensorBase):
         grad_vars = [
             {'params': self.encoding.parameters(), 'lr': self.lr*lr_scale},
             {'params': self.sigma_net.parameters(), 'lr': self.lr_net*lr_scale},
-            {'params': self.density_layer.parameters(), 'lr': self.lr_net*lr_scale},
+            {'params': self.density_layer.parameters(), 'lr': self.lr_density*lr_scale},
         ]
         return grad_vars
 
@@ -89,10 +91,9 @@ class TCNNRF(TensorBase):
 
     def _compute_appfeature(self, xyz_normed):
         sigfeat, h = self.calc_feat(xyz_normed)
-        h = h[:, 1:]
         return h
 
-    def _compute_densityfeature(self, xyz_normed, activate=True):
+    def _compute_densityfeature(self, xyz_normed):
         sigfeat, h = self.calc_feat(xyz_normed)
         return sigfeat
 

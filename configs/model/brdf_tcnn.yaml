@@ -60,20 +60,6 @@ arch:
     conv: 10
     bound: 1.5
 
-    # _target_: samplers.alphagrid.AlphaGridSampler
-    # _partial_: True
-    # enable_alpha_mask: False
-    # nEnvSamples: 0
-    # update_list: [4000, 8000]
-    # multiplier: 1
-    # threshold: 0.0001
-
-    # _target_: samplers.raymarch.Raymarcher
-    # _partial_: True
-    # max_samples: 100000
-    # grid_size: 256
-    # max_steps: 1024
-
   brdf_sampler:
     _target_: models.brdf.GGXSampler
     # _target_: models.brdf.CosineLobeSampler
@@ -139,25 +125,6 @@ arch:
     mul_betas: [0.9, 0.9]
     mipbias_lr: 1e-4
     mipnoise: 0.0
-
-  # diffuse_module:
-  #   _partial_: True
-  #   _target_: models.render_modules.MLPDiffuse
-  #   pospe: -1
-  #   feape: 0
-  #   # pospe: 12
-  #   # feape: 0
-  #   # view_encoder:
-  #   #   _target_: models.render_modules.PE
-  #   #   max_degree: 2
-  #   hidden_w: 64
-  #   num_layers: 3
-  #   initializer: 'kaiming'
-  #   lr: 1e-3
-  #   tint_offset: -1.1
-  #   diffuse_offset: -1.1
-  #   roughness_offset: 3
-  #   # allocation: 7
 
   diffuse_module:
     _partial_: True
@@ -233,5 +200,5 @@ params:
   lr_init: 1
   lr_final: 1e-3
   lr_delay_mult: 0.1
-  lr_delay_steps: 512
+  lr_delay_steps: 100
 

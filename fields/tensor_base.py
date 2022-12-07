@@ -11,13 +11,13 @@ class TruncExp(torch.autograd.Function):
     @custom_fwd(cast_inputs=torch.float32)
     def forward(ctx, x):
         ctx.save_for_backward(x)
-        return torch.exp(x)
+        return torch.exp(x.clamp(-15, 10))
 
     @staticmethod
     @custom_bwd
     def backward(ctx, dL_dout):
         x = ctx.saved_tensors[0]
-        return dL_dout * torch.exp(x.clamp(-15, 15))
+        return dL_dout * torch.exp(x.clamp(-15, 10))
 
 
 def normalize(v, ord=2, eps=torch.finfo(torch.float32).eps):
@@ -87,8 +87,6 @@ class TensorBase(torch.nn.Module):
         raise Exception("Not implemented")
 
     def compute_densityfeature(self, xyz_sampled, activate=True):
-        # ic(xyz_sampled.min(), xyz_sampled.max())
-        # traceback.print_stack()
         sigfeat = self._compute_densityfeature(self.normalize_coord(xyz_sampled))
         if activate:
             return self.feature2density(sigfeat).reshape(-1)

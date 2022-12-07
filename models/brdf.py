@@ -56,11 +56,14 @@ class BeckmannSampler(PseudoRandomSampler):
         # r1, r2: B roughness values for anisotropic roughness
         device = normal.device
         B = normal.shape[0]
+        # importance sampling according to:
+        # A Simpler and Exact Sampling Routine for the GGX Distribution of Visible Normals
+        # https://hal.archives-ouvertes.fr/hal-01509746/document
 
         # establish basis for BRDF
         z_up = torch.tensor([0.0, 0.0, 1.0], device=device).reshape(1, 3).expand(B, 3)
         x_up = torch.tensor([-1.0, 0.0, 0.0], device=device).reshape(1, 3).expand(B, 3)
-        up = torch.where(normal[:, 2:3] < 0.9, z_up, x_up)
+        up = torch.where(normal[:, 2:3] < 0.999, z_up, x_up)
         tangent = normalize(torch.linalg.cross(up, normal))
         bitangent = normalize(torch.linalg.cross(normal, tangent))
         # B, 3, 3

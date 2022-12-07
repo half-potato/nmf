@@ -267,17 +267,16 @@ def reconstruction(args):
                 space_optim.step()
         else:
             # calculate alpha mean
-            xyz = torch.rand(20000, 4, device=device)*2-1
+            xyz = torch.rand(100000, 4, device=device)*2-1
             xyz[:, 3] *= 0
             sigma_feat = tensorf.rf.compute_densityfeature(xyz)
 
             # step_size = 0.015
-            step_size = tensorf.sampler.stepsize
-            target_sigma = -math.log(1-params.start_density) / (step_size * tensorf.rf.distance_scale)
+            target_sigma = -math.log(1-params.start_density) / (tensorf.sampler.stepsize * tensorf.rf.distance_scale)
 
             # compute density_shift assume exponential activation
             density_shift = math.log(target_sigma) - math.log(sigma_feat.mean().item())
-            ic(target_sigma, sigma_feat.mean(), density_shift)
+            ic(target_sigma, sigma_feat.mean(), density_shift, sigma_feat.mean())
             tensorf.rf.density_shift += density_shift
             args.field.density_shift = tensorf.rf.density_shift
     # tensorf.sampler.mark_untrained_grid(train_dataset.poses, train_dataset.intrinsics)
@@ -285,11 +284,12 @@ def reconstruction(args):
     tensorf.sampler.update(tensorf.rf, init=True)
 
 
-    xyz = torch.rand(20000, 4, device=device)*2-1
+    xyz = torch.rand(100000, 4, device=device)*2-1
     xyz[:, 3] *= 0
     sigma_feat = tensorf.rf.compute_densityfeature(xyz)
-    alpha = 1-torch.exp(-sigma_feat * step_size * tensorf.rf.distance_scale)
+    alpha = 1-torch.exp(-sigma_feat * tensorf.sampler.stepsize * tensorf.rf.distance_scale)
     print(f"Mean alpha: {alpha.detach().mean().item():.06f}.")
+    ic(sigma_feat.mean())
 
     pbar = tqdm(range(params.n_iters), miniters=args.progress_refresh_rate, file=sys.stdout)
     def init_optimizer(grad_vars):
@@ -319,6 +319,7 @@ def reconstruction(args):
             optimizer.zero_grad()
             losses, roughnesses, envmap_regs = [],[],[]
             pred_losses, ori_losses = [], []
+            TVs = []
 
             while rays_remaining > 0:
                 ray_idx, rgb_idx = trainingSampler.nextids(min(8192, rays_remaining))
@@ -414,6 +415,7 @@ def reconstruction(args):
 
                 photo_loss = photo_loss.detach().item()
             
+                TVs.append(float(loss_tv))
                 ori_losses.append(params.ori_lambda * ori_loss.detach().item())
                 pred_losses.append(params.pred_lambda * prediction_loss.detach().item())
                 losses.append(total_loss.detach().item())
@@ -455,6 +457,7 @@ def reconstruction(args):
                     f' ori loss = {float(np.mean(ori_losses) / params.batch_size):.5f}' + \
                     f' pred loss = {float(np.mean(pred_losses) / params.batch_size):.5f}' + \
                     f' rough = {float(np.mean(roughnesses)):.5f}' + \
+                    f' tv = {float(np.mean(TVs)):.5f}' + \
                     f' envmap = {float(np.mean(envmap_regs)):.5f}'
                     # + f' mse = {photo_loss:.6f}'
                 # if tensorf.bg_module is not None:

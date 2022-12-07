@@ -167,7 +167,7 @@ class MLPRender_FP(torch.nn.Module):
     feape: int
     featureC: int
     num_layers: int
-    def __init__(self, in_channels, view_encoder=None, ref_encoder=None, feape=6, featureC=128, num_layers=4, activation='softplus', lr=1e-3):
+    def __init__(self, in_channels, view_encoder=None, ref_encoder=None, feape=6, activation='softplus', lr=1e-3, offset=0, **kwargs):
         super().__init__()
 
         self.lr = lr
@@ -181,22 +181,10 @@ class MLPRender_FP(torch.nn.Module):
         if ref_encoder is not None:
             self.in_mlpC += self.ref_encoder.dim()
         self.feape = feape
+        self.offset = offset
 
-        self.mlp = torch.nn.Sequential(
-            # torch.nn.BatchNorm1d(self.in_mlpC),
-            torch.nn.Linear(self.in_mlpC, featureC),
-            # torch.nn.BatchNorm1d(featureC),
-            *sum([[
-                    torch.nn.ReLU(inplace=True),
-                    torch.nn.Linear(featureC, featureC),
-                    # torch.nn.BatchNorm1d(featureC),
-                ] for _ in range(num_layers-2)], []),
-            torch.nn.ReLU(inplace=True),
-            torch.nn.Linear(featureC, 3)
-        )
+        self.mlp = util.create_mlp(self.in_mlpC, 3, **kwargs)
         self.activation = str2fn(activation)
-        torch.nn.init.constant_(self.mlp[-1].bias, -2)
-        self.mlp.apply(self.init_weights)
 
     def init_weights(self, m):
         if isinstance(m, torch.nn.Linear):
@@ -205,7 +193,6 @@ class MLPRender_FP(torch.nn.Module):
     def forward(self, pts, viewdirs, features, refdirs, roughness, viewdotnorm, **kwargs):
         B = pts.shape[0]
         pts = pts[..., :3]
-
 
         indata = [refdirs, viewdotnorm]
         if self.feape > -1:
@@ -221,7 +208,7 @@ class MLPRender_FP(torch.nn.Module):
 
         mlp_in = torch.cat(indata, dim=-1)
         rgb = self.mlp(mlp_in)
-        rgb = self.activation(rgb)
+        rgb = self.activation(rgb + self.offset)
 
         return rgb
 

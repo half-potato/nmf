@@ -108,6 +108,20 @@ class TensoRF(torch.nn.Module):
             self.app_line[i] = torch.nn.Parameter(
                 F.interpolate(self.app_line[i].data, size=(res_target[vec_id], 1), mode=self.interp_mode, align_corners=self.align_corners))
 
+    @torch.no_grad()
+    def shrink(self, t_l, b_r):
+        for i in range(len(self.vecMode)):
+            mode0 = self.vecMode[i]
+            self.app_line[i] = torch.nn.Parameter(
+                self.app_line[i].data[...,t_l[mode0]:b_r[mode0],:]
+            )
+            mode0, mode1 = self.matMode[i]
+            self.app_plane[i] = torch.nn.Parameter(
+                self.app_plane[i].data[...,t_l[mode1]:b_r[mode1],t_l[mode0]:b_r[mode0]]
+            )
+            # ic(self.density_plane[i].data.shape)
+            # ic(self.density_line[i].data.shape)
+
 
 class Triplanar(TensoRF):
 
@@ -235,24 +249,8 @@ class TensorVMSplit(TensorVoxelBase):
         if torch.equal(new_aabb, self.aabb):
             return
 
-        for i in range(len(self.vecMode)):
-            mode0 = self.vecMode[i]
-            self.density_line[i] = torch.nn.Parameter(
-                self.density_line[i].data[...,t_l[mode0]:b_r[mode0],:]
-            )
-            self.app_line[i] = torch.nn.Parameter(
-                self.app_line[i].data[...,t_l[mode0]:b_r[mode0],:]
-            )
-            mode0, mode1 = self.matMode[i]
-            self.density_plane[i] = torch.nn.Parameter(
-                self.density_plane[i].data[...,t_l[mode1]:b_r[mode1],t_l[mode0]:b_r[mode0]]
-            )
-            self.app_plane[i] = torch.nn.Parameter(
-                self.app_plane[i].data[...,t_l[mode1]:b_r[mode1],t_l[mode0]:b_r[mode0]]
-            )
-            # ic(self.density_plane[i].data.shape)
-            # ic(self.density_line[i].data.shape)
-
+        self.app_rf.shrink(t_l, b_r)
+        self.density_rf.shrink(t_l, b_r)
 
         newSize = b_r - t_l
         ic(newSize)

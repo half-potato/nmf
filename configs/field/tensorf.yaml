@@ -1,6 +1,6 @@
 _partial_: True
 _target_: fields.tensoRF.TensorVMSplit
-distance_scale: 25
+distance_scale: 10
 density_n_comp: 16
 # density_n_comp: 24
 appearance_n_comp: 24
