@@ -329,7 +329,7 @@ class HydraMLPDiffuse(torch.nn.Module):
     refpe: int
     featureC: int
     num_layers: int
-    def __init__(self, in_channels, pospe=12, view_encoder=None, feape=6, allocation=0, unlit_tint=False, lr=1e-4, tint_bias=-1, diffuse_bias=-2, roughness_bias=1, **kwargs):
+    def __init__(self, in_channels, pospe=12, view_encoder=None, feape=6, allocation=0, unlit_tint=False, lr=1e-4, tint_bias=-1, diffuse_bias=-2, diffuse_mul=1, roughness_bias=1, **kwargs):
         super().__init__()
 
         in_channels = in_channels if allocation <= 0 else allocation
@@ -342,6 +342,7 @@ class HydraMLPDiffuse(torch.nn.Module):
         self.roughness_bias = roughness_bias
         self.lr = lr
         self.allocation = allocation
+        self.diffuse_mul = diffuse_mul
 
         self.view_encoder = view_encoder
         if view_encoder is not None:
@@ -351,14 +352,6 @@ class HydraMLPDiffuse(torch.nn.Module):
         self.diffuse_mlp = util.create_mlp(self.in_mlpC, 3, **kwargs)
         self.tint_mlp = util.create_mlp(self.in_mlpC, 3, **kwargs)
         self.roughness_mlp = util.create_mlp(self.in_mlpC, 1, **kwargs)
-
-    def init_weights(self, m):
-        if isinstance(m, nn.Linear):
-            # if m.weight.shape[0] <= 60:
-            #     torch.nn.init.constant_(m.weight, np.sqrt(2) / m.weight.shape[1])
-            # else:
-            #     torch.nn.init.xavier_uniform_(m.weight, gain=np.sqrt(2))
-            torch.nn.init.xavier_uniform_(m.weight, gain=torch.nn.init.calculate_gain('relu'))
 
     def forward(self, pts, viewdirs, features, **kwargs):
         if self.allocation > 0:
@@ -379,7 +372,7 @@ class HydraMLPDiffuse(torch.nn.Module):
         if self.view_encoder is not None:
             indata += [self.view_encoder(viewdirs, torch.tensor(1e-3, device=pts.device).expand(B)).reshape(B, -1), viewdirs]
         mlp_in = torch.cat(indata, dim=-1)
-        diffuse = torch.sigmoid(self.diffuse_mlp(mlp_in)+self.diffuse_bias)
+        diffuse = torch.sigmoid(self.diffuse_mul*self.diffuse_mlp(mlp_in)+self.diffuse_bias)
         r1 = torch.sigmoid(self.roughness_mlp(mlp_in)+self.roughness_bias)
         tint = torch.sigmoid(self.tint_mlp(mlp_in)+self.tint_bias)
 

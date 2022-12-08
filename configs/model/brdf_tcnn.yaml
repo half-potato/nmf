@@ -128,10 +128,11 @@ arch:
       #   max_degree: 2
       hidden_w: 64
       num_layers: 1
-      initializer: 'kaiming'
+      initializer: 'xavier_sigmoid'
       lr: 1e-3
       tint_bias: -1.1
       diffuse_bias: -1.1
+      diffuse_mul: 1.5
       roughness_bias: -1
       # allocation: 7
 

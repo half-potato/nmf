@@ -50,6 +50,12 @@ def init_weights_kaiming_fanout(m):
         if m.bias is not None:
             torch.nn.init.constant_(m.bias, 0)
 
+def init_weights_xavier_sigmoid(m):
+    if isinstance(m, torch.nn.Linear):
+        torch.nn.init.xavier_uniform_(m.weight, gain=1)
+        if m.bias is not None:
+            torch.nn.init.constant_(m.bias, 0)
+
 def init_weights_xavier(m):
     if isinstance(m, torch.nn.Linear):
         torch.nn.init.xavier_uniform_(m.weight, gain=np.sqrt(2))
@@ -66,6 +72,8 @@ def create_mlp(input_w, output_w, num_layers, hidden_w=128, skip=None, initializ
             net.apply(init_weights_kaiming)
         case 'xavier':
             net.apply(init_weights_xavier)
+        case 'xavier_sigmoid':
+            net.apply(init_weights_xavier_sigmoid)
         case _:
             pass
     return net

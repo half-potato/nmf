@@ -61,7 +61,7 @@ def render_test(args):
 
     if args.fixed_bg is not None:
         bg_sd = torch.load(args.fixed_bg)
-        from models import bg_modules
+        from modules import bg_modules
         bg_module = bg_modules.HierarchicalCubeMap(bg_resolution=2048, num_levels=1, featureC=128, activation='softplus', power=2, lr=1e-2)
         bg_module.load_state_dict(bg_sd, strict=False)
         a = bg_module.bg_mats[0].reshape(-1, 3).mean(dim=-1)
@@ -87,8 +87,8 @@ def render_test(args):
         tensorf.bg_module = bg_module
     tensorf = tensorf.to(device)
     tensorf.sampler.update(tensorf.rf, init=True)
-    if tensorf.bright_sampler is not None:
-        tensorf.bright_sampler.update(tensorf.bg_module)
+    # if tensorf.bright_sampler is not None:
+    #     tensorf.bright_sampler.update(tensorf.bg_module)
 
     logfolder = os.path.dirname(args.ckpt)
     if args.render_train:
@@ -158,12 +158,12 @@ def reconstruction(args):
     # TODO REMOVE
     if args.fixed_bg is not None:
         bg_sd = torch.load(args.fixed_bg)
-        from models import bg_modules
+        from modules import bg_modules
         bg_module = bg_modules.HierarchicalCubeMap(bg_resolution=2048, num_levels=1, featureC=128, activation='softplus', power=2, lr=1e-2)
         bg_module.load_state_dict(bg_sd, strict=False)
         tensorf.bg_module = bg_module
-        if tensorf.bright_sampler is not None:
-            tensorf.bright_sampler.update(tensorf.bg_module)
+        # if tensorf.bright_sampler is not None:
+        #     tensorf.bright_sampler.update(tensorf.bg_module)
 
     tensorf = tensorf.to(device)
 
