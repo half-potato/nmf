@@ -4,12 +4,12 @@ from tqdm.auto import tqdm
 from dataLoader.ray_utils import get_rays
 from utils import *
 from dataLoader.ray_utils import ndc_rays_blender
-from models import tonemap
+from modules import tonemap
 
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
 from icecream import ic
-from models.tensor_nerf import LOGGER
+from modules.tensor_nerf import LOGGER
 import traceback
 from pathlib import Path
 
@@ -19,28 +19,9 @@ class dotdict(dict):
     __setattr__ = dict.__setitem__
     __delattr__ = dict.__delitem__
 
-def chunk_renderer(rays, tensorf, focal, keys=['rgb_map'], chunk=4096, render2completion=False, **kwargs):
-
-    data = defaultdict(list)
-    N_rays_all = rays.shape[0]
-    for chunk_idx in range(N_rays_all // chunk + int(N_rays_all % chunk > 0)):
-        rays_chunk = rays[chunk_idx * chunk:(chunk_idx + 1) * chunk]#.to(device)
-        if rays_chunk.numel() == 0:
-            continue
-        need_rendering = torch.ones((rays_chunk.shape[0]), dtype=bool, device=rays_chunk.device)
-        while need_rendering.sum() > 0:
-            rays_p = rays_chunk[need_rendering]
-            cdata = tensorf(rays_p, focal, **kwargs)
-            for key in keys:
-                data[key].append(cdata[key])
-            whole_valid = cdata['whole_valid']
-            # ic(whole_valid, need_rendering)
-            if not render2completion:
-                break
-            need_rendering[need_rendering.clone()] = ~whole_valid
-
+def stack_tensors(data):
     # stack it boyyy
-    for key in keys:
+    for key in data.keys():
         try:
             if len(data[key]) == 1:
                 data[key] = data[key][0]
@@ -53,6 +34,43 @@ def chunk_renderer(rays, tensorf, focal, keys=['rgb_map'], chunk=4096, render2co
             traceback.print_exc()
             ic(key, data[key][0])
     return data
+
+def chunk_renderer(rays, tensorf, focal, keys=['rgb_map'], chunk=4096, render2completion=False, **kwargs):
+
+    ims = defaultdict(list)
+    stats = defaultdict(list)
+    N_rays_all = rays.shape[0]
+    for chunk_idx in range(N_rays_all // chunk + int(N_rays_all % chunk > 0)):
+        rays_chunk = rays[chunk_idx * chunk:(chunk_idx + 1) * chunk]#.to(device)
+        if rays_chunk.numel() == 0:
+            continue
+        need_rendering = torch.ones((rays_chunk.shape[0]), dtype=bool, device=rays_chunk.device)
+        while need_rendering.sum() > 0:
+            rays_p = rays_chunk[need_rendering]
+            if rays_p.shape[0] == 0:
+                break
+            cims, cstats = tensorf(rays_p, focal, **kwargs)
+            # collect stuff in keys if specified, else collect everything
+            if keys is not None:
+                for key in keys:
+                    if key in cims:
+                        ims[key].append(cims[key])
+                    if key in cstats:
+                        stats[key].append(cstats[key])
+            else:
+                for key in cims.keys():
+                    if key in cims:
+                        ims[key].append(cims[key])
+                for key in cstats.keys():
+                    if key in cstats:
+                        stats[key].append(cstats[key])
+
+            whole_valid = cstats['whole_valid']
+            if not render2completion:
+                break
+            need_rendering[need_rendering.clone()] = ~whole_valid
+
+    return stack_tensors(ims), stack_tensors(stats)
 
 class BundleRender:
     def __init__(self, base_renderer, H, W, focal, bundle_size=1, scale_normal=False):
@@ -70,25 +88,20 @@ class BundleRender:
         fW = width
         device = rays.device
 
-        map_keys = [
-            'depth_map', 'rgb_map', 'normal_map', 'acc_map',
-            'debug_map', 'surf_width', 'world_normal_map',
-            'tint_map', 'diffuse_map', 'spec_map',
-            'roughness_map', 'brdf_map', 'diffuse_light_map', 'r0_map', 'transmitted', 'cross_section']
         LOGGER.reset()
-        data = self.base_renderer(
-            rays, tensorf, keys=map_keys + ['termination_xyz'],
+        ims, stats = self.base_renderer(
+            rays, tensorf, keys=None,
             focal=self.focal, chunk=tensorf.eval_batch_size, render2completion=True, **kwargs)
 
         LOGGER.save('rays.pkl')
         LOGGER.reset()
-        points = data['termination_xyz']
+        points = ims['termination_xyz']
         # ic(data['backwards_rays_loss'].mean(), acc_map.max())
         #  ind = [598,532]
         point = points[len(points)//2].to(device)
 
-        if tensorf.ref_module is not None:
-            env_map = tensorf.recover_envmap(512, xyz=point, roughness=0.01)
+        if hasattr(tensorf.model, 'recover_envmap') and False:
+            env_map = tensorf.model.recover_envmap(512, xyz=point, roughness=0.01)
             env_map = (env_map.detach().cpu().numpy() * 255).astype('uint8')
             # col_map = (col_map.detach().cpu().numpy() * 255).astype('uint8')
             vals = dict(
@@ -104,9 +117,9 @@ class BundleRender:
             return val_map
 
         return dotdict(
-            **{k: reshape(data[k].detach()).cpu() for k in map_keys},
-            **vals
-        )
+            **{k: reshape(ims[k].detach()).cpu() for k in ims.keys()},
+            **vals,
+        ), stats
 
 
 def depth_to_normals(depth, focal):
@@ -191,42 +204,41 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
     tensorf.eval()
     for idx, im_idx, rays, gt_rgb in iterator():
 
-        data = brender(
-                rays, tensorf, N_samples=N_samples, ndc_ray=ndc_ray, white_bg = white_bg, is_train=False)
+        ims, stats = brender(rays, tensorf, N_samples=N_samples, ndc_ray=ndc_ray, white_bg = white_bg, is_train=False)
 
-        # H, W, _ = normal_map.shape
-        # normal_map = normal_map.reshape(-1, 3)# @ pose[:3, :3]
-        # normal_map = normal_map.reshape(H, W, 3)
+        # H, W, _ = normal.shape
+        # normal = normal.reshape(-1, 3)# @ pose[:3, :3]
+        # normal = normal.reshape(H, W, 3)
         # bottom of the sphere is green
         # top is blue
-        vis_normal_map = (data.normal_map * 127 + 128).clamp(0, 255).byte()
-        vis_world_normal_map = (data.world_normal_map * 127 + 128).clamp(0, 255).byte()
-        # vis_normal_map = (normal_map * 255).clamp(0, 255).byte()
+        vis_normal = (ims.normal * 127 + 128).clamp(0, 255).byte()
+        vis_world_normal = (ims.world_normal * 127 + 128).clamp(0, 255).byte()
+        # vis_normal = (normal * 255).clamp(0, 255).byte()
 
-        err_map = (data.rgb_map.clip(0, 1) - gt_rgb.clip(0, 1)) + 0.5
+        err_map = (ims.rgb_map.clip(0, 1) - gt_rgb.clip(0, 1)) + 0.5
 
-        vis_depth_map, _ = visualize_depth_numpy(data.depth_map.numpy(),near_far)
+        vis_depth_map, _ = visualize_depth_numpy(ims.depth.numpy(),near_far)
         if gt_rgb is not None:
             try:
-                gt_normal_map = test_dataset.get_normal(im_idx)
-                # vis_gt_normal_map = (gt_normal_map * 127 + 128).clamp(0, 255).byte()
-                # X = normal_map.reshape(-1, 3)
-                # Y = gt_normal_map.reshape(-1, 3)
+                gt_normal = test_dataset.get_normal(im_idx)
+                # vis_gt_normal = (gt_normal * 127 + 128).clamp(0, 255).byte()
+                # X = normal.reshape(-1, 3)
+                # Y = gt_normal.reshape(-1, 3)
                 # u, d, vh = torch.linalg.svd(X.T @ Y)
                 # ic(u @ vh)
-                # mask = (gt_normal_map[..., 0] == 1) & (gt_normal_map[..., 1] == 1) & (gt_normal_map[..., 2] == 1)
-                # gt_normal_map[mask] = 0
-                norm_err = torch.arccos((data.normal_map * gt_normal_map).sum(dim=-1).clip(min=1e-8, max=1-1e-8)) * 180/np.pi
+                # mask = (gt_normal[..., 0] == 1) & (gt_normal[..., 1] == 1) & (gt_normal[..., 2] == 1)
+                # gt_normal[mask] = 0
+                norm_err = torch.arccos((ims.normal * gt_normal).sum(dim=-1).clip(min=1e-8, max=1-1e-8)) * 180/np.pi
                 norm_err[torch.isnan(norm_err)] = 0
-                norm_err *= data.acc_map.squeeze(-1)
+                norm_err *= ims.acc_map.squeeze(-1)
                 norm_errs.append(norm_err.mean())
                 if savePath is not None:
                     imageio.imwrite(f'{savePath}/normal_err/{prtx}{idx:03d}.png', norm_err.clip(max=255).numpy().astype(np.uint8))
-                    # imageio.imwrite(f'{savePath}/normal_err/{prtx}{idx:03d}.png', vis_gt_normal_map)
+                    # imageio.imwrite(f'{savePath}/normal_err/{prtx}{idx:03d}.png', vis_gt_normal)
             except:
                 pass
                 # traceback.print_exc()
-            loss = torch.mean((data.rgb_map.clip(0, 1) - gt_rgb.clip(0, 1)) ** 2)
+            loss = torch.mean((ims.rgb_map.clip(0, 1) - gt_rgb.clip(0, 1)) ** 2)
             PSNRs.append(-10.0 * np.log(loss.item()) / np.log(10.0))
 
             # fig, axs = plt.subplots(2, 2)
@@ -237,14 +249,14 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
             # plt.show()
 
             if compute_extra_metrics:
-                ssim = rgb_ssim(data.rgb_map, gt_rgb, 1)
-                l_a = rgb_lpips(gt_rgb.numpy(), data.rgb_map.numpy(), 'alex', device)
-                l_v = rgb_lpips(gt_rgb.numpy(), data.rgb_map.numpy(), 'vgg', device)
+                ssim = rgb_ssim(ims.rgb_map, gt_rgb, 1)
+                l_a = rgb_lpips(gt_rgb.numpy(), ims.rgb_map.numpy(), 'alex', device)
+                l_v = rgb_lpips(gt_rgb.numpy(), ims.rgb_map.numpy(), 'vgg', device)
                 ssims.append(ssim)
                 l_alex.append(l_a)
                 l_vgg.append(l_v)
 
-        rgb_map = (data.rgb_map.clamp(0, 1).numpy() * 255).astype('uint8')
+        rgb_map = (ims.rgb_map.clamp(0, 1).numpy() * 255).astype('uint8')
         err_map = (err_map.clamp(0, 1).numpy() * 255).astype('uint8')
         # rgb_map = np.concatenate((rgb_map, depth_map), axis=1)
         rgb_maps.append(rgb_map)
@@ -253,27 +265,25 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
         if savePath is not None:
             imageio.imwrite(f'{savePath}/{prtx}{idx:03d}.png', rgb_map)
             rgb_map = np.concatenate((rgb_map, vis_depth_map), axis=1)
-            imageio.imwrite(f'{savePath}/rgbd/{prtx}{idx:03d}.exr', data.depth_map.numpy())
-            imageio.imwrite(f'{savePath}/normal/{prtx}{idx:03d}.png', vis_normal_map)
-            imageio.imwrite(f'{savePath}/spec/{prtx}{idx:03d}.png', (255*(data.spec_map/(1+data.spec_map)).numpy()).astype(np.uint8))
-            imageio.imwrite(f'{savePath}/diffuse_light/{prtx}{idx:03d}.png', (255*(data.diffuse_light_map/(1+data.diffuse_light_map)).numpy()).astype(np.uint8))
-            imageio.imwrite(f'{savePath}/transmitted/{prtx}{idx:03d}.png', (255*(data.transmitted/(1+data.transmitted)).numpy()).astype(np.uint8))
-            imageio.imwrite(f'{savePath}/r0/{prtx}{idx:03d}.exr', data.r0_map)
-            imageio.imwrite(f'{savePath}/roughness/{prtx}{idx:03d}.exr', data.roughness_map)
-            imageio.imwrite(f'{savePath}/diffuse/{prtx}{idx:03d}.png', (255*data.diffuse_map.clamp(0, 1).numpy()).astype(np.uint8))
-            imageio.imwrite(f'{savePath}/brdf/{prtx}{idx:03d}.png', (255*(data.brdf_map/(data.brdf_map+1)).numpy()).astype(np.uint8))
-            imageio.imwrite(f'{savePath}/tint/{prtx}{idx:03d}.png', (255*data.tint_map.clamp(0, 1).numpy()).astype(np.uint8))
-            imageio.imwrite(f'{savePath}/world_normal/{prtx}{idx:03d}.png', vis_world_normal_map)
+            imageio.imwrite(f'{savePath}/rgbd/{prtx}{idx:03d}.exr', ims.depth.numpy())
+            imageio.imwrite(f'{savePath}/normal/{prtx}{idx:03d}.png', vis_normal)
+            if 'spec' in ims:
+                imageio.imwrite(f'{savePath}/spec/{prtx}{idx:03d}.png', (255*(ims.spec/(1+ims.spec)).numpy()).astype(np.uint8))
+            if 'roughness' in ims:
+                imageio.imwrite(f'{savePath}/roughness/{prtx}{idx:03d}.exr', ims.roughness)
+            if 'tint' in ims:
+                imageio.imwrite(f'{savePath}/tint/{prtx}{idx:03d}.png', (255*ims.tint.clamp(0, 1).numpy()).astype(np.uint8))
+            if 'diffuse' in ims:
+                imageio.imwrite(f'{savePath}/diffuse/{prtx}{idx:03d}.png', (255*ims.diffuse.clamp(0, 1).numpy()).astype(np.uint8))
+            imageio.imwrite(f'{savePath}/world_normal/{prtx}{idx:03d}.png', vis_world_normal)
             imageio.imwrite(f'{savePath}/err/{prtx}{idx:03d}.png', err_map)
-            imageio.imwrite(f'{savePath}/surf_width/{prtx}{idx:03d}.png', data.surf_width.numpy().astype(np.uint8))
+            imageio.imwrite(f'{savePath}/surf_width/{prtx}{idx:03d}.png', ims.surf_width.numpy().astype(np.uint8))
 
-            cross_section = (data.cross_section.clamp(0, 1).numpy() * 255).astype('uint8')
+            cross_section = (ims.cross_section.clamp(0, 1).numpy() * 255).astype('uint8')
             imageio.imwrite(f'{savePath}/cross_section/{prtx}{idx:03d}.png', cross_section)
             # debug = 255*data.debug_map.clamp(0, 1)
-            debug = data.debug_map
-            imageio.imwrite(f'{savePath}/debug/{prtx}{idx:03d}.exr', (debug.numpy()))
-            if tensorf.ref_module is not None:
-                imageio.imwrite(f'{savePath}/envmaps/{prtx}ref_map_{idx:03d}.png', data.env_map)
+            if 'env_map' in ims:
+                imageio.imwrite(f'{savePath}/envmaps/{prtx}ref_map_{idx:03d}.png', ims.env_map)
                 # imageio.imwrite(f'{savePath}/envmaps/{prtx}view_map_{idx:03d}.png', data.col_map)
 
     tensorf.train()

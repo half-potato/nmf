@@ -9,7 +9,7 @@ import cv2
 import math
 import nvdiffrast.torch as nvdr
 from mutils import unravel_index
-from models import sh
+from modules import sh
 
 
 class DualParaboloidUnwrap(torch.nn.Module):

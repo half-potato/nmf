@@ -32,3 +32,4 @@ fp16: false
 n_bg_iters: 1000
 save_often: false
 fixed_bg: NULL
+seed: 20211200

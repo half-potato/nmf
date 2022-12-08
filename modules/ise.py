@@ -4,7 +4,7 @@ import numpy as np
 import torch
 from icecream import ic
 import math
-from models import safemath
+from modules import safemath
 
 def read_coeffs(s):
     s = s.strip()

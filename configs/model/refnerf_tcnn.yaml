@@ -1,5 +1,5 @@
 arch:
-  _target_: models.tensor_nerf.TensorNeRF
+  _target_: modules.tensor_nerf.TensorNeRF
   _partial_: True
 
   rayMarch_weight_thres: 1e-4
@@ -8,41 +8,17 @@ arch:
   infinity_border: False
   eval_batch_size: 4096
 
-  anoise: 0.1
-  anoise_decay: 1
-
   bg_noise: 0.0
   bg_noise_decay: 0.999
-  rough_light: False
 
-  max_brdf_rays: []
-  cold_start_bg_iters: 0
-  detach_N_iters: 0
-  normalize_brdf: False
   use_predicted_normals: True
   orient_world_normals: False
-  diffuse_dropout: 0
-
-  transmittance_thres: 1.0
-  percent_bright: 0.1
-
   detach_inter: True
-  selector:
-    _target_: modules.pt_selectors.Selector
-    _partial_: True
-    max_selected: 25000000
-    weight_thres: 1e-3
-
-  # bright_sampler:
-  #   _target_: modules.bright_sampler.BrightnessImportanceSampler
-  #   _partial_: True
-  #   scale: 10
-  #   update_freq: 50
 
   tonemap:
-    # _target_: models.tonemap.HDRTonemap
-    # _target_: models.tonemap.LinearTonemap
-    _target_: models.tonemap.SRGBTonemap
+    # _target_: modules.tonemap.HDRTonemap
+    # _target_: modules.tonemap.LinearTonemap
+    _target_: modules.tonemap.SRGBTonemap
 
   sampler:
     _target_: samplers.continuous_alphagrid.ContinuousAlphagrid
@@ -60,8 +36,82 @@ arch:
     conv: 10
     bound: 1.5
 
+  normal_module:
+    _partial_: True
+    _target_: modules.render_modules.MLPNormal
+    lr: 1e-3
+    # pospe: -1
+    # feape: 2
+    # pospe: 0
+    pospe: -1
+    feape: 0
+
+    hidden_w: 64
+    num_layers: 3
+    initializer: 'kaiming_fanout'
+    size_multi: 2.5e-3
+    # allocation: 3
+    offset_geometry: False
+
+  model:
+    _partial_: True
+    _target_: models.refnerf.RefNeRF
+    anoise: 0.1
+    detach_N_iters: 500
+
+    ref_module:
+      _partial_: True
+      _target_: modules.render_modules.MLPRender_FP
+      feape: 0
+      lr: 1e-4
+      # view_encoder:
+      #   _target_: models.ish.FullISH
+      #   max_degree: 4
+      # ref_encoder:
+      #   _target_: models.ish.ListISH
+      #   degs: [0,1,2,4,8,16]
+      ref_encoder:
+        _target_: modules.refsh.RefSH
+        deg_view: 5
+      # ref_encoder:
+      #   _target_: models.render_modules.PE
+      #   max_degree: 4
+      # ref_encoder:
+      #   _target_: models.ish.ISH
+      #   max_degree: 6
+      # ref_encoder:
+      #   _target_: models.ish.RandISH
+      #   rand_n: 64
+      #   std: 5
+      # activation: 'softplus'
+      activation: 'sigmoid'
+      initializer: 'kaiming'
+      hidden_w: 256
+      num_layers: 8
+      skip: 4
+      offset: 0
+
+    diffuse_module:
+      _partial_: True
+      _target_: modules.render_modules.HydraMLPDiffuse
+      pospe: -1
+      feape: 0
+      # pospe: 12
+      # feape: 0
+      # view_encoder:
+      #   _target_: modules.render_modules.PE
+      #   max_degree: 2
+      hidden_w: 64
+      num_layers: 1
+      initializer: 'kaiming'
+      lr: 1e-3
+      tint_bias: -1.1
+      diffuse_bias: -1.1
+      roughness_bias: -1
+      # allocation: 7
+
   bg_module:
-    _target_: models.bg_modules.HierarchicalCubeMap
+    _target_: modules.bg_modules.HierarchicalCubeMap
     bg_resolution: 512
     mipbias: 0
     num_levels: 1
@@ -78,81 +128,14 @@ arch:
     mipbias_lr: 1e-4
     mipnoise: 0.0
 
-  diffuse_module:
-    _partial_: True
-    _target_: models.render_modules.HydraMLPDiffuse
-    pospe: -1
-    feape: 0
-    # pospe: 12
-    # feape: 0
-    # view_encoder:
-    #   _target_: models.render_modules.PE
-    #   max_degree: 2
-    hidden_w: 64
-    num_layers: 1
-    initializer: 'kaiming'
-    lr: 1e-3
-    tint_offset: 0
-    diffuse_offset: -1.1
-    roughness_offset: 0
-    # allocation: 7
-
-  ref_module:
-    _partial_: True
-    _target_: models.render_modules.MLPRender_FP
-    feape: 0
-    lr: 1e-4
-    # view_encoder:
-    #   _target_: models.ish.FullISH
-    #   max_degree: 4
-    # ref_encoder:
-    #   _target_: models.ish.ListISH
-    #   degs: [0,1,2,4,8,16]
-    ref_encoder:
-      _target_: modules.refsh.RefSH
-      deg_view: 5
-    # ref_encoder:
-    #   _target_: models.render_modules.PE
-    #   max_degree: 4
-    # ref_encoder:
-    #   _target_: models.ish.ISH
-    #   max_degree: 6
-    # ref_encoder:
-    #   _target_: models.ish.RandISH
-    #   rand_n: 64
-    #   std: 5
-    # activation: 'softplus'
-    activation: 'sigmoid'
-    initializer: 'kaiming'
-    hidden_w: 256
-    num_layers: 8
-    skip: 4
-    offset: 0
-
-  normal_module:
-    _partial_: True
-    _target_: models.render_modules.MLPNormal
-    lr: 1e-3
-    # pospe: -1
-    # feape: 2
-    # pospe: 0
-    pospe: -1
-    feape: 0
-
-    hidden_w: 64
-    num_layers: 3
-    initializer: 'kaiming_fanout'
-    size_multi: 2.5e-3
-    # allocation: 3
-    offset_geometry: False
-
   rf: 'placeholder'
 
 params:
   L1_weight_initial: 0
   L1_weight_rest: 0
   clip_grad: 10
-  eps: 1e-8
+  weight_decay: 1e-6
+  eps: 1e-15
   betas: [0.9, 0.99]
 
   TV_weight_density: 0.0

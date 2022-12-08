@@ -5,17 +5,34 @@ distance_scale: 1
 density_shift: 0
 activation: 'exp'
 # activation: 'softplus'
-hidden_w: 64
-num_layers: 3
 # initializer: 'xavier'
 enc_mul: 1
 initializer: 'kaiming'
-encoder_conf:
+
+dencoder_conf:
     otype: "HashGrid"
     n_levels: 16
     n_features_per_level: 2
     log2_hashmap_size: 19
     base_resolution: 16
+
+dmlp_conf:
+    hidden_w: 64
+    num_layers: 2
+    initializer: 'kaiming'
+
+aencoder_conf:
+    otype: "HashGrid"
+    n_levels: 16
+    n_features_per_level: 2
+    log2_hashmap_size: 19
+    base_resolution: 16
+
+amlp_conf:
+    hidden_w: 64
+    num_layers: 2
+    initializer: 'kaiming'
+
 max_resolution: 1024
 lr: 1e-3
 lr_net: 1e-3
@@ -23,5 +40,5 @@ lr_density: 1e-3
 num_pretrain: 0
 tint_offset: -1.1
 diffuse_offset: -1.1
-enc_dim: 32
-init_scale: 1e-4
+enc_dim: 16
+

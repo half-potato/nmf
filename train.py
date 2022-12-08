@@ -1,6 +1,6 @@
 import os
 from tqdm.auto import tqdm
-from models.tensor_nerf import TensorNeRF
+from modules.tensor_nerf import TensorNeRF
 from renderer import *
 from utils import *
 from torch.optim import lr_scheduler
@@ -333,19 +333,19 @@ def reconstruction(args):
                     alpha_train = None
 
                 with torch.cuda.amp.autocast(enabled=args.fp16):
-                    data = renderer(rays_train, tensorf,
-                            keys = ['rgb_map', 'distortion_loss', 'prediction_loss', 'ori_loss', 'diffuse_reg', 'roughness', 'whole_valid', 'envmap_reg', 'brdf_reg'],#, 'normal_map'],
+                    ims, stats = renderer(rays_train, tensorf,
+                            keys = ['rgb_map', 'distortion_loss', 'prediction_loss', 'ori_loss', 'diffuse_reg', 'roughness', 'whole_valid', 'envmap_reg', 'brdf_reg'],
                             focal=focal, output_alpha=alpha_train, chunk=params.batch_size, white_bg = white_bg, is_train=True, ndc_ray=ndc_ray)
 
-                    prediction_loss = data['prediction_loss'].sum()
-                    distortion_loss = data['distortion_loss'].sum()
-                    diffuse_reg = data['diffuse_reg'].sum()
-                    envmap_reg = data['envmap_reg'].sum()
-                    brdf_reg = data['brdf_reg'].sum()
-                    rgb_map = data['rgb_map']
+                    prediction_loss = stats['prediction_loss'].sum()
+                    distortion_loss = stats['distortion_loss'].sum()
+                    diffuse_reg = stats['diffuse_reg'].sum()
+                    envmap_reg = stats['envmap_reg'].sum()
+                    brdf_reg = stats['brdf_reg'].sum()
+                    rgb_map = ims['rgb_map']
                     if not train_dataset.hdr:
                         rgb_map = rgb_map.clip(max=1)
-                    whole_valid = data['whole_valid'] 
+                    whole_valid = stats['whole_valid'] 
                     if params.charbonier_loss:
                         loss = torch.sqrt((rgb_map - rgb_train[whole_valid]) ** 2 + params.charbonier_eps**2).sum()
                     else:
@@ -358,15 +358,15 @@ def reconstruction(args):
                     # loss = torch.sqrt(F.huber_loss(rgb_map, rgb_train, delta=1, reduction='none') + params.charbonier_eps**2).mean()
                     # photo_loss = ((rgb_map.clip(0, 1) - rgb_train[whole_valid].clip(0, 1)) ** 2).mean().detach()
                     photo_loss = ((rgb_map.clip(0, 1) - rgb_train[whole_valid].clip(0, 1))**2).mean().detach()
-                    ori_loss = data['ori_loss'].sum()
+                    ori_loss = stats['ori_loss'].sum()
 
                     rays_remaining -= rgb_map.shape[0]
 
                     # loss
                     ori_lambda = params.ori_lambda if iteration > 1000 else params.ori_lambda * iteration / 1000
-                    pred_lambda = params.pred_lambda if iteration > 500 else params.pred_lambda * iteration / 500
+                    # pred_lambda = params.pred_lambda if iteration > 500 else params.pred_lambda * iteration / 500
                     # ori_lambda = params.ori_lambda
-                    # pred_lambda = params.pred_lambda
+                    pred_lambda = params.pred_lambda
                     total_loss = loss + \
                         params.distortion_lambda*distortion_loss + \
                         ori_lambda*ori_loss + \
@@ -378,8 +378,8 @@ def reconstruction(args):
                     params.ori_lambda *= ori_decay
                     params.pred_lambda *= normal_decay
 
-                    if tensorf.visibility_module is not None:
-                        pass
+                    # if tensorf.visibility_module is not None:
+                        # pass
                         # if iteration % 1 == 0 and iteration > 250:
                         #     # if iteration < 100 or iteration % 1000 == 0:
                         #     if iteration % 250 == 0 and iteration < 2000:
@@ -419,7 +419,7 @@ def reconstruction(args):
                 ori_losses.append(params.ori_lambda * ori_loss.detach().item())
                 pred_losses.append(params.pred_lambda * prediction_loss.detach().item())
                 losses.append(total_loss.detach().item())
-                roughnesses.append(data['roughness'].mean().detach().item())
+                roughnesses.append(ims['roughness'].mean().detach().item())
                 envmap_regs.append(envmap_reg.detach().item())
                 PSNRs.append(-10.0 * np.log(photo_loss) / np.log(10.0))
 
@@ -524,8 +524,8 @@ def reconstruction(args):
 @hydra.main(version_base=None, config_path='configs', config_name='default')
 def train(cfg: DictConfig):
     torch.set_default_dtype(torch.float32)
-    torch.manual_seed(20211201)
-    np.random.seed(20211201)
+    torch.manual_seed(cfg.seed)
+    np.random.seed(cfg.seed)
     logger.info(cfg.dataset)
     logger.info(cfg.model)
     cfg.model.arch.rf = cfg.field

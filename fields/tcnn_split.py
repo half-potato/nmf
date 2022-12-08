@@ -5,7 +5,7 @@ import numpy as np
 from icecream import ic
 from mutils import normalize
 import torch.nn.functional as F
-from modules import util
+from models import util
 
 def init_weights(m):
     if isinstance(m, torch.nn.Linear):
@@ -14,7 +14,7 @@ def init_weights(m):
         torch.nn.init.constant_(m.bias, 0)
 
 class TCNNRF(TensorBase):
-    def __init__(self, aabb, encoder_conf, enc_dim, max_resolution, lr_density, init_scale, roughness_bias=-1, tint_offset=0, diffuse_offset=-1, enc_mul=1, **kwargs):
+    def __init__(self, aabb, dencoder_conf, aencoder_conf, dmlp_conf, amlp_conf, enc_dim, max_resolution, lr_density, roughness_bias=-1, tint_offset=0, diffuse_offset=-1, enc_mul=1, **kwargs):
         super().__init__(aabb, **kwargs)
 
         # self.nSamples = 1024                                                                                                                                                                                        
@@ -30,31 +30,35 @@ class TCNNRF(TensorBase):
         self.roughness_bias = roughness_bias
         self.enc_mul = enc_mul
         self.lr_density = lr_density
+        self.n_features_per_level = encoder_conf.n_features_per_level
+        self.n_levels = encoder_conf.n_levels
 
-        self.separate_appgrid = False
+        self.separate_appgrid = True
 
         self.bound = torch.abs(aabb).max()
         bound = 1
         per_level_scale = np.exp2(np.log2(max_resolution * bound / encoder_conf.base_resolution) / (encoder_conf.n_levels - 1))
         ic(per_level_scale)
 
-        self.encoding = tcnn.Encoding(3, encoding_config=dict(per_level_scale=per_level_scale, **encoder_conf))
-        app_dim = encoder_conf.n_features_per_level * encoder_conf.n_levels
-        self.n_features_per_level = encoder_conf.n_features_per_level
-        self.n_levels = encoder_conf.n_levels
+
+        self.d_enc = tcnn.Encoding(3, encoding_config=dict(per_level_scale=per_level_scale, **dencoder_conf))
+        self.a_enc = tcnn.Encoding(3, encoding_config=dict(per_level_scale=per_level_scale, **aencoder_conf))
+
+        app_dim = aencoder_conf.n_features_per_level * aencoder_conf.n_levels
+        dense_dim = dencoder_conf.n_features_per_level * dencoder_conf.n_levels
         # self.sigma_net = tcnn.Network(n_input_dims=self.app_dim, n_output_dims=1, network_config=dict(**network_config))
-        torch.nn.init.uniform_(list(self.encoding.parameters())[0], -init_scale, init_scale)
-        # torch.nn.init.constant_(list(self.encoding.parameters())[0], init_scale)
-        self.sigma_net = util.create_mlp(app_dim, enc_dim, **kwargs)
-        self.density_layer = util.create_mlp(enc_dim, 1, 1, initializer='kaiming')
+        # torch.nn.init.uniform_(list(self.encoding.parameters())[0], -1e-2, 1e-2)
+        self.sigma_net = util.create_mlp(app_dim, enc_dim, **amlp_conf)
+        self.density_net = util.create_mlp(dense_dim, 1, **dmlp_conf)
         self.app_dim = enc_dim
         # self.sigma_net.apply(init_weights)
 
     def get_optparam_groups(self, lr_scale=1):
         grad_vars = [
-            {'params': self.encoding.parameters(), 'lr': self.lr*lr_scale},
+            {'params': self.d_enc.parameters(), 'lr': self.lr*lr_scale},
+            {'params': self.a_enc.parameters(), 'lr': self.lr*lr_scale},
             {'params': self.sigma_net.parameters(), 'lr': self.lr_net*lr_scale},
-            {'params': self.density_layer.parameters(), 'lr': self.lr_density*lr_scale},
+            {'params': self.density_net.parameters(), 'lr': self.lr_density*lr_scale},
         ]
         return grad_vars
 
@@ -100,4 +104,5 @@ class TCNNRF(TensorBase):
 
     def shrink(self, new_aabb, voxel_size):
         pass
+
 

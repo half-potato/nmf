@@ -137,3 +137,133 @@ class NaiveVisCache(torch.nn.Module):
         # ic((vis_mask | bgvisibility).sum(), (vis_mask & bgvisibility).sum())
         # ic((vis_mask).sum(), (bgvisibility).sum())
         self.cache[i, j, k, face_index] = vals.clamp(0, 255).type(torch.uint8)
+
+    def init_vis_module(self, S=4, G=8):
+        device = self.get_device()
+        _theta = torch.linspace(-np.pi/2, np.pi/2, G//2, device=device)
+        _phi = torch.linspace(-np.pi, np.pi, G, device=device)
+        _theta += torch.rand(1, device=device)
+        _phi += torch.rand(1, device=device)
+        theta, phi = torch.meshgrid(_theta, _phi, indexing='ij')
+        pviewdirs = torch.stack([
+            torch.cos(theta) * torch.cos(phi),
+            torch.cos(theta) * torch.sin(phi),
+            -torch.sin(theta),
+        ], dim=-1).reshape(-1, 1, 3)
+
+        X = torch.linspace(0, 1, self.visibility_module.grid_size, device=device).split(S)
+        Y = torch.linspace(0, 1, self.visibility_module.grid_size, device=device).split(S)
+        Z = torch.linspace(0, 1, self.visibility_module.grid_size, device=device).split(S)
+
+        for xs in X:
+            for ys in Y:
+                for zs in Z:
+                    # construct points
+                    xx, yy, zz = torch.meshgrid(xs, ys, zs, indexing='ij')
+                    samples = torch.cat([xx.reshape(-1, 1), yy.reshape(-1, 1), zz.reshape(-1, 1)], dim=-1) # [N, 3], in [0, 1)
+                    samples = (samples + (torch.rand_like(samples)) / (self.visibility_module.grid_size-1)).clip(0, 1)
+                    porigins = self.rf.aabb[0] * (1-samples) + self.rf.aabb[1] * samples
+
+                    origins = porigins.reshape(1, -1, 3).expand(pviewdirs.shape[0], -1, -1).reshape(-1, 3)
+                    viewdirs = pviewdirs.expand(-1, porigins.shape[0], 3).reshape(-1, 3)
+                    
+                    rays = torch.cat([ origins, viewdirs ], dim=-1)
+
+                    # pass rays to sampler to compute expected termination
+                    xyz_sampled, ray_valid, max_samps, z_vals, dists, whole_valid = self.sampler.sample(
+                        rays, 0.1, False, override_near=0.05, is_train=False, N_samples=-1)
+
+                    # xyz_sampled: (M, 4) float. premasked valid sample points
+                    # ray_valid: (b, N) bool. mask of which samples are valid
+                    # max_samps = N
+                    # z_vals: (b, N) float. distance along ray to sample
+                    # dists: (b, N) float. distance between samples
+                    # whole_valid: mask into origin rays of which B rays where able to be fully sampled.
+                    # """
+                    B = ray_valid.shape[0]
+                    full_shape = (B, max_samps, 3)
+                    sigma = torch.zeros(full_shape[:-1], device=device)
+
+                    if ray_valid.any():
+                        if self.rf.separate_appgrid:
+                            psigma = self.rf.compute_densityfeature(xyz_sampled)
+                        else:
+                            psigma, all_app_features = self.rf.compute_feature(xyz_sampled)
+                        sigma[ray_valid] = psigma
+
+                    # weight: [N_rays, N_samples]
+                    alpha, weight, bg_weight = raw2alpha(sigma, dists * self.rf.distance_scale)
+
+                    # app_features = self.rf.compute_appfeature(norm_ray_origins)
+                    termination = (z_vals * weight).median()
+                    bgvisibility = bg_weight[..., 0] > 0.1
+                    # """
+                    # bgvisibility = ray_valid.sum(dim=1) > 0
+                    normed_origins = self.rf.normalize_coord(origins)
+
+                    self.visibility_module.update(normed_origins, viewdirs, bgvisibility)
+        torch.cuda.empty_cache()
+        return torch.tensor(0.0, device=device)
+
+    def compute_visibility_loss(self, N, G=16):
+        # generate random rays within aabb
+        device = self.get_device()
+        samples = torch.rand(N // 2, 3, device=device)
+        # interpolate
+        porigins = self.rf.aabb[0] * (1-samples) + self.rf.aabb[1] * samples
+        _, _, xyz = self.sampler.sample_occupied(-1, N//2)
+        porigins = torch.cat([porigins, xyz], dim=0)
+
+        _theta = torch.linspace(-np.pi/2, np.pi/2, G//2, device=device)
+        _phi = torch.linspace(-np.pi, np.pi, G, device=device)
+        _theta += torch.rand(1, device=device)
+        _phi += torch.rand(1, device=device)
+        theta, phi = torch.meshgrid(_theta, _phi, indexing='ij')
+        pviewdirs = torch.stack([
+            torch.cos(theta) * torch.cos(phi),
+            torch.cos(theta) * torch.sin(phi),
+            -torch.sin(theta),
+        ], dim=-1).reshape(-1, 1, 3)
+        origins = porigins.reshape(1, -1, 3).expand(pviewdirs.shape[0], -1, -1).reshape(-1, 3)
+        viewdirs = pviewdirs.expand(-1, porigins.shape[0], 3).reshape(-1, 3)
+
+        rays = torch.cat([origins, viewdirs], dim=-1)
+
+        # pass rays to sampler to compute expected termination
+        xyz_sampled, ray_valid, max_samps, z_vals, dists, whole_valid = self.sampler.sample(
+            rays, 0.1, False, override_near=0.05, is_train=False, N_samples=-1)
+
+        # xyz_sampled: (M, 4) float. premasked valid sample points
+        # ray_valid: (b, N) bool. mask of which samples are valid
+        # max_samps = N
+        # z_vals: (b, N) float. distance along ray to sample
+        # dists: (b, N) float. distance between samples
+        # whole_valid: mask into origin rays of which B rays where able to be fully sampled.
+        # """
+        B = ray_valid.shape[0]
+        xyz_normed = self.rf.normalize_coord(xyz_sampled)
+        full_shape = (B, max_samps, 3)
+        sigma = torch.zeros(full_shape[:-1], device=device)
+
+        if ray_valid.any():
+            if self.rf.separate_appgrid:
+                psigma = self.rf.compute_densityfeature(xyz_normed)
+            else:
+                psigma, all_app_features = self.rf.compute_feature(xyz_normed)
+            sigma[ray_valid] = psigma
+
+        # weight: [N_rays, N_samples]
+        alpha, weight, bg_weight = raw2alpha(sigma, dists * self.rf.distance_scale)
+        # """
+
+        # termination = (z_vals * weight).median()
+        # bgvisibility = ray_valid.sum(dim=1) > 0
+        bgvisibility = bg_weight[..., 0] > 0.1
+        # ic(bgvisibility.sum() / bgvisibility.numel())
+
+        # get value from MLP and compare to get loss
+        norm_ray_origins = self.rf.normalize_coord(origins)
+        # app_features = self.rf.compute_appfeature(origins)
+        torch.cuda.empty_cache()
+        return self.visibility_module.update(norm_ray_origins, viewdirs, bgvisibility)
+

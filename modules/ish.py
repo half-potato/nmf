@@ -1,6 +1,6 @@
 import math
 import torch
-from models import safemath
+from modules import safemath
 from scipy.special import legendre as legendrecoeffs
 import numpy as np
 from icecream import ic
