@@ -161,6 +161,7 @@ def reconstruction(args):
         from modules import bg_modules
         bg_module = bg_modules.HierarchicalCubeMap(bg_resolution=2048, num_levels=1, featureC=128, activation='softplus', power=2, lr=1e-2)
         bg_module.load_state_dict(bg_sd, strict=False)
+        bg_module.lr = 0
         tensorf.bg_module = bg_module
         # if tensorf.bright_sampler is not None:
         #     tensorf.bright_sampler.update(tensorf.bg_module)

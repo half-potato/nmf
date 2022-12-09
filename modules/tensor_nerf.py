@@ -45,8 +45,8 @@ class TensorNeRF(torch.nn.Module):
                  alphaMask=None,
                  infinity_border=False,
                  rayMarch_weight_thres=0.0001, recur_weight_thres=1e-3,detach_inter=False, bg_noise=0, bg_noise_decay=0.999, use_predicted_normals=True,
-                 orient_world_normals=False,
-                  eval_batch_size=512,
+                 orient_world_normals=False, align_pred_norms=True,
+                 eval_batch_size=512, geonorm_iters=-1,
                  lr_scale=1,
                  **kwargs):
         super(TensorNeRF, self).__init__()
@@ -69,11 +69,14 @@ class TensorNeRF(torch.nn.Module):
         self.rayMarch_weight_thres = rayMarch_weight_thres
         self.recur_weight_thres = recur_weight_thres
         self.eval_batch_size = eval_batch_size
+        self.geonorm_iters = geonorm_iters
 
         self.detach_inter = detach_inter
 
         self.use_predicted_normals = use_predicted_normals and self.normal_module is not None
-        self.orient_world_normals = orient_world_normals | (not use_predicted_normals)
+        self.align_pred_norms = use_predicted_normals | align_pred_norms
+        self.orient_world_normals = orient_world_normals | (not self.align_pred_norms)
+        ic(self.use_predicted_normals, self.align_pred_norms, self.orient_world_normals)
 
     def get_device(self):
         return self.rf.units.device
@@ -133,6 +136,8 @@ class TensorNeRF(torch.nn.Module):
         if require_reassignment:
             self.sampler.update(self.rf, init=True)
         self.bg_noise *= self.bg_noise_decay
+        if self.geonorm_iters > 0:
+            self.use_predicted_normals = self.geonorm_iters*batch_mul > iter
         return require_reassignment
 
     def at_infinity(self, xyz_sampled, max_dist=10):
@@ -302,7 +307,7 @@ class TensorNeRF(torch.nn.Module):
 
                 world_normal_map = row_mask_sum(world_normal*pweight[..., None], ray_valid)
                 world_normal_map = acc_map[..., None] * world_normal_map + (1 - acc_map[..., None])
-                pred_norm_map = row_mask_sum(v_world_normal*pweight[..., None], ray_valid)
+                pred_norm_map = row_mask_sum(pred_norms*pweight[..., None], ray_valid)
                 pred_norm_map = acc_map[..., None] * pred_norm_map + (1 - acc_map[..., None])
                 # ic(pred_norms, pred_norm_map)
 
@@ -358,7 +363,7 @@ class TensorNeRF(torch.nn.Module):
             distortion_loss = calc_distortion_loss(midpoint, full_weight, dt)
             # distortion_loss = torch.tensor(0.0, device=device) 
 
-            if self.use_predicted_normals:
+            if self.align_pred_norms:
                 align_world_loss = 2*(1-(pred_norms[papp_mask] * world_normal[papp_mask]).sum(dim=-1))#**0.5
                 # ic(pred_norms.mean(), world_normal.mean(), align_world_loss.mean(), aweight.mean(), align_world_loss.shape)
                 prediction_loss = (aweight * align_world_loss).sum()# / B

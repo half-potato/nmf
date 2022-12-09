@@ -392,7 +392,7 @@ class MLPDiffuse(torch.nn.Module):
     refpe: int
     featureC: int
     num_layers: int
-    def __init__(self, in_channels, pospe=12, view_encoder=None, feape=6, allocation=0, unlit_tint=False, lr=1e-4, tint_offset=-1, diffuse_offset=-2, roughness_offset=1, **kwargs):
+    def __init__(self, in_channels, pospe=12, view_encoder=None, feape=6, allocation=0, unlit_tint=False, lr=1e-4, tint_bias=-1, diffuse_bias=-2, diffuse_mul=1, roughness_bias=1, **kwargs):
         super().__init__()
 
         in_channels = in_channels if allocation <= 0 else allocation
@@ -400,9 +400,10 @@ class MLPDiffuse(torch.nn.Module):
         if pospe >= 0:
             self.in_mlpC += 2*pospe*3 + 3 
         self.unlit_tint = unlit_tint
-        self.tint_offset = tint_offset
-        self.diffuse_offset = diffuse_offset
-        self.roughness_offset = roughness_offset
+        self.tint_bias = tint_bias
+        self.diffuse_bias = diffuse_bias
+        self.roughness_bias = roughness_bias
+        self.diffuse_mul = diffuse_mul
         self.lr = lr
         self.allocation = allocation
 
@@ -443,13 +444,13 @@ class MLPDiffuse(torch.nn.Module):
         mlp_out = self.mlp(mlp_in)
 
         ambient = torch.sigmoid(mlp_out[..., 6:7]-2)
-        # r1 = F.softplus(mlp_out[..., 7:8]+self.roughness_offset) + 1e-3
-        # r2 = F.softplus(mlp_out[..., 8:9]+self.roughness_offset) + 1e-3
-        r1 = torch.sigmoid(mlp_out[..., 7:8]+self.roughness_offset)*(1-1e-3) + 1e-3
-        r2 = torch.sigmoid(mlp_out[..., 8:9]+self.roughness_offset)*(1-1e-3) + 1e-3
-        tint = torch.sigmoid((mlp_out[..., 3:6]+self.tint_offset))
+        # r1 = F.softplus(mlp_out[..., 7:8]+self.roughness_bias) + 1e-3
+        # r2 = F.softplus(mlp_out[..., 8:9]+self.roughness_bias) + 1e-3
+        r1 = torch.sigmoid(mlp_out[..., 7:8]+self.roughness_bias)*(1-1e-3) + 1e-3
+        r2 = torch.sigmoid(mlp_out[..., 8:9]+self.roughness_bias)*(1-1e-3) + 1e-3
+        tint = torch.sigmoid((mlp_out[..., 3:6]+self.tint_bias))
         f0 = torch.sigmoid((mlp_out[..., 9:10]+3))*(1-0.001)+0.001
-        diffuse = torch.sigmoid((mlp_out[..., :3]+self.diffuse_offset))
+        diffuse = torch.sigmoid((self.diffuse_mul*mlp_out[..., :3]+self.diffuse_bias))
 
         # ic(f0)
         return diffuse, tint, dict(

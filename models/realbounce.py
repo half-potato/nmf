@@ -115,6 +115,7 @@ class RealBounce(torch.nn.Module):
 
             reflect_rgb[bounce_mask] = tinted_ref_rgb
             brdf_rgb[bounce_mask] = brdf_color
+            # brdf_rgb[bounce_mask] = row_mask_sum((L * eN).sum(dim=-1, keepdim=True).expand(-1, 3), ray_mask) / ray_count
 
         rgb = reflect_rgb + diffuse
         debug['diffuse'] = diffuse

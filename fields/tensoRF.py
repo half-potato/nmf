@@ -2,10 +2,10 @@ from .tensor_base import TensorVoxelBase
 import torch
 import torch.nn.functional as F
 from icecream import ic
-from models.grid_sample_Cinf import grid_sample
+from modules.grid_sample_Cinf import grid_sample
 import random
 import math
-from models import safemath
+from modules import safemath
 
 # here is original grid sample derivative for testing
 # def grid_sample(*args, smoothing, **kwargs):
