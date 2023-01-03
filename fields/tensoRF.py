@@ -25,6 +25,10 @@ class TensoRF(torch.nn.Module):
         self.init_mode = init_mode
         self.interp_mode = interp_mode
         self.app_plane, self.app_line = self.init_one_svd(dim, self.grid_size, init_val, 0)
+        self._dim = dim
+
+    def dim(self):
+        return self._dim * 3
 
     def get_optparam_groups(self, lr_scale=1):
         grad_vars = [
@@ -48,7 +52,8 @@ class TensoRF(torch.nn.Module):
             freqs = 2**torch.arange(n_degs-1).reshape(1, -1, 1, 1)
             freqs = torch.cat([torch.zeros_like(freqs[:, 0:1]), freqs], dim=1)
             line_pos_vals = torch.linspace(-1, 1, grid_size).reshape(1, 1, -1, 1)
-            scales = scale * 1/(freqs+1)
+            # scales = scale * 1/(freqs+1)
+            scales = scale * torch.exp(-freqs)
             # scales[:, scales.shape[1]//2:] = 0
             match self.init_mode:
                 case 'trig':
@@ -71,6 +76,16 @@ class TensoRF(torch.nn.Module):
                 case 'randplane':
                     plane_coef_v = scale**(1/2) * torch.randn((1, n_component, grid_size, grid_size))
                     line_coef_v = scale**(1/2) * torch.ones((1, n_component, grid_size, 1))
+                case 'unifplane_scaled':
+                    scales_r = scales.repeat_interleave(2, dim=1)
+                    plane_coef_v = scales_r * (2*torch.rand((1, n_component, grid_size, grid_size))-1)
+                    line_coef_v = scales_r * torch.ones((1, n_component, grid_size, 1))
+                case 'unifplane':
+                    plane_coef_v = scale**(1/2) * (2*torch.rand((1, n_component, grid_size, grid_size))-1)
+                    line_coef_v = scale**(1/2) * torch.ones((1, n_component, grid_size, 1))
+                case 'unif':
+                    plane_coef_v = scale**(1/2) * (2*torch.rand((1, n_component, grid_size, grid_size))-1)
+                    line_coef_v = scale**(1/2) * (2*torch.rand((1, n_component, grid_size, 1))-1)
                 case _:
                     plane_coef_v = scale**(1/2) * torch.randn((1, n_component, grid_size, grid_size))
                     line_coef_v = scale**(1/2) * torch.randn((1, n_component, grid_size, 1))
@@ -125,6 +140,9 @@ class TensoRF(torch.nn.Module):
 
 class Triplanar(TensoRF):
 
+    def dim(self):
+        return self._dim
+
     def forward(self, xyz_normed):
         coordinate_plane, coordinate_line = self.coords(xyz_normed)
         coefs = 1
@@ -132,11 +150,11 @@ class Triplanar(TensoRF):
             pc = grid_sample(self.app_plane[idx_plane], coordinate_plane[[idx_plane]], mode=self.interp_mode,
                         align_corners=self.align_corners, smoothing=self.smoothing).view(-1, *xyz_normed.shape[:1])
             coefs = pc * coefs
-        return coefs.T
+        return [coefs]
 
 
 class TensorVMSplit(TensorVoxelBase):
-    def __init__(self, aabb, smoothing, interp_mode = 'bilinear', dbasis=True, init_mode='trig', *args, **kwargs):
+    def __init__(self, aabb, smoothing, interp_mode = 'bilinear', dbasis=True, triplanar=False, init_mode='trig', d_init_val=0.1, app_init_val=0.1, *args, **kwargs):
         super(TensorVMSplit, self).__init__(aabb, *args, **kwargs)
 
         # num_levels x num_outputs
@@ -147,11 +165,11 @@ class TensorVMSplit(TensorVoxelBase):
         self.align_corners = True
 
         #(grid_size, dim, init_mode, interp_mode, init_val, smoothing=0.5):
-        self.density_rf = TensoRF(self.grid_size[0], self.density_n_comp[0], init_mode, interp_mode, 0.1, self.lr, smoothing)
-        self.app_rf = TensoRF(self.grid_size[0], self.app_n_comp[0], init_mode, interp_mode, 0.1, self.lr, smoothing)
-        m = sum(self.app_n_comp)
-        self.basis_mat = torch.nn.Linear(m, self.app_dim, bias=False)
-        self.dbasis_mat = torch.nn.Linear(sum(self.density_n_comp), 1, bias=False)
+        model = TensoRF if not triplanar else Triplanar
+        self.density_rf = model(self.grid_size[0], self.density_n_comp[0], init_mode, interp_mode, d_init_val, self.lr, smoothing)
+        self.app_rf = model(self.grid_size[0], self.app_n_comp[0], init_mode, interp_mode, app_init_val, self.lr, smoothing)
+        self.basis_mat = torch.nn.Linear(self.app_rf.dim(), self.app_dim, bias=False)
+        self.dbasis_mat = torch.nn.Linear(self.density_rf.dim(), 1, bias=False)
 
         self.smoothing = smoothing
     

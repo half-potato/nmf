@@ -11,11 +11,11 @@ arch:
   bg_noise: 0.0
   bg_noise_decay: 0.999
 
-  use_predicted_normals: True
-  orient_world_normals: False
+  use_predicted_normals: False
+  orient_world_normals: True
   align_pred_norms: True
   detach_inter: True
-  geonorm_iters: 0
+  geonorm_iters: 10000
 
   tonemap:
     # _target_: modules.tonemap.HDRTonemap
@@ -25,7 +25,10 @@ arch:
   sampler:
     _target_: samplers.continuous_alphagrid.ContinuousAlphagrid
     _partial_: True
-    multiplier: 1
+    multipliers: [1, 2]
+    multiplier_iters: [1000]
+    # multipliers: [1]
+    # multiplier_iters: []
     shrink_iters: []
     dynamic_batchsize: True
     # sample_mode: multi_jitter
@@ -34,8 +37,9 @@ arch:
     # threshold: 5e-5
     threshold: 1e-4
     grid_size: 256
+    update_freq: 16
     max_samples: 200000
-    conv: 10
+    conv: 2
     bound: 1.5
 
   normal_module:
@@ -59,9 +63,10 @@ arch:
     _partial_: True
     _target_: models.realbounce.RealBounce
     percent_bright: 0.1
-    max_brdf_rays: [3194304]
+    # max_brdf_rays: [3194304]
+    max_brdf_rays: [2194304]
     cold_start_bg_iters: 0
-    detach_N_iters: 250
+    detach_N_iters: 0
     anoise: 0.0
 
     # bright_sampler:
@@ -113,7 +118,7 @@ arch:
       # dotpe: 6
       # featureC: 128
       # activation: 'sigexp'
-      bias: -1.1
+      bias: 3
       activation: 'sigmoid'
       # activation: 'sigmoid'
       lr: 1e-3
@@ -133,7 +138,7 @@ arch:
       initializer: 'xavier_sigmoid'
       lr: 1e-3
       tint_bias: -1.1
-      diffuse_bias: -1.1
+      diffuse_bias: -0.619
       diffuse_mul: 1.5
       roughness_bias: -1
       # allocation: 7
@@ -158,18 +163,36 @@ arch:
     #   roughness_bias: -1
     #   # allocation: 7
 
+  # bg_module:
+  #   _target_: modules.bg_modules.HierarchicalCubeMap
+  #   bg_resolution: 512
+  #   mipbias: 0
+  #   num_levels: 1
+  #   TV_max_scale: 1
+  #   activation: 'exp'
+  #   power: 2
+  #   stds: []
+  #   lr: 0.01
+  #   init_val: -1.897
+  #   mul_lr: 0.001
+  #   brightness_lr: 0
+  #   betas: [0.0, 0.0]
+  #   mul_betas: [0.9, 0.9]
+  #   mipbias_lr: 1e-4
+  #   mipnoise: 0.0
+
   bg_module:
-    _target_: modules.bg_modules.HierarchicalCubeMap
-    bg_resolution: 512
+    _target_: modules.integral_equirect.IntegralEquirect
+    bg_resolution: 1024
     mipbias: 0
     num_levels: 1
     TV_max_scale: 1
     activation: 'exp'
     power: 2
     stds: []
-    lr: 0.1
-    init_val: 0
-    mul_lr: 0
+    lr: 0.01
+    init_val: -1.897
+    mul_lr: 0.001
     brightness_lr: 0
     betas: [0.0, 0.0]
     mul_betas: [0.9, 0.9]
@@ -217,3 +240,4 @@ params:
   lr_delay_mult: 0.1
   lr_delay_steps: 100
 
+  bg_col: 'white'

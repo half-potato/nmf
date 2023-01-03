@@ -2,11 +2,15 @@ import torch
 from icecream import ic
 
 @torch.no_grad()
-def select_bounces(weights, num_roughness_rays, percent_bright):
+def select_bounces(weights, app_mask, num_roughness_rays, percent_bright):
     device = weights.device
 
     pt_limit = weights * num_roughness_rays + 0.5
-    num_samples = pt_limit.floor().quantile(0.999).int()
+    nopt_mask = pt_limit.max(dim=1).values < 1
+    pt_limit[nopt_mask] = pt_limit[nopt_mask] / pt_limit.max(dim=1, keepdim=True).values.clamp(min=0.9, max=1)[nopt_mask]# + 0.01
+    pt_limit = pt_limit[app_mask]
+
+    num_samples = pt_limit.floor().quantile(0.99).int()
 
     # create ray_mask
     ray_mask = torch.arange(num_samples, device=device).reshape(1, -1) < pt_limit.reshape(-1, 1).floor()

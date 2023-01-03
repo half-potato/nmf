@@ -1,6 +1,5 @@
 _partial_: True
-# _target_: fields.tcnn.TCNNRF
-_target_: fields.tcnn_og.TCNNRF
+_target_: fields.tcnn.TCNNRF
 distance_scale: 1
 density_shift: 0
 activation: 'exp'
@@ -23,5 +22,5 @@ lr_density: 1e-3
 num_pretrain: 0
 tint_offset: -1.1
 diffuse_offset: -1.1
-enc_dim: 32
+enc_dim: 16
 init_scale: 1e-4

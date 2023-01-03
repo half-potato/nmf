@@ -73,7 +73,8 @@ class ContinuousAlphagrid(torch.nn.Module):
                  near_far=[0.2, 6],
                  threshold=0.002,
                  shrink_threshold=None,
-                 multiplier=1, 
+                 multipliers=[1], 
+                 multiplier_iters=[],
                  sample_mode='multi_jitter',
                  test_sample_mode=None,
                  update_freq=16,
@@ -109,7 +110,9 @@ class ContinuousAlphagrid(torch.nn.Module):
             self.cascade = 1
         ic(self.cascade, self.bound, threshold)
         self.grid_size = grid_size
-        self.multiplier = multiplier
+        self.multipliers = multipliers
+        self.multiplier_iters = multiplier_iters
+        self.multiplier = self.multipliers[0]
         # self.cascade = 1 + math.ceil(math.log2(bound))
         self.grid_size = grid_size
         self.near_far = near_far
@@ -132,7 +135,7 @@ class ContinuousAlphagrid(torch.nn.Module):
         self.iter_density = 0
         # step counter
 
-    def sample_ray_ndc(self, rays_o, rays_d, focal, is_train=True, N_samples=-1):
+    def sample_ray_ndc(self, rays_o, rays_d, focal, is_train=True, stepmul=1, N_samples=-1):
         N_samples = N_samples if N_samples > 0 else self.nSamples
         near, far = self.near_far
         interpx = torch.linspace(near, far, N_samples).unsqueeze(0).to(rays_o)
@@ -150,9 +153,9 @@ class ContinuousAlphagrid(torch.nn.Module):
 
         return rays_pts, interpx, ~mask_outbbox
 
-    def sample_ray(self, rays_o, rays_d, focal, is_train=True, override_near=None, N_samples=-1, N_env_samples=-1):
+    def sample_ray(self, rays_o, rays_d, focal, is_train=True, override_near=None, stepmul=1, N_samples=-1, N_env_samples=-1):
         # focal: ratio of meters to pixels at a distance of 1 meter
-        N_samples = N_samples if N_samples > 0 else self.nSamples
+        N_samples = int((N_samples if N_samples > 0 else self.nSamples) * stepmul)
         # N_env_samples = N_env_samples if N_env_samples > 0 else self.nEnvSamples
         N_env_samples = 0
         device = rays_o.device
@@ -227,7 +230,7 @@ class ContinuousAlphagrid(torch.nn.Module):
         return rays_pts, interpx, ~mask_outbbox, env_mask
 
     @torch.no_grad()
-    def sample(self, rays_chunk, focal, ndc_ray=False, override_near=None, is_train=False, N_samples=-1):
+    def sample(self, rays_chunk, focal, ndc_ray=False, override_near=None, is_train=False, dynamic_batch_size=True, N_samples=-1, stepmul=1):
         """
             Parameters:
                 rays_chunk: (B, 6) float. (ox, oy, oz, dx, dy, dz) ray origin and direction
@@ -247,7 +250,7 @@ class ContinuousAlphagrid(torch.nn.Module):
         viewdirs = rays_chunk[:, 3:6]
         if ndc_ray:
             xyz_sampled, z_vals, ray_valid = self.sample_ray_ndc(
-                rays_chunk[:, :3], viewdirs, focal, is_train=is_train, N_samples=N_samples)
+                rays_chunk[:, :3], viewdirs, focal, is_train=is_train, stepmul=stepmul, N_samples=N_samples)
             dists = torch.cat(
                 (z_vals[:, 1:] - z_vals[:, :-1], torch.zeros_like(z_vals[:, :1])), dim=-1)
             rays_norm = torch.norm(viewdirs, dim=-1, keepdim=True)
@@ -255,7 +258,7 @@ class ContinuousAlphagrid(torch.nn.Module):
             viewdirs = viewdirs / rays_norm
         else:
             xyz_sampled, z_vals, ray_valid, env_mask = self.sample_ray(
-                rays_chunk[:, :3], viewdirs, focal, is_train=is_train, N_samples=N_samples, override_near=override_near)
+                rays_chunk[:, :3], viewdirs, focal, is_train=is_train, N_samples=N_samples, stepmul=stepmul, override_near=override_near)
             dists = torch.cat(
                 (z_vals[:, 1:] - z_vals[:, :-1], torch.zeros_like(z_vals[:, :1])), dim=-1)
 
@@ -292,7 +295,7 @@ class ContinuousAlphagrid(torch.nn.Module):
         ray_invalid[ray_valid] |= (~alpha_mask)
         ray_valid = ~ray_invalid
 
-        if self.dynamic_batchsize and is_train:
+        if self.dynamic_batchsize and is_train and dynamic_batch_size:
             whole_valid = torch.cumsum(ray_valid.sum(dim=1), dim=0) < self.max_samples
             ray_valid = ray_valid[whole_valid, :] 
             xyz_sampled = xyz_sampled[whole_valid, :] 
@@ -423,6 +426,11 @@ class ContinuousAlphagrid(torch.nn.Module):
     def check_schedule(self, iteration, batch_mul, rf):
         if iteration % self.update_freq == 0:
             self.update(rf)
+        multi_list = [i*batch_mul for i in self.multiplier_iters]
+        if iteration in multi_list:
+            i = multi_list.index(iteration)
+            self.multiplier = self.multipliers[i+1]
+            print(f'Multiplier: {self.multiplier}, {i}')
         if iteration in [i*batch_mul for i in self.shrink_iters]:
             new_aabb = self.get_bounds()
             rf.shrink(new_aabb, self.grid_size)

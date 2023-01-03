@@ -11,11 +11,12 @@ arch:
   bg_noise: 0.0
   bg_noise_decay: 0.999
 
-  use_predicted_normals: True
-  orient_world_normals: False
+  use_predicted_normals: False
+  orient_world_normals: True
   align_pred_norms: True
   detach_inter: True
-  geonorm_iters: 0
+  geonorm_iters: 10000
+  recur_stepmul: 0.25
 
   tonemap:
     # _target_: modules.tonemap.HDRTonemap
@@ -27,6 +28,8 @@ arch:
     _partial_: True
     multipliers: [1, 2]
     multiplier_iters: [1000]
+    # multipliers: [1]
+    # multiplier_iters: []
     shrink_iters: []
     dynamic_batchsize: True
     # sample_mode: multi_jitter
@@ -35,8 +38,9 @@ arch:
     # threshold: 5e-5
     threshold: 1e-4
     grid_size: 256
-    max_samples: 200000
-    conv: 10
+    update_freq: 16
+    max_samples: 10000
+    conv: 2
     bound: 1.5
 
   normal_module:
@@ -51,48 +55,74 @@ arch:
 
     hidden_w: 64
     num_layers: 3
-    initializer: 'kaiming_fanout'
+    initializer: 'kaiming'
     size_multi: 2.5e-3
     # allocation: 3
     offset_geometry: False
 
   model:
     _partial_: True
-    _target_: models.refnerf.RefNeRF
-    anoise: 0.1
-    detach_N_iters: 500
+    _target_: models.realbounce.RealBounce
+    percent_bright: 0.1
+    max_brdf_rays: [70000, 800000]
+    # max_brdf_rays: [2194304]
+    cold_start_bg_iters: 0
+    detach_N_iters: 0
+    anoise: 0.0
 
-    ref_module:
+    # bright_sampler:
+    #   _target_: modules.bright_sampler.BrightnessImportanceSampler
+    #   _partial_: True
+    #   scale: 10
+    #   update_freq: 50
+
+    brdf_sampler:
+      _target_: brdf_samplers.ggx.GGXSampler
+      # _target_: modules.brdf.CosineLobeSampler
+      # _target_: modules.brdf.BeckmannSampler
       _partial_: True
-      _target_: modules.render_modules.MLPRender_FP
+
+    brdf:
+      _target_: modules.brdf.MLPBRDF
+      _partial_: True
+      # pbr: True
+
+      # v_encoder:
+      #   _target_: modules.ish.ListISH
+      #   degs: [0,1,2,4]
+      # l_encoder:
+      #   _target_: modules.ish.ListISH
+      #   degs: [0,1,2,4]
+      # num_layers: 4
+      # feape: 0
+      # featureC: 128
+      mul_LdotN: False
       feape: 0
-      lr: 1e-4
-      # view_encoder:
-      #   _target_: models.ish.FullISH
-      #   max_degree: 4
-      # ref_encoder:
-      #   _target_: models.ish.ListISH
-      #   degs: [0,1,2,4,8,16]
-      ref_encoder:
-        _target_: modules.refsh.RefSH
-        deg_view: 5
-      # ref_encoder:
-      #   _target_: models.render_modules.PE
-      #   max_degree: 4
-      # ref_encoder:
-      #   _target_: models.ish.ISH
-      #   max_degree: 6
-      # ref_encoder:
-      #   _target_: models.ish.RandISH
-      #   rand_n: 64
-      #   std: 5
-      # activation: 'softplus'
-      activation: 'sigmoid'
+      dotpe: -1
+      # h_encoder:
+      #   _target_: modules.render_modules.PE
+      #   max_degree: 2
+      # d_encoder:
+      #   _target_: modules.render_modules.PE
+      #   max_degree: 2
+      h_encoder:
+        _target_: modules.ish.ListISH
+        degs: [0,1,2,4]
+      d_encoder:
+        _target_: modules.ish.ListISH
+        degs: [0,1,2,4]
+      hidden_w: 64
+      num_layers: 4
       initializer: 'kaiming'
-      hidden_w: 256
-      num_layers: 8
-      skip: 4
-      offset: 0
+
+      # num_layers: 4
+      # dotpe: 6
+      # featureC: 128
+      # activation: 'sigexp'
+      bias: -1.735
+      activation: 'sigmoid'
+      # activation: 'sigmoid'
+      lr: 1e-3
 
     diffuse_module:
       _partial_: True
@@ -106,12 +136,33 @@ arch:
       #   max_degree: 2
       hidden_w: 64
       num_layers: 1
-      initializer: 'kaiming'
+      initializer: 'xavier_sigmoid'
       lr: 1e-3
       tint_bias: -1.1
-      diffuse_bias: -1.1
+      diffuse_bias: -0.62
+      diffuse_mul: 1.5
       roughness_bias: -1
       # allocation: 7
+
+    # diffuse_module:
+    #   _partial_: True
+    #   _target_: modules.render_modules.MLPDiffuse
+    #   pospe: -1
+    #   feape: 0
+    #   # pospe: 12
+    #   # feape: 0
+    #   # view_encoder:
+    #   #   _target_: modules.render_modules.PE
+    #   #   max_degree: 2
+    #   hidden_w: 64
+    #   num_layers: 1
+    #   initializer: 'xavier_sigmoid'
+    #   lr: 1e-3
+    #   tint_bias: -1.1
+    #   diffuse_bias: -1.1
+    #   diffuse_mul: 1.5
+    #   roughness_bias: -1
+    #   # allocation: 7
 
   bg_module:
     _target_: modules.bg_modules.HierarchicalCubeMap
@@ -122,9 +173,9 @@ arch:
     activation: 'exp'
     power: 2
     stds: []
-    lr: 0.1
+    lr: 0.01
     init_val: 0
-    mul_lr: 0
+    mul_lr: 0.001
     brightness_lr: 0
     betas: [0.0, 0.0]
     mul_betas: [0.9, 0.9]
@@ -147,7 +198,7 @@ params:
   envmap_lambda: 5e-5
   pred_lambda: 3e-4
   final_pred_lambda: Null
-  diffuse_lambda: 0
+  diffuse_lambda: -1e-6
   ori_lambda: 0.01
   final_ori_lambda: Null
   brdf_lambda: 0
@@ -173,3 +224,4 @@ params:
   lr_delay_steps: 100
 
   bg_col: 'white'
+

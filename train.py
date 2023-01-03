@@ -17,7 +17,7 @@ from pathlib import Path
 from loguru import logger
 import functools
 
-torch.autograd.set_detect_anomaly(True)
+# torch.autograd.set_detect_anomaly(True)
 
 # from torch.profiler import profile, record_function, ProfilerActivity
 
@@ -313,7 +313,7 @@ def reconstruction(args):
 
     OmegaConf.save(config=args, f=f'{logfolder}/config.yaml')
     if True:
-    # with torch.profiler.profile(record_shapes=True, schedule=torch.profiler.schedule(wait=1, warmup=1, active=20), with_stack=True) as p:
+    # with torch.profiler.profile(record_shapes=True, schedule=torch.profiler.schedule(wait=1, warmup=1, active=params.n_iters-1), with_stack=True) as p:
     # with torch.autograd.detect_anomaly():
         for iteration in pbar:
             rays_remaining = params.batch_size
@@ -322,21 +322,30 @@ def reconstruction(args):
             pred_losses, ori_losses = [], []
             TVs = []
 
-            while rays_remaining > 0:
-                ray_idx, rgb_idx = trainingSampler.nextids(min(8192, rays_remaining))
+            ray_idx, rgb_idx = trainingSampler.nextids(rays_remaining)
+            rays_train, rgba_train = allrays[ray_idx], allrgbs[rgb_idx].reshape(-1, allrgbs.shape[-1])
+            match params.bg_col:
+                case 'rand':
+                    bg_col = torch.rand(3, device=device)
+                case 'white':
+                    bg_col = torch.ones((3), device=device)
+                case 'black':
+                    bg_col = torch.zeros((3), device=device)
+                case _:
+                    raise Exception(f"Unknown bg col: {params.bg_col}")
+            if rgba_train.shape[-1] == 4:
+                rgb_train = rgba_train[:, :3] * rgba_train[:, -1:] + (1 - rgba_train[:, -1:])*bg_col  # blend A to RGB
+                alpha_train = rgba_train[..., 3]
+            else:
+                rgb_train = rgba_train
+                alpha_train = None
 
-                rays_train, rgba_train = allrays[ray_idx], allrgbs[rgb_idx].reshape(-1, allrgbs.shape[-1])
-                if rgba_train.shape[-1] == 4:
-                    rgb_train = rgba_train[:, :3] * rgba_train[:, -1:] + (1 - rgba_train[:, -1:])  # blend A to RGB
-                    alpha_train = rgba_train[..., 3]
-                else:
-                    rgb_train = rgba_train
-                    alpha_train = None
+            while rays_remaining > 0:
 
                 with torch.cuda.amp.autocast(enabled=args.fp16):
                     ims, stats = renderer(rays_train, tensorf,
                             keys = ['rgb_map', 'distortion_loss', 'prediction_loss', 'ori_loss', 'diffuse_reg', 'roughness', 'whole_valid', 'envmap_reg', 'brdf_reg'],
-                            focal=focal, output_alpha=alpha_train, chunk=params.batch_size, white_bg = white_bg, is_train=True, ndc_ray=ndc_ray)
+                            focal=focal, output_alpha=alpha_train, chunk=params.batch_size, bg_col=bg_col, is_train=True, ndc_ray=ndc_ray)
 
                     prediction_loss = stats['prediction_loss'].sum()
                     distortion_loss = stats['distortion_loss'].sum()
@@ -352,7 +361,8 @@ def reconstruction(args):
                     else:
                         # loss = ((rgb_map - rgb_train[whole_valid]) ** 2).mean()
                         # loss = F.huber_loss(rgb_map.clip(0, 1), rgb_train[whole_valid], delta=1, reduction='mean')
-                        loss = ((rgb_map.clip(0, 1) - rgb_train[whole_valid].clip(0, 1))**2).sum()
+                        # loss = ((rgb_map.clip(0, 1) - rgb_train[whole_valid].clip(0, 1))**2).sum()
+                        loss = ((rgb_map.clip(0, 1) - rgb_train[whole_valid].clip(0, 1)).abs()).sum()
                     # gt_normal_map = test_dataset.all_norms[ray_idx].to(device)
                     # norm_err = -(data['normal_map'] * gt_normal_map).sum(dim=-1).mean()
                     # ic(norm_err)
@@ -362,12 +372,21 @@ def reconstruction(args):
                     ori_loss = stats['ori_loss'].sum()
 
                     rays_remaining -= rgb_map.shape[0]
+                    rays_train = rays_train[~whole_valid]
+                    rgb_train = rgb_train[~whole_valid]
 
                     # loss
-                    ori_lambda = params.ori_lambda if iteration > 1000 else params.ori_lambda * iteration / 1000
+                    # ori_lambda = params.ori_lambda if iteration > 1000 else params.ori_lambda * iteration / 1000
                     # pred_lambda = params.pred_lambda if iteration > 500 else params.pred_lambda * iteration / 500
-                    # ori_lambda = params.ori_lambda
+                    ori_lambda = params.ori_lambda
                     pred_lambda = params.pred_lambda
+                    # ic(pred_lambda, ori_lambda, loss, 
+                    #     params.distortion_lambda*distortion_loss,
+                    #     ori_lambda*ori_loss,
+                    #     params.envmap_lambda * (envmap_reg-0.05).clip(min=0),
+                    #     params.diffuse_lambda * diffuse_reg,
+                    #     params.brdf_lambda * brdf_reg,
+                    #     pred_lambda * prediction_loss)
                     total_loss = loss + \
                         params.distortion_lambda*distortion_loss + \
                         ori_lambda*ori_loss + \
@@ -376,8 +395,6 @@ def reconstruction(args):
                         params.brdf_lambda * brdf_reg + \
                         pred_lambda * prediction_loss
 
-                    params.ori_lambda *= ori_decay
-                    params.pred_lambda *= normal_decay
 
                     # if tensorf.visibility_module is not None:
                         # pass
@@ -437,6 +454,8 @@ def reconstruction(args):
                 torch.nn.utils.clip_grad_norm_(tensorf.parameters(), params.clip_grad)
             optimizer.step()
             scheduler.step()
+            params.ori_lambda *= ori_decay
+            params.pred_lambda *= normal_decay
                 
             if iteration % args.vis_every == args.vis_every - 1 and args.N_vis!=0:
                 # tensorf.save(f'{logfolder}/{args.expname}_{iteration}.th', args.model.arch)

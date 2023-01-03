@@ -89,7 +89,7 @@ def Al(l):
         return 2*np.pi * (-1)**(l/2-1) / ((l+2)*(l-1)) * ( math.factorial(l) / (2**l*math.factorial(l//2)**2) )
 
 class HierarchicalCubeMap(torch.nn.Module):
-    def __init__(self, bg_resolution=512, num_levels=1, featureC=128, activation='identity', power=4, brightness_lr=0.01, mul_lr=0.01, mul_betas=[0.9, 0.999],
+    def __init__(self, bg_resolution=512, num_levels=1, featureC=128, activation='identity', power=2, brightness_lr=0.01, mul_lr=0.01, mul_betas=[0.9, 0.999],
                  stds = [1, 2, 4, 8], betas=[0.9, 0.99], TV_max_scale=1, mipbias=+0.5, init_val=-2, interp_pyramid=True, lr=0.15, mipbias_lr=1e-3, mipnoise=0.5, learnable_bias=True):
         super().__init__()
         self.num_levels = num_levels
@@ -98,14 +98,18 @@ class HierarchicalCubeMap(torch.nn.Module):
         self.power = power
         self.align_corners = True
         self.smoothing = 1
-        self.mipbias_lr = mipbias_lr
+
         self.lr = lr
         self.mul_lr = mul_lr
+        self.mipbias_lr = mipbias_lr
+        self.brightness_lr = brightness_lr
+
         self.mul_betas = mul_betas
+        self.betas = betas
+
         start_mip = self.num_levels - 1
         self.TV_max_scale = TV_max_scale
         self.mipnoise = mipnoise
-        self.betas = betas
         self.max_mip = start_mip
         self.register_parameter('brightness', torch.nn.Parameter(torch.tensor(0.0, dtype=float)))
         self.register_parameter('mul', torch.nn.Parameter(torch.tensor(1.0, dtype=float)))
@@ -117,7 +121,6 @@ class HierarchicalCubeMap(torch.nn.Module):
             self.register_parameter('mipbias', torch.nn.Parameter(torch.tensor(mipbias, dtype=float)))
         else:
             self.mipbias = mipbias
-        self.brightness_lr = brightness_lr
 
         data = init_val * torch.ones((1, 6, bg_resolution, bg_resolution, 3))
         self.bg_mats = nn.ParameterList([

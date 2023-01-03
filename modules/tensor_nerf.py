@@ -43,7 +43,7 @@ class TensorNeRF(torch.nn.Module):
     def __init__(self, rf, model, aabb, near_far,
                  sampler, tonemap=None, bg_module=None, normal_module=None,
                  alphaMask=None,
-                 infinity_border=False,
+                 infinity_border=False, recur_stepmul=1,
                  rayMarch_weight_thres=0.0001, recur_weight_thres=1e-3,detach_inter=False, bg_noise=0, bg_noise_decay=0.999, use_predicted_normals=True,
                  orient_world_normals=False, align_pred_norms=True,
                  eval_batch_size=512, geonorm_iters=-1,
@@ -70,6 +70,7 @@ class TensorNeRF(torch.nn.Module):
         self.recur_weight_thres = recur_weight_thres
         self.eval_batch_size = eval_batch_size
         self.geonorm_iters = geonorm_iters
+        self.recur_stepmul = recur_stepmul
 
         self.detach_inter = detach_inter
 
@@ -137,7 +138,7 @@ class TensorNeRF(torch.nn.Module):
             self.sampler.update(self.rf, init=True)
         self.bg_noise *= self.bg_noise_decay
         if self.geonorm_iters > 0:
-            self.use_predicted_normals = self.geonorm_iters*batch_mul > iter
+            self.use_predicted_normals = self.geonorm_iters*batch_mul < iter
         return require_reassignment
 
     def at_infinity(self, xyz_sampled, max_dist=10):
@@ -162,15 +163,15 @@ class TensorNeRF(torch.nn.Module):
             norms = normalize(-g[0][:, :3])
             return norms
 
-    def render_just_bg(self, rays, roughness, white_bg=True):
+    def render_just_bg(self, rays, roughness):
         if rays.shape[0] == 0:
             return torch.empty((0, 3), device=rays.device)
         viewdirs = rays[:, 3:6]
         bg = self.bg_module(viewdirs[:, :], roughness)
         return bg.reshape(-1, 3)
 
-    def forward(self, rays, focal, start_mipval=None,
-                recur=0, override_near=None, output_alpha=None, white_bg=True,
+    def forward(self, rays, focal, start_mipval=None, bg_col=torch.tensor([1, 1, 1]), stepmul=1,
+                recur=0, override_near=None, output_alpha=None, dynamic_batch_size=True,
                 is_train=False, ndc_ray=False, N_samples=-1, tonemap=True, draw_debug=True):
         # rays: (N, (origin, viewdir, ray_up))
         output = {}
@@ -180,7 +181,7 @@ class TensorNeRF(torch.nn.Module):
         device = rays.device
 
         xyz_sampled, ray_valid, max_samps, z_vals, dists, whole_valid = self.sampler.sample(
-            rays, focal, ndc_ray, override_near=override_near, is_train=is_train, N_samples=N_samples)
+            rays, focal, ndc_ray, override_near=override_near, is_train=is_train, stepmul=stepmul, dynamic_batch_size=dynamic_batch_size, N_samples=N_samples)
         # xyz_sampled: (M, 4) float. premasked valid sample points
         # ray_valid: (b, N) bool. mask of which samples are valid
         # max_samps = N
@@ -218,7 +219,7 @@ class TensorNeRF(torch.nn.Module):
 
         def recur_forward(rays, start_mipval):
             if recur < len(self.model.max_brdf_rays)-1:
-                incoming_data = self(rays, focal, recur=recur+1, white_bg=False,
+                incoming_data, incoming_stats = self(rays, focal, recur=recur+1, bg_col=None, dynamic_batch_size=False, stepmul=self.recur_stepmul,
                                      start_mipval=start_mipval.reshape(-1), override_near=self.rf.stepSize*5, is_train=is_train,
                                      ndc_ray=False, N_samples=N_samples, tonemap=False, draw_debug=False)
                 incoming_light = incoming_data['rgb_map']
@@ -236,6 +237,7 @@ class TensorNeRF(torch.nn.Module):
         thres = self.rayMarch_weight_thres if recur == 0 else self.recur_weight_thres
         app_mask = (weight > thres)
         papp_mask = app_mask[ray_valid]
+        # ic(recur, ray_valid.shape, ray_valid.sum(), app_mask.shape, app_mask.sum())
 
         # if self.visibility_module is not None:
         #     self.visibility_module.ray_update(xyz_normed, viewdirs[ray_valid], app_mask, ray_valid)
@@ -264,7 +266,7 @@ class TensorNeRF(torch.nn.Module):
             else:
                 v_world_normal = world_normal
 
-            rgb, debug = self.model(app_xyz, app_features, viewdirs[app_mask], v_world_normal[papp_mask], weight[app_mask], weight.shape[0], recur, recur_forward)
+            rgb, debug = self.model(app_xyz, app_features, viewdirs[app_mask], v_world_normal[papp_mask], weight, app_mask, weight.shape[0], recur, recur_forward)
 
         else:
             debug = {k: torch.empty((0, v), device=device, dtype=weight.dtype) for k, v in self.model.outputs.items()}
@@ -277,7 +279,6 @@ class TensorNeRF(torch.nn.Module):
         # (N, bundle_size, bundle_size)
         if recur > 0 and self.detach_inter:
             weight = weight.detach()
-            bg_weight = bg_weight.detach()
 
         acc_map = torch.sum(weight, 1)
         # rgb_map = torch.sum(weight[..., None] * rgb.clip(min=0, max=1), -2)
@@ -309,7 +310,6 @@ class TensorNeRF(torch.nn.Module):
                 world_normal_map = acc_map[..., None] * world_normal_map + (1 - acc_map[..., None])
                 pred_norm_map = row_mask_sum(pred_norms*pweight[..., None], ray_valid)
                 pred_norm_map = acc_map[..., None] * pred_norm_map + (1 - acc_map[..., None])
-                # ic(pred_norms, pred_norm_map)
 
                 if weight.shape[1] > 0:
                     inds = ((weight).max(dim=1).indices).clip(min=0)
@@ -322,7 +322,7 @@ class TensorNeRF(torch.nn.Module):
 
                 # collect statistics about the surface
                 # surface width in voxels
-                surface_width = app_mask.sum(dim=1)
+                surface_width = ray_valid.sum(dim=1)
 
                 # TODO REMOVE
                 LOGGER.log_norms_n_rays(xyz_sampled[papp_mask], v_world_normal[papp_mask], weight[app_mask])
@@ -346,8 +346,11 @@ class TensorNeRF(torch.nn.Module):
             # viewdirs point inward. -viewdirs aligns with pred_norms. So we want it below 0
             o_world_normal = world_normal if self.orient_world_normals else pred_norms
             aweight = weight[app_mask]
-            NdotV = (-viewdirs[app_mask].reshape(-1, 3).detach() * o_world_normal[papp_mask].reshape(-1, 3)).sum(dim=-1)
-            ori_loss = (aweight * NdotV.clamp(max=0)**2).sum()# / B
+            NdotV1 = (-viewdirs[app_mask].reshape(-1, 3).detach() * pred_norms[papp_mask].reshape(-1, 3)).sum(dim=-1)
+
+            aweight = weight[app_mask]
+            NdotV2 = (-viewdirs[app_mask].reshape(-1, 3).detach() * world_normal[papp_mask].reshape(-1, 3)).sum(dim=-1)
+            ori_loss = (aweight * (NdotV1.clamp(max=0)**2 + NdotV2.clamp(max=0)**2)).sum()# / B
 
             midpoint = torch.cat([
                 z_vals,
@@ -365,7 +368,6 @@ class TensorNeRF(torch.nn.Module):
 
             if self.align_pred_norms:
                 align_world_loss = 2*(1-(pred_norms[papp_mask] * world_normal[papp_mask]).sum(dim=-1))#**0.5
-                # ic(pred_norms.mean(), world_normal.mean(), align_world_loss.mean(), aweight.mean(), align_world_loss.shape)
                 prediction_loss = (aweight * align_world_loss).sum()# / B
             else:
                 prediction_loss = torch.tensor(0.0)
@@ -392,24 +394,23 @@ class TensorNeRF(torch.nn.Module):
         # ic(weight.mean(), rgb.mean(), rgb_map.mean(), v_world_normal.mean(), sigma.mean(), dists.mean(), alpha.mean())
 
         # ic(rgb[app_mask].mean(dim=0), rgb_map[acc_map>0.1].mean(dim=0), weight.shape)
-        if self.bg_module is not None and not white_bg:
+        if self.bg_module is not None and bg_col is None:
             bg_roughness = -100*torch.ones(B, 1, device=device) if start_mipval is None else start_mipval
             bg = self.bg_module(viewdirs[:, 0, :], bg_roughness).reshape(-1, 3)
             if tonemap:
                 bg = self.tonemap(bg, noclip=True)
-            if recur > 0:
-                bg = bg.detach()
             rgb_map = rgb_map + \
                 (1 - acc_map[..., None]) * bg
         else:
-            if white_bg or (is_train and torch.rand((1,)) < 0.5):
-                if output_alpha is not None and self.bg_noise > 0:
-                    noise = (torch.rand((1, 1), device=device) > 0.5).float()*output_alpha[:, None] + (1-output_alpha[:, None])
-                    # noise = (torch.rand((*acc_map.shape, 1), device=device) > 0.5).float()*output_alpha[:, None] + (1-output_alpha[:, None])
-                else:
-                    noise = 1-torch.rand((*acc_map.shape, 3), device=device)*self.bg_noise
-                # noise = 1-torch.rand((*acc_map.shape, 3), device=device)*self.bg_noise
-                rgb_map = rgb_map + (1 - acc_map[..., None]) * noise
+            # if white_bg or (is_train and torch.rand((1,)) < 0.5):
+            #     if output_alpha is not None and self.bg_noise > 0:
+            #         noise = (torch.rand((1, 1), device=device) > 0.5).float()*output_alpha[:, None] + (1-output_alpha[:, None])
+            #         # noise = (torch.rand((*acc_map.shape, 1), device=device) > 0.5).float()*output_alpha[:, None] + (1-output_alpha[:, None])
+            #     else:
+            #         noise = 1-torch.rand((*acc_map.shape, 3), device=device)*self.bg_noise
+            #     # noise = 1-torch.rand((*acc_map.shape, 3), device=device)*self.bg_noise
+            #     rgb_map = rgb_map + (1 - acc_map[..., None]) * noise
+            rgb_map = rgb_map + (1 - acc_map[..., None]) * bg_col.to(device).reshape(1, 3)
             # if white_bg:
             #     if True:
             #         bg_col = torch.rand((1, 3), device=device).clip(min=torch.finfo(torch.float32).eps).sqrt()

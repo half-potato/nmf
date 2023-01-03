@@ -39,7 +39,7 @@ class RealBounce(torch.nn.Module):
             self.detach_N = False
         return False
 
-    def forward(self, xyzs, app_features, viewdirs, normals, weights, B, recur, ray_cast_fn):
+    def forward(self, xyzs, app_features, viewdirs, normals, weights, app_mask, B, recur, ray_cast_fn):
         # xyzs: (M, 4)
         # viewdirs: (M, 3)
         # normals: (M, 3)
@@ -56,7 +56,7 @@ class RealBounce(torch.nn.Module):
         # pick rays to bounce
         num_brdf_rays = self.max_brdf_rays[recur] // B
         bounce_mask, ray_mask, bright_mask = select_bounces(
-                weights, num_brdf_rays, self.percent_bright)
+                weights, app_mask, num_brdf_rays, self.percent_bright)
 
         reflect_rgb = torch.zeros_like(diffuse)
         brdf_rgb = torch.zeros_like(diffuse)
@@ -81,15 +81,34 @@ class RealBounce(torch.nn.Module):
                 pbright_mask = bright_mask[ray_mask]
                 L[pbright_mask] = bL[bright_mask]
 
-            eV = bV.reshape(-1, 1, 3).expand(-1, ray_mask.shape[1], 3)[ray_mask]
-            eN = bN.reshape(-1, 1, 3).expand(-1, ray_mask.shape[1], 3)[ray_mask]
+            n = ray_xyz.shape[0]
+            m = ray_mask.shape[1]
+
+            eV = bV.reshape(-1, 1, 3).expand(-1, m, 3)[ray_mask]
+            eN = bN.reshape(-1, 1, 3).expand(-1, m, 3)[ray_mask]
             ea = r1.expand(ray_mask.shape)[ray_mask]
+            efeatures = noise_app_features[bounce_mask].reshape(n, 1, -1).expand(n, m, -1)[ray_mask]
+            exyz = ray_xyz[ray_mask]
+
+            # stacked = torch.cat([
+            #     bV.reshape(-1, 1, 3).expand(-1, m, 3),
+            #     bN.reshape(-1, 1, 3).expand(-1, m, 3),
+            #     ray_xyz,
+            #     r1.reshape(-1, 1, 1).expand(*ray_mask.shape, 1),
+            #     noise_app_features[bounce_mask].reshape(n, 1, -1).expand(n, m, -1),
+            # ], dim=-1)
+            # masked = stacked[ray_mask]
+            # eV = masked[:, 0:3]
+            # eN = masked[:, 3:6]
+            # exyz = masked[:, 6:9]
+            # ea = masked[:, 9:10]
+            # efeatures = masked[:, 10:]
 
             H = normalize((eV+L)/2)
             mipval = self.brdf_sampler.calculate_mipval(H.detach(), eV, eN.detach(), ray_mask, ea**2)
 
             bounce_rays = torch.cat([
-                ray_xyz[ray_mask],
+                exyz,
                 L,
             ], dim=-1)
             n = bounce_rays.shape[0]
@@ -98,12 +117,10 @@ class RealBounce(torch.nn.Module):
 
             # calculate second part of BRDF
             n, m = ray_mask.shape
-            efeatures = noise_app_features[bounce_mask].reshape(n, 1, -1).expand(n, m, -1)[ray_mask]
-            eroughness = r1.expand(n, m)[ray_mask].reshape(-1, 1)
             diffvec = torch.matmul(row_world_basis.permute(0, 2, 1), L.unsqueeze(-1)).squeeze(-1)
             halfvec = torch.matmul(row_world_basis.permute(0, 2, 1), H.unsqueeze(-1)).squeeze(-1)
             # brdf_weight = self.brdf(eV, L, eN, halfvec, diffvec, efeatures, eroughness)
-            brdf_weight = self.brdf(eV, L.detach(), eN.detach(), halfvec.detach(), diffvec.detach(), efeatures, eroughness.detach()) #*(1-1e-2) + 1e-2
+            brdf_weight = self.brdf(eV, L.detach(), eN.detach(), halfvec.detach(), diffvec.detach(), efeatures, ea.detach())
             ray_count = (ray_mask.sum(dim=1)+1e-8)[..., None]
 
             brdf_color = row_mask_sum(brdf_weight, ray_mask) / ray_count

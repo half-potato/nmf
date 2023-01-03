@@ -62,7 +62,7 @@ class RefNeRF(torch.nn.Module):
         
         return self.tonemap(envmap).clamp(0, 1)#, self.tonemap(color).clamp(0, 1)
 
-    def forward(self, xyzs, app_features, viewdirs, normals, weights, B, recur, ray_cast_fn):
+    def forward(self, xyzs, app_features, viewdirs, normals, weights, app_mask, B, recur, ray_cast_fn):
         # xyzs: (M, 4)
         # viewdirs: (M, 3)
         # normals: (M, 3)

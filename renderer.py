@@ -204,7 +204,7 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
     tensorf.eval()
     for idx, im_idx, rays, gt_rgb in iterator():
 
-        ims, stats = brender(rays, tensorf, N_samples=N_samples, ndc_ray=ndc_ray, white_bg = white_bg, is_train=False)
+        ims, stats = brender(rays, tensorf, N_samples=N_samples, ndc_ray=ndc_ray, is_train=False)
 
         # H, W, _ = normal.shape
         # normal = normal.reshape(-1, 3)# @ pose[:3, :3]
