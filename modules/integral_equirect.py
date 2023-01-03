@@ -4,6 +4,9 @@ import torch.nn.functional as F
 import math
 from . import safemath
 from icecream import ic
+import numpy as np
+import imageio
+import cv2
 
 class IntegralEquirect(torch.nn.Module):
     def __init__(self, bg_resolution, init_val, activation='identity',
@@ -35,7 +38,7 @@ class IntegralEquirect(torch.nn.Module):
     def get_optparam_groups(self, lr_scale=1):
         # lr_scale = 1
         return [
-            {'params': self.bg_mats,
+            {'params': self.bg_mat,
              'betas': self.betas,
              'lr': self.lr*lr_scale,
              'name': 'bg'},
@@ -76,6 +79,17 @@ class IntegralEquirect(torch.nn.Module):
 
     def mean_color(self):
         return self.activation_fn(self.bg_mat).reshape(-1, 3).mean(dim=0)
+
+    @torch.no_grad()
+    def save(self, path, prefix='', tonemap=None):
+        im = self.activation_fn(self.bg_mat)
+        if tonemap is not None:
+            im = tonemap(im)
+        im = im.clamp(0, 1)
+        im = (255*im).short().permute(0, 2, 3, 1).squeeze(0)
+        im = im.cpu().numpy()
+        im = cv2.cvtColor(im.astype(np.uint8), cv2.COLOR_RGB2BGR)
+        imageio.imwrite(str(path / f'{prefix}pano.png'), im)
 
     def sa2mip(self, u, saSample, eps=torch.finfo(torch.float32).eps):
         h, w = self.hw()
@@ -143,7 +157,7 @@ class IntegralEquirect(torch.nn.Module):
         theta = safemath.atan2(c, norm2d)
         coords = torch.cat([
             (phi % (2*math.pi) - math.pi) / math.pi,
-            theta/math.pi*2,
+            -theta/math.pi*2,
         ], dim=1)
         x = coords.reshape(1, 1, -1, 2)
 

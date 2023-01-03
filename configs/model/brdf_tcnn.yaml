@@ -185,11 +185,7 @@ arch:
     _target_: modules.integral_equirect.IntegralEquirect
     bg_resolution: 1024
     mipbias: 0
-    num_levels: 1
-    TV_max_scale: 1
     activation: 'exp'
-    power: 2
-    stds: []
     lr: 0.01
     init_val: -1.897
     mul_lr: 0.001
