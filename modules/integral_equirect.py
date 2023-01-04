@@ -19,7 +19,7 @@ class IntegralEquirect(torch.nn.Module):
         # self.register_buffer('cache', cache)
         self.mipnoise = mipnoise
         # self.interp_mode = 'nearest'
-        self.align_corners = False
+        self.align_corners = True
         self.interp_mode = 'bilinear'
         self.register_parameter('mipbias', torch.nn.Parameter(torch.tensor(mipbias, dtype=float)))
         self.register_parameter('brightness', torch.nn.Parameter(torch.tensor(0.0, dtype=float)))
@@ -55,7 +55,7 @@ class IntegralEquirect(torch.nn.Module):
         ]
 
     def hw(self):
-        h, w = self.bg_mat.shape[-1], self.bg_mat.shape[-2]
+        w, h = self.bg_mat.shape[-1], self.bg_mat.shape[-2]
         return h, w
 
     def activation_fn(self, x):
@@ -88,15 +88,15 @@ class IntegralEquirect(torch.nn.Module):
         im = im.clamp(0, 1)
         im = (255*im).short().permute(0, 2, 3, 1).squeeze(0)
         im = im.cpu().numpy()
-        im = cv2.cvtColor(im.astype(np.uint8), cv2.COLOR_RGB2BGR)
+        # im = cv2.cvtColor(im.astype(np.uint8), cv2.COLOR_RGB2BGR)
         imageio.imwrite(str(path / f'{prefix}pano.png'), im)
 
     def sa2mip(self, u, saSample, eps=torch.finfo(torch.float32).eps):
         h, w = self.hw()
-        saTexel = 4 * math.pi / (6*h*w) * 4
         # TODO calculate distortion of cube map for saTexel
         # distortion = 4 * math.pi / 6
-        distortion_w = 1-u[:, 2]**2
+        # distortion_w = 1/(1-u[:, 2]**2).clip(min=eps)
+        distortion_w = (1-u[:, 2]**2).clip(min=eps).sqrt()
         distortion_h = torch.ones_like(distortion_w)
         saSample = saSample.reshape(-1)
 
@@ -116,25 +116,26 @@ class IntegralEquirect(torch.nn.Module):
         eps = torch.finfo(torch.float32).eps
         miplevel_w, miplevel_h = self.sa2mip(viewdirs, saSample)
         h, w = self.hw()
-        sw = 2 ** miplevel_w / w
+        sw = 2 ** miplevel_w / h / 2
         sh = 2 ** miplevel_h / h
         # sw = 0.20*torch.ones_like(sw)
         # sh = 0.20*torch.ones_like(sh)
         offset = torch.stack([sw, sh], dim=-1).reshape(1, 1, -1, 2)
 
-        cum_mat = torch.cumsum(torch.cumsum(self.activation_fn(self.bg_mat), dim=2), dim=3)
+        activated = self.activation_fn(self.bg_mat)
+        cum_mat = torch.cumsum(torch.cumsum(activated, dim=2), dim=3)
         # cum_mat = torch.cumsum(self.bg_mat, dim=2)
         # cum_mat = torch.cumsum(self.bg_mat, dim=3)
         # cum_mat = self.bg_mat
         # ic(cum_mat)
-        size = (offset * torch.tensor([w, h], device=device).reshape(1, 1, 1, 2)).prod(dim=-1).reshape(-1, 1)
+        size = (offset / 2 * torch.tensor([w, h], device=device).reshape(1, 1, 1, 2)).prod(dim=-1).reshape(-1, 1)
 
         def integrate_area(bl, br, tl, tr, size):
             exceed_t = (tl[..., 1] - 1).clip(min=0)
             exceed_b = -(bl[..., 1] + 1).clip(max=0)
             # if exceed top, add to bot
-            bl[..., 1] += exceed_t
-            br[..., 1] += exceed_t
+            bl[..., 1] += -exceed_t
+            br[..., 1] += -exceed_t
             tl[..., 1] += exceed_b
             tr[..., 1] += exceed_b
 
@@ -201,11 +202,12 @@ class IntegralEquirect(torch.nn.Module):
 
         # handle top and bottom
         cutoff = 1 - 2 / h
-        top_row = self.bg_mat[..., 0, :].mean(dim=-1)
-        bot_row = self.bg_mat[..., -1, :].mean(dim=-1)
+        top_row = activated[..., 0, :].mean(dim=-1)
+        bot_row = activated[..., -1, :].mean(dim=-1)
         bg_vals[coords[:, 1] > cutoff] = bot_row
         bg_vals[coords[:, 1] < -cutoff] = top_row
         # return self.activation_fn(bg_vals)
+        # bg_vals = (miplevel_w - miplevel_h).reshape(-1, 1).repeat(repeats=(1, 3))
         return bg_vals
 
 if __name__ == "__main__":
@@ -219,11 +221,16 @@ if __name__ == "__main__":
     # data = data[:100, :100]
     bg_module = IntegralEquirect(bg_res, 0, activation='exp')
     bg_module.bg_mat = nn.Parameter(data.log())
+    # bg_module.bg_mat.data += -5
+    # bg_module.bg_mat.data[0, 0, new_w//2, new_w] = 1
+    # bg_module.bg_mat.data[0, 0, new_w//4+1, new_w] = 1
+    # bg_module.bg_mat.data[0, 0, new_w//8+1, new_w] = 1
+    # bg_module.bg_mat.data[0, 0, new_w//2-1, new_w//2] = 1
 
     bg_module = bg_module.to(device)
     res = bg_res
     ele_grid, azi_grid = torch.meshgrid(
-        torch.linspace(math.pi/2, -math.pi/2, res, dtype=torch.float32),
+        torch.linspace(-math.pi/2, math.pi/2, res, dtype=torch.float32),
         torch.linspace(0, 2*math.pi, 2*res, dtype=torch.float32), indexing='ij')
     # azi_grid = azi_grid - math.pi
     # each col of x ranges from -pi/2 to pi/2
@@ -233,9 +240,15 @@ if __name__ == "__main__":
         torch.cos(ele_grid) * torch.sin(azi_grid),
         -torch.sin(ele_grid),
     ], dim=-1).reshape(-1, 3).to(device)
-    sa_sample = -1*torch.ones((ang_vecs.shape[0], 1), device=device)
+    sa_sample = -5*torch.ones((ang_vecs.shape[0], 1), device=device)
     vals = bg_module(ang_vecs, sa_sample)
     blur_img = vals.reshape(res, 2*res, 3)#.abs()
     imageio.imwrite("bg_blur.exr", blur_img.detach().cpu().numpy())
     imageio.imwrite("bg_blur_abs.exr", blur_img.abs().detach().cpu().numpy())
-    imageio.imwrite("bg_noblur.exr", bg_module.bg_mat.squeeze(0).permute(1, 2, 0).detach().cpu().numpy())
+    imageio.imwrite("bg_noblur.exr", bg_module.bg_mat.exp().squeeze(0).permute(1, 2, 0).detach().cpu().numpy())
+
+    # ang_vecs = torch.tensor([1, 0, 0]).reshape(1, 3).to(device)
+    # sa_sample = -5*torch.ones((ang_vecs.shape[0], 1), device=device)
+    # vals = bg_module(ang_vecs, sa_sample)
+    # ic(vals)
+

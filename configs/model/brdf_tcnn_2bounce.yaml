@@ -64,7 +64,7 @@ arch:
     _partial_: True
     _target_: models.realbounce.RealBounce
     percent_bright: 0.1
-    max_brdf_rays: [70000, 800000]
+    max_brdf_rays: [50000, 200000]
     # max_brdf_rays: [2194304]
     cold_start_bg_iters: 0
     detach_N_iters: 0
@@ -164,17 +164,31 @@ arch:
     #   roughness_bias: -1
     #   # allocation: 7
 
+  # bg_module:
+  #   _target_: modules.bg_modules.HierarchicalCubeMap
+  #   bg_resolution: 512
+  #   mipbias: 0
+  #   num_levels: 1
+  #   TV_max_scale: 1
+  #   activation: 'exp'
+  #   power: 2
+  #   stds: []
+  #   lr: 0.01
+  #   init_val: 0
+  #   mul_lr: 0.001
+  #   brightness_lr: 0
+  #   betas: [0.0, 0.0]
+  #   mul_betas: [0.9, 0.9]
+  #   mipbias_lr: 1e-4
+  #   mipnoise: 0.0
+
   bg_module:
-    _target_: modules.bg_modules.HierarchicalCubeMap
-    bg_resolution: 512
+    _target_: modules.integral_equirect.IntegralEquirect
+    bg_resolution: 1024
     mipbias: 0
-    num_levels: 1
-    TV_max_scale: 1
     activation: 'exp'
-    power: 2
-    stds: []
     lr: 0.01
-    init_val: 0
+    init_val: -1.897
     mul_lr: 0.001
     brightness_lr: 0
     betas: [0.0, 0.0]
