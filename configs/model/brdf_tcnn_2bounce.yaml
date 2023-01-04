@@ -16,7 +16,7 @@ arch:
   align_pred_norms: True
   detach_inter: True
   geonorm_iters: 10000
-  recur_stepmul: 0.25
+  recur_stepmul: 0.1
 
   tonemap:
     # _target_: modules.tonemap.HDRTonemap
@@ -64,7 +64,7 @@ arch:
     _partial_: True
     _target_: models.realbounce.RealBounce
     percent_bright: 0.1
-    max_brdf_rays: [50000, 200000]
+    max_brdf_rays: [70000, 600000]
     # max_brdf_rays: [2194304]
     cold_start_bg_iters: 0
     detach_N_iters: 0
@@ -119,7 +119,7 @@ arch:
       # dotpe: 6
       # featureC: 128
       # activation: 'sigexp'
-      bias: -1.735
+      bias: 3
       activation: 'sigmoid'
       # activation: 'sigmoid'
       lr: 1e-3
@@ -212,7 +212,7 @@ params:
   envmap_lambda: 5e-5
   pred_lambda: 3e-4
   final_pred_lambda: Null
-  diffuse_lambda: -1e-6
+  diffuse_lambda: 0
   ori_lambda: 0.01
   final_ori_lambda: Null
   brdf_lambda: 0

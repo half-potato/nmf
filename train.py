@@ -361,8 +361,8 @@ def reconstruction(args):
                     else:
                         # loss = ((rgb_map - rgb_train[whole_valid]) ** 2).mean()
                         # loss = F.huber_loss(rgb_map.clip(0, 1), rgb_train[whole_valid], delta=1, reduction='mean')
-                        # loss = ((rgb_map.clip(0, 1) - rgb_train[whole_valid].clip(0, 1))**2).sum()
-                        loss = ((rgb_map.clip(0, 1) - rgb_train[whole_valid].clip(0, 1)).abs()).sum()
+                        loss = ((rgb_map.clip(0, 1) - rgb_train[whole_valid].clip(0, 1))**2).sum()
+                        # loss = ((rgb_map.clip(0, 1) - rgb_train[whole_valid].clip(0, 1)).abs()).sum()
                     # gt_normal_map = test_dataset.all_norms[ray_idx].to(device)
                     # norm_err = -(data['normal_map'] * gt_normal_map).sum(dim=-1).mean()
                     # ic(norm_err)
