@@ -230,7 +230,8 @@ class ContinuousAlphagrid(torch.nn.Module):
         return rays_pts, interpx, ~mask_outbbox, env_mask
 
     @torch.no_grad()
-    def sample(self, rays_chunk, focal, ndc_ray=False, override_near=None, is_train=False, dynamic_batch_size=True, N_samples=-1, stepmul=1):
+    def sample(self, rays_chunk, focal, ndc_ray=False, override_near=None, is_train=False,
+               dynamic_batch_size=True, N_samples=-1, stepmul=1, **args):
         """
             Parameters:
                 rays_chunk: (B, 6) float. (ox, oy, oz, dx, dy, dz) ray origin and direction
@@ -461,7 +462,7 @@ class ContinuousAlphagrid(torch.nn.Module):
             occ_coords = morton3D_invert(occ_indices) # [N, 3]
             # convert coords to aabb
             xyz = self.coords2xyz(occ_coords, cas, randomize=True)
-            xyzs.append(xyz)
+            xyzs.append(xyz[:, :3])
         xyzs = torch.cat(xyzs, dim=0)
         aabb =  torch.stack([
             xyzs.min(dim=0).values,

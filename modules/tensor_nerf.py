@@ -112,10 +112,11 @@ class TensorNeRF(torch.nn.Module):
     def load(ckpt, config=None, near_far=None, **kwargs):
         config = ckpt['config'] if config is None else config
         aabb = ckpt['state_dict']['rf.aabb']
-        del ckpt['state_dict']['brdf_sampler.angs']
+        del ckpt['state_dict']['model.brdf_sampler.angs']
         near_far = near_far if near_far is not None else [1, 6]
         if 'rf.grid_size' in ckpt['state_dict']:
             grid_size = list(ckpt['state_dict']['rf.grid_size'])
+            ic(grid_size)
         else:
             grid_size = None
         rf = hydra.utils.instantiate(config)(aabb=aabb, near_far=near_far, grid_size=grid_size)
@@ -171,7 +172,7 @@ class TensorNeRF(torch.nn.Module):
         return bg.reshape(-1, 3)
 
     def forward(self, rays, focal, start_mipval=None, bg_col=torch.tensor([1, 1, 1]), stepmul=1,
-                recur=0, override_near=None, output_alpha=None, dynamic_batch_size=True,
+                recur=0, override_near=None, output_alpha=None, dynamic_batch_size=True, gt_normals=None,
                 is_train=False, ndc_ray=False, N_samples=-1, tonemap=True, draw_debug=True):
         # rays: (N, (origin, viewdir, ray_up))
         output = {}
@@ -181,7 +182,9 @@ class TensorNeRF(torch.nn.Module):
         device = rays.device
 
         xyz_sampled, ray_valid, max_samps, z_vals, dists, whole_valid = self.sampler.sample(
-            rays, focal, ndc_ray, override_near=override_near, is_train=is_train, stepmul=stepmul, dynamic_batch_size=dynamic_batch_size, N_samples=N_samples)
+            rays, focal, ndc_ray=ndc_ray, override_near=override_near, is_train=is_train,
+            stepmul=stepmul, dynamic_batch_size=dynamic_batch_size,
+            N_samples=N_samples, rf=self.rf)
         # xyz_sampled: (M, 4) float. premasked valid sample points
         # ray_valid: (b, N) bool. mask of which samples are valid
         # max_samps = N
@@ -380,6 +383,12 @@ class TensorNeRF(torch.nn.Module):
             else:
                 statistics['envmap_reg'] = torch.tensor(0.0)
 
+            if gt_normals is not None:
+                gt_normals_mask = gt_normals[whole_valid].view(-1, 1, 3).expand(full_shape)[app_mask]
+                gt_mask = gt_normals_mask.sum(dim=1) > 0.9
+                pred_norm_err_b = 2*(1-(world_normal[papp_mask][gt_mask] * gt_normals_mask[gt_mask]).sum(dim=-1))
+                pred_norm_err = (aweight[gt_mask] * pred_norm_err_b).sum()# / B
+                statistics['normal_err'] = pred_norm_err
             statistics['brdf_reg'] = -debug['tint'].mean() if 'tint' in debug else torch.tensor(0.0)
             statistics['diffuse_reg'] = -debug['roughness'].sum() if 'roughness' in debug else torch.tensor(0.0)
             statistics['prediction_loss'] = prediction_loss

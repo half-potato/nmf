@@ -23,25 +23,31 @@ arch:
     # _target_: modules.tonemap.LinearTonemap
     _target_: modules.tonemap.SRGBTonemap
 
+  # sampler:
+  #   _target_: samplers.continuous_alphagrid.ContinuousAlphagrid
+  #   _partial_: True
+  #   multipliers: [1, 2]
+  #   multiplier_iters: [1000]
+  #   # multipliers: [1]
+  #   # multiplier_iters: []
+  #   shrink_iters: []
+  #   dynamic_batchsize: True
+  #   # sample_mode: multi_jitter
+  #   sample_mode: single_jitter
+  #   test_sample_mode: midpoint
+  #   # threshold: 5e-5
+  #   threshold: 1e-4
+  #   grid_size: 256
+  #   update_freq: 16
+  #   max_samples: 10000
+  #   conv: 2
+  #   bound: 1.5
+
   sampler:
-    _target_: samplers.continuous_alphagrid.ContinuousAlphagrid
+    _target_: samplers.nerf_acc.NerfAccSampler
     _partial_: True
-    multipliers: [1, 2]
-    multiplier_iters: [1000]
-    # multipliers: [1]
-    # multiplier_iters: []
-    shrink_iters: []
-    dynamic_batchsize: True
-    # sample_mode: multi_jitter
-    sample_mode: single_jitter
-    test_sample_mode: midpoint
-    # threshold: 5e-5
-    threshold: 1e-4
     grid_size: 256
     update_freq: 16
-    max_samples: 10000
-    conv: 2
-    bound: 1.5
 
   normal_module:
     _partial_: True

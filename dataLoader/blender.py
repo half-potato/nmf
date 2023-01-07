@@ -15,13 +15,16 @@ from .ray_utils import *
 
 
 class BlenderDataset(Dataset):
-    def __init__(self, datadir, split='train', downsample=1.0, is_stack=False, N_vis=-1):
+    def __init__(self, datadir, stack_norms=False, split='train', downsample=1.0, is_stack=False, N_vis=-1):
         self.downsample=downsample
         self.N_vis = N_vis
         self.root_dir = datadir
         self.split = split
         self.is_stack = is_stack
+        self.stack_norms = stack_norms
         self.define_transforms()
+        if self.stack_norms:
+            print("Stacking normals")
 
         self.scene_bbox = torch.tensor([[-1.5, -1.5, -1.5], [1.5, 1.5, 1.5]])
         self.blender2opencv = np.array([[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]])
@@ -137,14 +140,16 @@ class BlenderDataset(Dataset):
             # img = img.clip(0, 1)
             self.all_rgbs += [img]
 
-            # self.all_norms += [self.get_normal(i).reshape(-1, 3)]
+            if self.stack_norms:
+                self.all_norms += [self.get_normal(i).reshape(-1, 3)]
 
 
             self.all_rays += [rays]  # (h*w, 6)
 
 
         self.poses = torch.stack(self.poses)
-        # self.all_norms = torch.cat(self.all_norms)
+        if self.stack_norms:
+            self.all_norms = torch.cat(self.all_norms)
         if not self.is_stack:
             self.all_rays = torch.cat(self.all_rays, 0)  # (len(self.meta['frames])*h*w, 3)
             self.all_rgbs = torch.cat(self.all_rgbs, 0)  # (len(self.meta['frames])*h*w, 3)
@@ -174,9 +179,9 @@ class BlenderDataset(Dataset):
         norms = torch.as_tensor(norms)[..., :3].float()
         if norms.max() > 2:
             norms = (norms - 128)/127
+            # norms = norms / torch.linalg.norm(norms, dim=-1, keepdim=True)
         else:
             norms = (norms - 0.5)*2
-        # norms = norms / torch.linalg.norm(norms, dim=-1, keepdim=True)
         return norms
 
     def __getitem__(self, idx):

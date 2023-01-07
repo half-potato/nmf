@@ -233,7 +233,7 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
                 norm_err *= ims.acc_map.squeeze(-1)
                 norm_errs.append(norm_err.mean())
                 if savePath is not None:
-                    imageio.imwrite(f'{savePath}/normal_err/{prtx}{idx:03d}.png', norm_err.clip(max=255).numpy().astype(np.uint8))
+                    imageio.imwrite(f'{savePath}/normal_err/{prtx}{idx:03d}.png', (10*norm_err).clip(max=255).numpy().astype(np.uint8))
                     # imageio.imwrite(f'{savePath}/normal_err/{prtx}{idx:03d}.png', vis_gt_normal)
             except:
                 pass

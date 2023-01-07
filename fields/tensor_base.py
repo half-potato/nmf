@@ -87,6 +87,8 @@ class TensorBase(torch.nn.Module):
         raise Exception("Not implemented")
 
     def compute_densityfeature(self, xyz_sampled, activate=True):
+        if xyz_sampled.shape[0] == 0:
+            return torch.empty((0), device=xyz_sampled.device)
         sigfeat = self._compute_densityfeature(self.normalize_coord(xyz_sampled))
         if activate:
             return self.feature2density(sigfeat).reshape(-1)

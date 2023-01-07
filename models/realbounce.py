@@ -68,6 +68,8 @@ class RealBounce(torch.nn.Module):
             if self.detach_N:
                 bN.detach_()
             bV = -viewdirs[bounce_mask]
+            # r1 = matprop['r1'][bounce_mask]*0 + 0.001
+            # r2 = matprop['r2'][bounce_mask]*0 + 0.001
             r1 = matprop['r1'][bounce_mask]
             r2 = matprop['r2'][bounce_mask]
 

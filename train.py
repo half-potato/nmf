@@ -64,24 +64,24 @@ def render_test(args):
         from modules import bg_modules
         bg_module = bg_modules.HierarchicalCubeMap(bg_resolution=2048, num_levels=1, featureC=128, activation='softplus', power=2, lr=1e-2)
         bg_module.load_state_dict(bg_sd, strict=False)
-        a = bg_module.bg_mats[0].reshape(-1, 3).mean(dim=-1)
-        b = tensorf.bg_module.bg_mats[0].reshape(-1, 3).mean(dim=-1)
-        a.sort()
-        b.sort()
-        a0 = a[500]
-        a1 = a[-500]
-        b0 = b[500]
-        b1 = b[-500]
-        # a0 = torch.quantile(a, 0.05)
-        # a1 = torch.quantile(a, 0.95)
-        # b0 = torch.quantile(b, 0.05)
-        # b1 = torch.quantile(b, 0.95)
-        new_mul = (tensorf.bg_module.mul*(b1-b0)) / (bg_module.mul*(a1-a0))
-        new_mul = 3
-        bg_module.mul *= new_mul
-        offset = tensorf.bg_module.mean_color().mean() / bg_module.mean_color().mean()
-        ic(new_mul, offset, torch.log(offset))
-        bg_module.brightness += torch.log(offset)
+        # a = bg_module.bg_mats[0].reshape(-1, 3).mean(dim=-1)
+        # b = tensorf.bg_module.bg_mats[0].reshape(-1, 3).mean(dim=-1)
+        # a.sort()
+        # b.sort()
+        # a0 = a[500]
+        # a1 = a[-500]
+        # b0 = b[500]
+        # b1 = b[-500]
+        # # a0 = torch.quantile(a, 0.05)
+        # # a1 = torch.quantile(a, 0.95)
+        # # b0 = torch.quantile(b, 0.05)
+        # # b1 = torch.quantile(b, 0.95)
+        # new_mul = (tensorf.bg_module.mul*(b1-b0)) / (bg_module.mul*(a1-a0))
+        # new_mul = 3
+        # bg_module.mul *= new_mul
+        # offset = tensorf.bg_module.mean_color().mean() / bg_module.mean_color().mean()
+        # ic(new_mul, offset, torch.log(offset))
+        # bg_module.brightness += torch.log(offset)
 
         # bg_module.mul += 1
         tensorf.bg_module = bg_module
@@ -117,7 +117,7 @@ def reconstruction(args):
 
     # init dataset
     dataset = dataset_dict[args.dataset.dataset_name]
-    train_dataset = dataset(os.path.join(args.datadir, args.dataset.scenedir), split='train', downsample=args.dataset.downsample_train, is_stack=False)
+    train_dataset = dataset(os.path.join(args.datadir, args.dataset.scenedir), split='train', downsample=args.dataset.downsample_train, is_stack=False, stack_norms=args.dataset.stack_norms)
     test_dataset = dataset(os.path.join(args.datadir, args.dataset.scenedir), split='test', downsample=args.dataset.downsample_train, is_stack=True)
     white_bg = train_dataset.white_bg
     train_dataset.near_far = args.dataset.near_far
@@ -167,6 +167,7 @@ def reconstruction(args):
         #     tensorf.bright_sampler.update(tensorf.bg_module)
 
     tensorf = tensorf.to(device)
+    tensorf.train()
 
     lr_bg = 1e-5
     grad_vars = tensorf.get_optparam_groups()
@@ -208,8 +209,8 @@ def reconstruction(args):
     tvreg = TVLoss()
     logger.info(f"initial TV_weight density: {TV_weight_density} appearance: {TV_weight_app}")
 
-    allrgbs = allrgbs.to(device)
-    allrays = allrays.to(device)
+    # allrgbs = allrgbs.to(device)
+    # allrays = allrays.to(device)
     # ratio of meters to pixels at a distance of 1 meter
     focal = (train_dataset.focal[0] if ndc_ray else train_dataset.focal)
     # / train_dataset.img_wh[0]
@@ -283,6 +284,7 @@ def reconstruction(args):
     # tensorf.sampler.mark_untrained_grid(train_dataset.poses, train_dataset.intrinsics)
     torch.cuda.empty_cache()
     tensorf.sampler.update(tensorf.rf, init=True)
+    torch.cuda.empty_cache()
 
 
     xyz = torch.rand(100000, 4, device=device)*2-1
@@ -323,7 +325,7 @@ def reconstruction(args):
             TVs = []
 
             ray_idx, rgb_idx = trainingSampler.nextids(rays_remaining)
-            rays_train, rgba_train = allrays[ray_idx], allrgbs[rgb_idx].reshape(-1, allrgbs.shape[-1])
+            rays_train, rgba_train = allrays[ray_idx].to(device), allrgbs[rgb_idx].reshape(-1, allrgbs.shape[-1]).to(device)
             match params.bg_col:
                 case 'rand':
                     bg_col = torch.rand(3, device=device)
@@ -339,12 +341,13 @@ def reconstruction(args):
             else:
                 rgb_train = rgba_train
                 alpha_train = None
+            gt_normal_map = train_dataset.all_norms[ray_idx].to(device)
 
             while rays_remaining > 0:
 
                 with torch.cuda.amp.autocast(enabled=args.fp16):
-                    ims, stats = renderer(rays_train, tensorf,
-                            keys = ['rgb_map', 'distortion_loss', 'prediction_loss', 'ori_loss', 'diffuse_reg', 'roughness', 'whole_valid', 'envmap_reg', 'brdf_reg'],
+                    ims, stats = renderer(rays_train, tensorf, gt_normals=gt_normal_map,
+                            keys = ['rgb_map', 'normal_err', 'distortion_loss', 'prediction_loss', 'ori_loss', 'diffuse_reg', 'roughness', 'whole_valid', 'envmap_reg', 'brdf_reg'],
                             focal=focal, output_alpha=alpha_train, chunk=params.batch_size, bg_col=bg_col, is_train=True, ndc_ray=ndc_ray)
 
                     prediction_loss = stats['prediction_loss'].sum()
@@ -363,9 +366,7 @@ def reconstruction(args):
                         # loss = F.huber_loss(rgb_map.clip(0, 1), rgb_train[whole_valid], delta=1, reduction='mean')
                         loss = ((rgb_map.clip(0, 1) - rgb_train[whole_valid].clip(0, 1))**2).sum()
                         # loss = ((rgb_map.clip(0, 1) - rgb_train[whole_valid].clip(0, 1)).abs()).sum()
-                    # gt_normal_map = test_dataset.all_norms[ray_idx].to(device)
-                    # norm_err = -(data['normal_map'] * gt_normal_map).sum(dim=-1).mean()
-                    # ic(norm_err)
+                    norm_err = stats['normal_err'].sum()
                     # loss = torch.sqrt(F.huber_loss(rgb_map, rgb_train, delta=1, reduction='none') + params.charbonier_eps**2).mean()
                     # photo_loss = ((rgb_map.clip(0, 1) - rgb_train[whole_valid].clip(0, 1)) ** 2).mean().detach()
                     photo_loss = ((rgb_map.clip(0, 1) - rgb_train[whole_valid].clip(0, 1))**2).mean().detach()
@@ -374,6 +375,7 @@ def reconstruction(args):
                     rays_remaining -= rgb_map.shape[0]
                     rays_train = rays_train[~whole_valid]
                     rgb_train = rgb_train[~whole_valid]
+                    gt_normal_map = gt_normal_map[~whole_valid]
 
                     # loss
                     # ori_lambda = params.ori_lambda if iteration > 1000 else params.ori_lambda * iteration / 1000
@@ -393,7 +395,8 @@ def reconstruction(args):
                         params.envmap_lambda * (envmap_reg-0.05).clip(min=0) + \
                         params.diffuse_lambda * diffuse_reg + \
                         params.brdf_lambda * brdf_reg + \
-                        pred_lambda * prediction_loss
+                        pred_lambda * prediction_loss + \
+                        0.1 * norm_err
 
 
                     # if tensorf.visibility_module is not None:
