@@ -341,7 +341,7 @@ def reconstruction(args):
             else:
                 rgb_train = rgba_train
                 alpha_train = None
-            gt_normal_map = train_dataset.all_norms[ray_idx].to(device)
+            gt_normal_map = train_dataset.all_norms[ray_idx].to(device) if train_dataset.stack_norms else None
 
             while rays_remaining > 0:
 
@@ -396,7 +396,7 @@ def reconstruction(args):
                         params.diffuse_lambda * diffuse_reg + \
                         params.brdf_lambda * brdf_reg + \
                         pred_lambda * prediction_loss + \
-                        0.1 * norm_err
+                        params.normal_err_lambda * norm_err
 
 
                     # if tensorf.visibility_module is not None:
