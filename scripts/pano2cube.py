@@ -1,4 +1,4 @@
-from models import render_modules, tonemap, ish, bg_modules
+from modules import tonemap, bg_modules
 import imageio
 from icecream import ic
 import torch
@@ -7,7 +7,8 @@ from tqdm import tqdm
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
 from pathlib import Path
-from models.cubemap_conv import cubemap_convolve, create_blur_pyramid
+# from models.cubemap_conv import cubemap_convolve, create_blur_pyramid
+from modules.integral_equirect import IntegralEquirect
 import argparse
 
 parser = argparse.ArgumentParser()
@@ -17,15 +18,29 @@ args = parser.parse_args()
 
 batch_size = 4096*50
 device = torch.device('cuda')
-epochs = 5000
+epochs = 1000
 
 # bg_module = render_modules.BackgroundRender(3, render_modules.PanoUnwrap(), bg_resolution=2*1024, featureC=128, num_layers=0)
 # bg_module = render_modules.BackgroundRender(3, render_modules.CubeUnwrap(), bg_resolution=2*1024, featureC=128, num_layers=0)
 tm = tonemap.LinearTonemap()
 # bg_module = bg_modules.HierarchicalCubeMap(bg_resolution=1600, num_levels=3, featureC=128, activation='softplus', power=4)
 # bg_module = bg_modules.HierarchicalCubeMap(bg_resolution=1600, num_levels=5, featureC=128, activation='softplus', power=2)
-bg_module = bg_modules.HierarchicalCubeMap(bg_resolution=2048, num_levels=1, featureC=128, activation='softplus', power=2)
+# bg_module = bg_modules.HierarchicalCubeMap(bg_resolution=2048, num_levels=1, featureC=128, activation='softplus', power=2)
 # bg_module = bg_modules.HierarchicalBG(3, bg_modules.DualParaboloidUnwrap(b=1.01), bg_resolution=2000, num_levels=5, activation='softplus', power=2)
+
+bg_module = IntegralEquirect(
+    bg_resolution = 1024,
+    mipbias = 0,
+    activation = 'exp',
+    lr = 0.001,
+    init_val = -1.897,
+    mul_lr = 0.001,
+    brightness_lr = 0,
+    betas = [0.0, 0.0],
+    mul_betas = [0.9, 0.9],
+    mipbias_lr = 1e-4,
+    mipnoise = 0.0
+)
 
 # bg_module = bg_modules.HierarchicalCubeMap(bg_resolution=2048, num_levels=5, featureC=128, activation='softplus', power=2)
 # bg_module = render_modules.MLPRender_FP(0, None, ish.ListISH([0,1,2,4,8,16]), -1, 256, 6)
@@ -117,8 +132,8 @@ for i in iter:
 # bg_module.reinit_mip_levels()
 
 torch.save(bg_module.state_dict(), args.output)
-bg_module.save(Path('log/cubed'), tonemap=tm)
-bg_resolution = bg_module.bg_mats[-1].shape[2]
+bg_module.save(Path('backgrounds/debug'), tonemap=tm, prefix='ninomaru_teien')
+# bg_resolution = bg_module.bg_mats[-1].shape[2]
 # save
 # for i, (convmat, mip) in enumerate(bg_module.create_pyramid()):
 #     ic(mip)

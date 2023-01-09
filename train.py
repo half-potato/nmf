@@ -16,6 +16,7 @@ from omegaconf import OmegaConf
 from pathlib import Path
 from loguru import logger
 import functools
+from modules.integral_equirect import IntegralEquirect
 
 # torch.autograd.set_detect_anomaly(True)
 
@@ -62,8 +63,24 @@ def render_test(args):
     if args.fixed_bg is not None:
         bg_sd = torch.load(args.fixed_bg)
         from modules import bg_modules
-        bg_module = bg_modules.HierarchicalCubeMap(bg_resolution=2048, num_levels=1, featureC=128, activation='softplus', power=2, lr=1e-2)
+        # bg_module = bg_modules.HierarchicalCubeMap(bg_resolution=2048, num_levels=1, featureC=128, activation='softplus', power=2, lr=1e-2)
+        bg_module = IntegralEquirect(
+            bg_resolution = 1024,
+            mipbias = 0,
+            activation = 'exp',
+            lr = 0.001,
+            init_val = -1.897,
+            mul_lr = 0.001,
+            brightness_lr = 0,
+            betas = [0.0, 0.0],
+            mul_betas = [0.9, 0.9],
+            mipbias_lr = 1e-4,
+            mipnoise = 0.0
+        )
         bg_module.load_state_dict(bg_sd, strict=False)
+        bg_module.lr = 0
+        bg_module.mul_lr = 0
+        bg_module.brightness_lr = 0
         # a = bg_module.bg_mats[0].reshape(-1, 3).mean(dim=-1)
         # b = tensorf.bg_module.bg_mats[0].reshape(-1, 3).mean(dim=-1)
         # a.sort()
@@ -86,7 +103,8 @@ def render_test(args):
         # bg_module.mul += 1
         tensorf.bg_module = bg_module
     tensorf = tensorf.to(device)
-    tensorf.sampler.update(tensorf.rf, init=True)
+    tensorf.train()
+    # tensorf.sampler.update(tensorf.rf, init=True)
     # if tensorf.bright_sampler is not None:
     #     tensorf.bright_sampler.update(tensorf.bg_module)
 
@@ -158,13 +176,31 @@ def reconstruction(args):
     # TODO REMOVE
     if args.fixed_bg is not None:
         bg_sd = torch.load(args.fixed_bg)
-        from modules import bg_modules
-        bg_module = bg_modules.HierarchicalCubeMap(bg_resolution=2048, num_levels=1, featureC=128, activation='softplus', power=2, lr=1e-2)
-        bg_module.load_state_dict(bg_sd, strict=False)
-        bg_module.lr = 0
-        tensorf.bg_module = bg_module
+        # from modules import bg_modules
+        # bg_module = bg_modules.HierarchicalCubeMap(bg_resolution=2048, num_levels=1, featureC=128, activation='softplus', power=2, lr=1e-2)
+        # bg_module.load_state_dict(bg_sd, strict=False)
+        # bg_module.lr = 0
+        # tensorf.bg_module = bg_module
         # if tensorf.bright_sampler is not None:
         #     tensorf.bright_sampler.update(tensorf.bg_module)
+        bg_module = IntegralEquirect(
+            bg_resolution = 1024,
+            mipbias = 0,
+            activation = 'exp',
+            lr = 0.001,
+            init_val = -1.897,
+            mul_lr = 0.001,
+            brightness_lr = 0,
+            betas = [0.0, 0.0],
+            mul_betas = [0.9, 0.9],
+            mipbias_lr = 1e-4,
+            mipnoise = 0.0
+        )
+        bg_module.load_state_dict(bg_sd)
+        bg_module.lr = 0
+        bg_module.mul_lr = 0
+        bg_module.brightness_lr = 0
+        tensorf.bg_module = bg_module
 
     tensorf = tensorf.to(device)
     tensorf.train()

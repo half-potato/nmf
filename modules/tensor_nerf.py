@@ -97,6 +97,7 @@ class TensorNeRF(torch.nn.Module):
         print(f"Saving nerf to {path}")
         if self.bg_module is not None:
             config['bg_module']['bg_resolution'] = self.bg_module.bg_resolution
+        config['use_predicted_normals'] = self.use_predicted_normals
         ckpt = {'config': config, 'state_dict': self.state_dict()}
         # if self.alphaMask is not None:
         #     alpha_volume = self.alphaMask.alpha_volume.cpu()
@@ -112,7 +113,11 @@ class TensorNeRF(torch.nn.Module):
     def load(ckpt, config=None, near_far=None, **kwargs):
         config = ckpt['config'] if config is None else config
         aabb = ckpt['state_dict']['rf.aabb']
+        # if 'model.brdf_sampler.angs' in ckpt['state_dict']:
+        #     c = ckpt['state_dict']['model.brdf_sampler.angs'].shape[0]
+        #     ic(c)
         del ckpt['state_dict']['model.brdf_sampler.angs']
+        # ic(ckpt['state_dict'].keys())
         near_far = near_far if near_far is not None else [1, 6]
         if 'rf.grid_size' in ckpt['state_dict']:
             grid_size = list(ckpt['state_dict']['rf.grid_size'])
@@ -386,8 +391,9 @@ class TensorNeRF(torch.nn.Module):
             if gt_normals is not None:
                 gt_normals_mask = gt_normals[whole_valid].view(-1, 1, 3).expand(full_shape)[app_mask]
                 gt_mask = gt_normals_mask.sum(dim=1) > 0.9
+                pred_norm_err_a = 2*(1-(pred_norms[papp_mask][gt_mask] * gt_normals_mask[gt_mask]).sum(dim=-1))
                 pred_norm_err_b = 2*(1-(world_normal[papp_mask][gt_mask] * gt_normals_mask[gt_mask]).sum(dim=-1))
-                pred_norm_err = (aweight[gt_mask] * pred_norm_err_b).sum()# / B
+                pred_norm_err = (aweight[gt_mask] * (pred_norm_err_a + pred_norm_err_b)).sum()# / B
                 statistics['normal_err'] = pred_norm_err
             statistics['brdf_reg'] = -debug['tint'].mean() if 'tint' in debug else torch.tensor(0.0)
             statistics['diffuse_reg'] = -debug['roughness'].sum() if 'roughness' in debug else torch.tensor(0.0)

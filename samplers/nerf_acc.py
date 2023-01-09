@@ -10,6 +10,7 @@ class NerfAccSampler(torch.nn.Module):
                  near_far,
                  grid_size=128,
                  render_n_samples=1024,
+                 multiplier=1,
                  update_freq=16,
                  alpha_thres = 0,
                  ):
@@ -22,6 +23,7 @@ class NerfAccSampler(torch.nn.Module):
             resolution=grid_size,
             contraction_type=contraction_type,
         )
+        self.multiplier = multiplier
         self.alpha_thres = alpha_thres
         self.update_freq = update_freq
         self.cone_angle = 0.0
@@ -38,7 +40,7 @@ class NerfAccSampler(torch.nn.Module):
             return density * self.stepsize
         self.occupancy_grid.every_n_step(step=iteration+1, occ_eval_fn=occ_eval_fn)
 
-        self.nSamples = int(rf.nSamples)
+        self.nSamples = int(rf.nSamples * self.multiplier)
         near, far = self.near_far
         self.stepsize = (far - near) / self.nSamples
         return False
