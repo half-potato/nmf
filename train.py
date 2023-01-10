@@ -402,7 +402,7 @@ def reconstruction(args):
                         # loss = F.huber_loss(rgb_map.clip(0, 1), rgb_train[whole_valid], delta=1, reduction='mean')
                         loss = ((rgb_map.clip(0, 1) - rgb_train[whole_valid].clip(0, 1))**2).sum()
                         # loss = ((rgb_map.clip(0, 1) - rgb_train[whole_valid].clip(0, 1)).abs()).sum()
-                    norm_err = stats['normal_err'].sum()
+                    norm_err = stats['normal_err']
                     # loss = torch.sqrt(F.huber_loss(rgb_map, rgb_train, delta=1, reduction='none') + params.charbonier_eps**2).mean()
                     # photo_loss = ((rgb_map.clip(0, 1) - rgb_train[whole_valid].clip(0, 1)) ** 2).mean().detach()
                     photo_loss = ((rgb_map.clip(0, 1) - rgb_train[whole_valid].clip(0, 1))**2).mean().detach()
@@ -411,7 +411,8 @@ def reconstruction(args):
                     rays_remaining -= rgb_map.shape[0]
                     rays_train = rays_train[~whole_valid]
                     rgb_train = rgb_train[~whole_valid]
-                    gt_normal_map = gt_normal_map[~whole_valid]
+                    if gt_normal_map is not None:
+                        gt_normal_map = gt_normal_map[~whole_valid]
 
                     # loss
                     # ori_lambda = params.ori_lambda if iteration > 1000 else params.ori_lambda * iteration / 1000

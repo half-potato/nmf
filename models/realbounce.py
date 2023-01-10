@@ -121,7 +121,7 @@ class RealBounce(torch.nn.Module):
             n, m = ray_mask.shape
             diffvec = torch.matmul(row_world_basis.permute(0, 2, 1), L.unsqueeze(-1)).squeeze(-1)
             halfvec = torch.matmul(row_world_basis.permute(0, 2, 1), H.unsqueeze(-1)).squeeze(-1)
-            # brdf_weight = self.brdf(eV, L, eN, halfvec, diffvec, efeatures, eroughness)
+            # brdf_weight = self.brdf(eV, L, eN, halfvec, diffvec, efeatures, ea)
             brdf_weight = self.brdf(eV, L.detach(), eN.detach(), halfvec.detach(), diffvec.detach(), efeatures, ea.detach())
             ray_count = (ray_mask.sum(dim=1)+1e-8)[..., None]
 

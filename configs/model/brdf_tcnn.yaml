@@ -48,6 +48,8 @@ arch:
     grid_size: 128
     update_freq: 16
     multiplier: 1
+    ema_decay: 0.95
+    occ_thre: 0.01
 
   normal_module:
     _partial_: True

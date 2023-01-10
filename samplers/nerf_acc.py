@@ -13,15 +13,17 @@ class NerfAccSampler(torch.nn.Module):
                  multiplier=1,
                  update_freq=16,
                  alpha_thres = 0,
+                 ema_decay = 0.95,
+                 occ_thre=0.01
                  ):
         super().__init__()
-        contraction_type = ContractionType.AABB
         self.aabb = aabb.reshape(-1)
         self.near_far = near_far
+        self.grid_size = grid_size
         self.occupancy_grid = OccupancyGrid(
             roi_aabb=self.aabb,
             resolution=grid_size,
-            contraction_type=contraction_type,
+            contraction_type=ContractionType.AABB,
         )
         self.multiplier = multiplier
         self.alpha_thres = alpha_thres
@@ -32,13 +34,15 @@ class NerfAccSampler(torch.nn.Module):
             * math.sqrt(3)
             / render_n_samples
         ).item()
+        self.occ_thre = occ_thre
+        self.ema_decay = ema_decay
 
     def check_schedule(self, iteration, batch_mul, rf):
         def occ_eval_fn(x):
             # x is in aabb, unnormalized
             density = rf.compute_densityfeature(x).reshape(-1)
             return density * self.stepsize
-        self.occupancy_grid.every_n_step(step=iteration+1, occ_eval_fn=occ_eval_fn)
+        self.occupancy_grid.every_n_step(step=iteration+1, occ_eval_fn=occ_eval_fn, ema_decay=self.ema_decay, occ_thre=self.occ_thre)
 
         self.nSamples = int(rf.nSamples * self.multiplier)
         near, far = self.near_far
@@ -46,11 +50,17 @@ class NerfAccSampler(torch.nn.Module):
         return False
 
     def update(self, rf, init=True):
+        if init:
+            self.occupancy_grid = OccupancyGrid(
+                roi_aabb=self.aabb,
+                resolution=self.grid_size,
+                contraction_type=ContractionType.AABB,
+            ).to(rf.get_device())
         def occ_eval_fn(x):
             # x is in aabb, unnormalized
             density = rf.compute_densityfeature(x).reshape(-1)
             return density * self.stepsize
-        self.occupancy_grid.every_n_step(step=0, occ_eval_fn=occ_eval_fn)
+        self.occupancy_grid.every_n_step(step=0, occ_eval_fn=occ_eval_fn, ema_decay=self.ema_decay, occ_thre=self.occ_thre)
 
     def sample(self, rays_chunk, focal, rf, override_near=None, is_train=False,
                dynamic_batch_size=True, stepmul=1, **args):

@@ -117,6 +117,8 @@ class TensorNeRF(torch.nn.Module):
         #     c = ckpt['state_dict']['model.brdf_sampler.angs'].shape[0]
         #     ic(c)
         del ckpt['state_dict']['model.brdf_sampler.angs']
+        # del ckpt['state_dict']['sampler.occupancy_grid._binary']
+        # del ckpt['state_dict']['sampler.occupancy_grid.occs']
         # ic(ckpt['state_dict'].keys())
         near_far = near_far if near_far is not None else [1, 6]
         if 'rf.grid_size' in ckpt['state_dict']:
@@ -396,7 +398,7 @@ class TensorNeRF(torch.nn.Module):
                 pred_norm_err = (aweight[gt_mask] * (pred_norm_err_a + pred_norm_err_b)).sum()# / B
                 statistics['normal_err'] = pred_norm_err
             statistics['brdf_reg'] = -debug['tint'].mean() if 'tint' in debug else torch.tensor(0.0)
-            statistics['diffuse_reg'] = -debug['roughness'].sum() if 'roughness' in debug else torch.tensor(0.0)
+            statistics['diffuse_reg'] = debug['roughness'].sum() if 'roughness' in debug else torch.tensor(0.0)
             statistics['prediction_loss'] = prediction_loss
             statistics['ori_loss'] = ori_loss
             statistics['distortion_loss'] = distortion_loss
