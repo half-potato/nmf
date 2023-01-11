@@ -1,10 +1,10 @@
 _partial_: True
 _target_: fields.tensoRF.TensorVMSplit
 distance_scale: 10
-density_n_comp: 16
+density_n_comp: 32
 # density_n_comp: 24
 appearance_n_comp: 24
-app_dim: 24
+app_dim: 48
 step_ratio: 0.5
 density_res_multi: 1
 contract_space: False
@@ -21,7 +21,7 @@ app_init_val: 0.1
 density_shift: -0
 # grid_size: [512, 512, 512]
 grid_size: [128, 128, 128]
-dbasis: False
+dbasis: True
 
 # N_voxel_init: 262144
 N_voxel_init: 2097156 # 128**3

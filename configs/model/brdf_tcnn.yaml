@@ -47,7 +47,7 @@ arch:
     _partial_: True
     grid_size: 128
     update_freq: 16
-    multiplier: 1
+    multiplier: 2
     ema_decay: 0.95
     occ_thre: 0.01
     max_samples: -1
@@ -77,7 +77,7 @@ arch:
     max_brdf_rays: [2194304]
     cold_start_bg_iters: 0
     detach_N_iters: 0
-    anoise: 0.0
+    anoise: 0.25
 
     # bright_sampler:
     #   _target_: modules.bright_sampler.BrightnessImportanceSampler
@@ -128,7 +128,7 @@ arch:
       # dotpe: 6
       # featureC: 128
       # activation: 'sigexp'
-      bias: 3
+      bias: 0
       activation: 'sigmoid'
       # activation: 'sigmoid'
       lr: 1e-3
