@@ -10,6 +10,7 @@ class NerfAccSampler(torch.nn.Module):
                  near_far,
                  grid_size=128,
                  render_n_samples=1024,
+                 max_samples=-1,
                  multiplier=1,
                  update_freq=16,
                  alpha_thres = 0,
@@ -29,6 +30,7 @@ class NerfAccSampler(torch.nn.Module):
         self.alpha_thres = alpha_thres
         self.update_freq = update_freq
         self.cone_angle = 0.0
+        self.max_samples = max_samples
         self.stepsize = (
             (self.aabb[3:] - self.aabb[:3]).max()
             * math.sqrt(3)
@@ -113,7 +115,6 @@ class NerfAccSampler(torch.nn.Module):
         pz_vals = (t_starts + t_ends) / 2
         pdists = t_ends - t_starts
         xyz_sampled = origins[ray_indices] + pz_vals * viewdirs[ray_indices]
-        whole_valid = torch.ones((N), dtype=bool, device=device)
 
         # turn ray_indices into ray_valid
         ele, counts = torch.unique(ray_indices, return_counts=True)
@@ -122,12 +123,25 @@ class NerfAccSampler(torch.nn.Module):
         M = counts.max(dim=0).values
         ray_valid = torch.arange(M, device=device).reshape(1, -1) < num_samps.reshape(-1, 1)
 
+        # add size
+        xyz_sampled = torch.cat([xyz_sampled, torch.zeros((xyz_sampled.shape[0], 1), device=device)], dim=-1)
+
         # pad out dists and z_vals
         dists = torch.zeros(ray_valid.shape, device=device)
         z_vals = torch.zeros(ray_valid.shape, device=device)
+        xyz_sampled_w = torch.zeros((*ray_valid.shape, 4), device=device)
         dists[ray_valid] = pdists.reshape(-1)
         z_vals[ray_valid] = pz_vals.reshape(-1)
+        xyz_sampled_w[ray_valid] = xyz_sampled
 
-        xyz_sampled_sized = torch.cat([xyz_sampled, torch.zeros((xyz_sampled.shape[0], 1), device=device)], dim=-1)
 
-        return xyz_sampled_sized, ray_valid, M, z_vals, dists, whole_valid
+        if self.max_samples > 0 and is_train and dynamic_batch_size:
+            whole_valid = torch.cumsum(ray_valid.sum(dim=1), dim=0) < self.max_samples
+            ray_valid = ray_valid[whole_valid, :] 
+            xyz_sampled_w = xyz_sampled_w[whole_valid, :] 
+            z_vals = z_vals[whole_valid, :]
+            dists = dists[whole_valid, :]
+        else:
+            whole_valid = torch.ones((N), dtype=bool, device=device)
+
+        return xyz_sampled_w[ray_valid], ray_valid, M, z_vals, dists, whole_valid

@@ -50,6 +50,7 @@ arch:
     multiplier: 1
     ema_decay: 0.95
     occ_thre: 0.01
+    max_samples: -1
 
   normal_module:
     _partial_: True
@@ -197,6 +198,7 @@ arch:
     activation: 'exp'
     lr: 0.01
     init_val: -1.897
+    # init_val: -0.602
     mul_lr: 0.001
     brightness_lr: 0
     betas: [0.0, 0.0]

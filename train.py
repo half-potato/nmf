@@ -402,7 +402,7 @@ def reconstruction(args):
                         # loss = F.huber_loss(rgb_map.clip(0, 1), rgb_train[whole_valid], delta=1, reduction='mean')
                         loss = ((rgb_map.clip(0, 1) - rgb_train[whole_valid].clip(0, 1))**2).sum()
                         # loss = ((rgb_map.clip(0, 1) - rgb_train[whole_valid].clip(0, 1)).abs()).sum()
-                    norm_err = stats['normal_err']
+                    norm_err = sum(stats['normal_err'])
                     # loss = torch.sqrt(F.huber_loss(rgb_map, rgb_train, delta=1, reduction='none') + params.charbonier_eps**2).mean()
                     # photo_loss = ((rgb_map.clip(0, 1) - rgb_train[whole_valid].clip(0, 1)) ** 2).mean().detach()
                     photo_loss = ((rgb_map.clip(0, 1) - rgb_train[whole_valid].clip(0, 1))**2).mean().detach()
