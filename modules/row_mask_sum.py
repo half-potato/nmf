@@ -3,14 +3,24 @@ import torch
 import time
 
 # warp isn't faster
+# def row_mask_sum(mat, mask):
+#     B, M = mask.shape
+#     N, D = mat.shape
+#     device = mat.device
+#     dtype = mat.dtype
+#     full_mat = torch.zeros((B, M, D), dtype=dtype, device=device)
+#     full_mat[mask] = mat
+#     return full_mat.sum(dim=1)
+
 def row_mask_sum(mat, mask):
     B, M = mask.shape
     N, D = mat.shape
-    device = mat.device
-    dtype = mat.dtype
-    full_mat = torch.zeros((B, M, D), dtype=dtype, device=device)
-    full_mat[mask] = mat
-    return full_mat.sum(dim=1)
+    indices = torch.where(mask)[0]
+    index = indices[:, None].expand(-1, D)
+    output = torch.zeros((B, D), device=mat.device, dtype=mat.dtype)
+    output.scatter_add_(0, index, mat)
+    return output
+
 """
 import warp as wp
 

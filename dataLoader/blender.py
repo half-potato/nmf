@@ -178,8 +178,8 @@ class BlenderDataset(Dataset):
         norms = imageio.imread(self.normal_paths[idx])
         norms = torch.as_tensor(norms)[..., :3].float()
         if norms.max() > 2:
-            norms = (norms - 128)/127
-            # norms = norms / torch.linalg.norm(norms, dim=-1, keepdim=True)
+            norms = (norms/127 - 1)
+            norms = norms / torch.linalg.norm(norms, dim=-1, keepdim=True).clip(min=torch.finfo(torch.float32).eps)
         else:
             norms = (norms - 0.5)*2
         return norms

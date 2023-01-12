@@ -293,8 +293,8 @@ class TensorNeRF(torch.nn.Module):
         acc_map = torch.sum(weight, 1)
         # rgb_map = torch.sum(weight[..., None] * rgb.clip(min=0, max=1), -2)
         eweight = weight[app_mask][..., None]
-        rgb_map = row_mask_sum(eweight * self.tonemap(rgb.clip(min=0, max=1)), app_mask)
-        # ic(eweight.shape, app_mask.sum(), rgb.shape, rgb_map.shape, rays.shape, whole_valid.shape, whole_valid.sum())
+        tmap_rgb = self.tonemap(rgb.clip(min=0, max=1))
+        rgb_map = row_mask_sum(eweight * tmap_rgb, app_mask)
         images = {}
         statistics = dict(
             recur=recur,
@@ -416,8 +416,6 @@ class TensorNeRF(torch.nn.Module):
             bg = self.bg_module(viewdirs[:, 0, :], bg_roughness).reshape(-1, 3)
             if tonemap:
                 bg = self.tonemap(bg, noclip=True)
-            rgb_map = rgb_map + \
-                (1 - acc_map[..., None]) * bg
         else:
             # if white_bg or (is_train and torch.rand((1,)) < 0.5):
             #     if output_alpha is not None and self.bg_noise > 0:
@@ -427,7 +425,8 @@ class TensorNeRF(torch.nn.Module):
             #         noise = 1-torch.rand((*acc_map.shape, 3), device=device)*self.bg_noise
             #     # noise = 1-torch.rand((*acc_map.shape, 3), device=device)*self.bg_noise
             #     rgb_map = rgb_map + (1 - acc_map[..., None]) * noise
-            rgb_map = rgb_map + (1 - acc_map[..., None]) * bg_col.to(device).reshape(1, 3)
+            bg = bg_col.to(device).reshape(1, 3)
+        rgb_map = rgb_map + (1 - acc_map[..., None]) * bg
             # if white_bg:
             #     if True:
             #         bg_col = torch.rand((1, 3), device=device).clip(min=torch.finfo(torch.float32).eps).sqrt()
@@ -436,6 +435,9 @@ class TensorNeRF(torch.nn.Module):
             #         # rgb_map = rgb_map + (1 - acc_map[..., None]) * bg_col
             #     else:
             #         rgb_map = rgb_map + (1 - acc_map[..., None])
+
+        # ic(rgb, rgb_map)
+        # ic(opacity, acc_map)
 
         images['rgb_map'] = rgb_map
         images['acc_map'] = acc_map.detach().cpu()
