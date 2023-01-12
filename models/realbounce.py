@@ -1,7 +1,7 @@
 import torch
 from modules.pt_selectors import select_bounces
 from mutils import normalize
-from modules.row_mask_sum import row_mask_sum
+from modules.row_mask_sum import row_mask_sum, row_mask_sum_where
 from icecream import ic
 
 class RealBounce(torch.nn.Module):
@@ -128,6 +128,12 @@ class RealBounce(torch.nn.Module):
             brdf_color = row_mask_sum(brdf_weight, ray_mask) / ray_count
             tinted_ref_rgb = row_mask_sum(incoming_light * brdf_weight, ray_mask) / ray_count
             spec[bounce_mask] = row_mask_sum(incoming_light, ray_mask) / ray_count
+
+            indices = torch.where(ray_mask)[0]
+            B, M = ray_mask.shape
+            brdf_color = row_mask_sum_where(brdf_weight, indices, B) / ray_count
+            tinted_ref_rgb = row_mask_sum_where(incoming_light * brdf_weight, indices, B) / ray_count
+            spec[bounce_mask] = row_mask_sum_where(incoming_light, indices, B) / ray_count
             # ic(incoming_light.mean(), tinted_ref_rgb.mean())
 
             if self.detach_bg:

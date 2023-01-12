@@ -110,7 +110,8 @@ class NerfAccSampler(torch.nn.Module):
                    1,
                    torch.empty((N, 1), device=device),
                    torch.empty((N, 1), device=device),
-                   torch.ones((N), dtype=bool, device=device))
+                   torch.ones((N), dtype=bool, device=device),
+                   dict(t_starts=t_starts, t_ends=t_ends, ray_indices=ray_indices))
 
         pz_vals = (t_starts + t_ends) / 2
         pdists = t_ends - t_starts
@@ -142,7 +143,12 @@ class NerfAccSampler(torch.nn.Module):
             xyz_sampled_w = xyz_sampled_w[whole_valid, :] 
             z_vals = z_vals[whole_valid, :]
             dists = dists[whole_valid, :]
+            if not whole_valid.all():
+                ray_indices = torch.where(ray_valid)[0]
         else:
             whole_valid = torch.ones((N), dtype=bool, device=device)
 
-        return xyz_sampled_w[ray_valid], ray_valid, M, z_vals, dists, whole_valid
+        return xyz_sampled_w[ray_valid], ray_valid, M, z_vals, dists, whole_valid, dict(
+                t_starts=t_starts,
+                t_ends=t_ends,
+                ray_indices=ray_indices)

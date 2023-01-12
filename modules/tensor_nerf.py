@@ -188,7 +188,7 @@ class TensorNeRF(torch.nn.Module):
         # sample points
         device = rays.device
 
-        xyz_sampled, ray_valid, max_samps, z_vals, dists, whole_valid = self.sampler.sample(
+        xyz_sampled, ray_valid, max_samps, z_vals, dists, whole_valid, extras = self.sampler.sample(
             rays, focal, ndc_ray=ndc_ray, override_near=override_near, is_train=is_train,
             stepmul=stepmul, dynamic_batch_size=dynamic_batch_size,
             N_samples=N_samples, rf=self.rf)
@@ -245,7 +245,8 @@ class TensorNeRF(torch.nn.Module):
         # app stands for appearance
         pweight = weight[ray_valid]
         thres = self.rayMarch_weight_thres if recur == 0 else self.recur_weight_thres
-        app_mask = (weight > thres)
+        # app_mask = weight > thres
+        app_mask = ray_valid
         papp_mask = app_mask[ray_valid]
         # ic(recur, ray_valid.shape, ray_valid.sum(), app_mask.shape, app_mask.sum())
 
@@ -294,7 +295,14 @@ class TensorNeRF(torch.nn.Module):
         # rgb_map = torch.sum(weight[..., None] * rgb.clip(min=0, max=1), -2)
         eweight = weight[app_mask][..., None]
         tmap_rgb = self.tonemap(rgb.clip(min=0, max=1))
-        rgb_map = row_mask_sum(eweight * tmap_rgb, app_mask)
+        # rgb_map = row_mask_sum(eweight * tmap_rgb, app_mask)
+
+        D = tmap_rgb.shape[1]
+        index = extras['ray_indices'][:, None].expand(-1, D)
+        rgb_map = torch.zeros((B, D), device=device, dtype=eweight.dtype)
+        # ic(index.shape, (eweight * tmap_rgb).shape, rgb_map.shape, index.max())
+        rgb_map.scatter_add_(0, index, eweight * tmap_rgb)
+
         images = {}
         statistics = dict(
             recur=recur,
@@ -316,9 +324,14 @@ class TensorNeRF(torch.nn.Module):
                 # ], dim=1)
                 # d_normal_map = torch.matmul(row_basis, d_world_normal_map.unsqueeze(-1)).squeeze(-1)
 
-                world_normal_map = row_mask_sum(world_normal*pweight[..., None], ray_valid)
+                # world_normal_map = row_mask_sum(world_normal*pweight[..., None], ray_valid)
+                world_normal_map = torch.zeros((B, 3), device=device, dtype=eweight.dtype)
+                world_normal_map.scatter_add_(0, index, eweight * world_normal)
                 world_normal_map = acc_map[..., None] * world_normal_map + (1 - acc_map[..., None])
-                pred_norm_map = row_mask_sum(pred_norms*pweight[..., None], ray_valid)
+
+                # pred_norm_map = row_mask_sum(pred_norms*pweight[..., None], ray_valid)
+                pred_norm_map = torch.zeros((B, 3), device=device, dtype=eweight.dtype)
+                pred_norm_map.scatter_add_(0, index, eweight * pred_norms)
                 pred_norm_map = acc_map[..., None] * pred_norm_map + (1 - acc_map[..., None])
 
                 if weight.shape[1] > 0:

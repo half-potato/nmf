@@ -21,6 +21,13 @@ def row_mask_sum(mat, mask):
     output.scatter_add_(0, index, mat)
     return output
 
+def row_mask_sum_where(mat, indices, B):
+    N, D = mat.shape
+    index = indices[:, None].expand(-1, D)
+    output = torch.zeros((B, D), device=mat.device, dtype=mat.dtype)
+    output.scatter_add_(0, index, mat)
+    return output
+
 """
 import warp as wp
 
