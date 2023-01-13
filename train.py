@@ -245,8 +245,8 @@ def reconstruction(args):
     tvreg = TVLoss()
     logger.info(f"initial TV_weight density: {TV_weight_density} appearance: {TV_weight_app}")
 
-    # allrgbs = allrgbs.to(device)
-    # allrays = allrays.to(device)
+    allrgbs = allrgbs.to(device)
+    allrays = allrays.to(device)
     # ratio of meters to pixels at a distance of 1 meter
     focal = (train_dataset.focal[0] if ndc_ray else train_dataset.focal)
     # / train_dataset.img_wh[0]
@@ -350,8 +350,8 @@ def reconstruction(args):
     ic(normal_decay)
 
     OmegaConf.save(config=args, f=f'{logfolder}/config.yaml')
-    if True:
-    # with torch.profiler.profile(record_shapes=True, schedule=torch.profiler.schedule(wait=1, warmup=1, active=params.n_iters-1), with_stack=True) as p:
+    # if True:
+    with torch.profiler.profile(record_shapes=True, schedule=torch.profiler.schedule(wait=1, warmup=1, active=params.n_iters-1), with_stack=True) as p:
     # with torch.autograd.detect_anomaly():
         for iteration in pbar:
             rays_remaining = params.batch_size
@@ -402,7 +402,7 @@ def reconstruction(args):
                         # loss = F.huber_loss(rgb_map.clip(0, 1), rgb_train[whole_valid], delta=1, reduction='mean')
                         loss = ((rgb_map.clip(0, 1) - rgb_train[whole_valid].clip(0, 1))**2).sum()
                         # loss = ((rgb_map.clip(0, 1) - rgb_train[whole_valid].clip(0, 1)).abs()).sum()
-                    norm_err = sum(stats['normal_err']) if (stats['normal_err']) == list else stats['normal_err'].sum()
+                    norm_err = sum(stats['normal_err']) if type(stats['normal_err']) == list else stats['normal_err'].sum()
                     # loss = torch.sqrt(F.huber_loss(rgb_map, rgb_train, delta=1, reduction='none') + params.charbonier_eps**2).mean()
                     # photo_loss = ((rgb_map.clip(0, 1) - rgb_train[whole_valid].clip(0, 1)) ** 2).mean().detach()
                     photo_loss = ((rgb_map.clip(0, 1) - rgb_train[whole_valid].clip(0, 1))**2).mean().detach()
@@ -548,8 +548,8 @@ def reconstruction(args):
             #     allrays, allrgbs, mask = tensorf.filtering_rays(allrays, allrgbs, focal)
             #     trainingSampler = SimpleSampler(allrays.shape[0], params.batch_size)
 
-    #         p.step()
-    # p.export_chrome_trace('p.trace')
+            p.step()
+    p.export_chrome_trace('p.trace')
 
 
     # prof.export_chrome_trace('trace.json')

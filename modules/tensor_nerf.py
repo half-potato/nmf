@@ -157,7 +157,7 @@ class TensorNeRF(torch.nn.Module):
 
     def calculate_normals(self, xyz):
         with torch.enable_grad():
-            xyz_g = xyz.clone()
+            xyz_g = xyz.detach().clone()
             xyz_g.requires_grad = True
 
             # compute sigma
@@ -243,41 +243,41 @@ class TensorNeRF(torch.nn.Module):
         alpha, weight, bg_weight = raw2alpha(sigma, dists * self.rf.distance_scale)
 
         # app stands for appearance
-        pweight = weight[ray_valid]
         thres = self.rayMarch_weight_thres if recur == 0 else self.recur_weight_thres
         # app_mask = weight > thres
         app_mask = ray_valid
-        papp_mask = app_mask[ray_valid]
+        # papp_mask = app_mask[ray_valid]
         # ic(recur, ray_valid.shape, ray_valid.sum(), app_mask.shape, app_mask.sum())
+        pviewdirs = viewdirs[app_mask]
 
         # if self.visibility_module is not None:
         #     self.visibility_module.ray_update(xyz_normed, viewdirs[ray_valid], app_mask, ray_valid)
 
         if app_mask.any():
             #  Compute normals for app mask
-            app_xyz = xyz_sampled[papp_mask]
+            app_xyz = xyz_sampled
 
             # TODO REMOVE
             norms = self.calculate_normals(app_xyz)
-            world_normal[papp_mask] = norms
+            world_normal = norms
 
-            app_norm_xyz = xyz_normed[papp_mask]
+            app_norm_xyz = xyz_normed
 
             if all_app_features is None:
                 app_features = self.rf.compute_appfeature(app_xyz)
             else:
-                app_features = all_app_features[papp_mask]
+                app_features = all_app_features
                 # _, app_features = self.rf.compute_feature(app_norm_xyz)
 
             # interpolate between the predicted and world normals
             if self.normal_module is not None:
                 pred_norms = torch.zeros_like(pred_norms)
-                pred_norms[papp_mask] = self.normal_module(app_norm_xyz, app_features, world_normal[papp_mask])
+                pred_norms = self.normal_module(app_norm_xyz, app_features, world_normal)
                 v_world_normal = pred_norms if self.use_predicted_normals else world_normal
             else:
                 v_world_normal = world_normal
 
-            rgb, debug = self.model(app_xyz, app_features, viewdirs[app_mask], v_world_normal[papp_mask], weight, app_mask, weight.shape[0], recur, recur_forward)
+            rgb, debug = self.model(app_xyz, app_features, pviewdirs, v_world_normal, weight, app_mask, weight.shape[0], recur, recur_forward)
 
         else:
             debug = {k: torch.empty((0, v), device=device, dtype=weight.dtype) for k, v in self.model.outputs.items()}
@@ -324,12 +324,12 @@ class TensorNeRF(torch.nn.Module):
                 # ], dim=1)
                 # d_normal_map = torch.matmul(row_basis, d_world_normal_map.unsqueeze(-1)).squeeze(-1)
 
-                # world_normal_map = row_mask_sum(world_normal*pweight[..., None], ray_valid)
+                # world_normal_map = row_mask_sum(world_normal*eweight[..., None], ray_valid)
                 world_normal_map = torch.zeros((B, 3), device=device, dtype=eweight.dtype)
                 world_normal_map.scatter_add_(0, index, eweight * world_normal)
                 world_normal_map = acc_map[..., None] * world_normal_map + (1 - acc_map[..., None])
 
-                # pred_norm_map = row_mask_sum(pred_norms*pweight[..., None], ray_valid)
+                # pred_norm_map = row_mask_sum(pred_norms*eweight[..., None], ray_valid)
                 pred_norm_map = torch.zeros((B, 3), device=device, dtype=eweight.dtype)
                 pred_norm_map.scatter_add_(0, index, eweight * pred_norms)
                 pred_norm_map = acc_map[..., None] * pred_norm_map + (1 - acc_map[..., None])
@@ -348,9 +348,8 @@ class TensorNeRF(torch.nn.Module):
                 surface_width = ray_valid.sum(dim=1)
 
                 # TODO REMOVE
-                LOGGER.log_norms_n_rays(xyz_sampled[papp_mask], v_world_normal[papp_mask], weight[app_mask])
                 # o_world_normal = world_normal if self.orient_world_normals else pred_norms
-                # ori_loss = torch.matmul(viewdirs[ray_valid].reshape(-1, 1, 3).detach(), o_world_normal.reshape(-1, 3, 1)).reshape(pweight.shape).clamp(min=0)**2
+                # ori_loss = torch.matmul(viewdirs[ray_valid].reshape(-1, 1, 3).detach(), o_world_normal.reshape(-1, 3, 1)).reshape(eweight.shape).clamp(min=0)**2
                 # debug[ray_valid] = ori_loss.reshape(-1, 1).expand(-1, 3)
                 # calculate cross section
                 pcs_mask = xyz_normed[..., 2] < 0
@@ -369,28 +368,28 @@ class TensorNeRF(torch.nn.Module):
             # viewdirs point inward. -viewdirs aligns with pred_norms. So we want it below 0
             o_world_normal = world_normal if self.orient_world_normals else pred_norms
             aweight = weight[app_mask]
-            NdotV1 = (-viewdirs[app_mask].reshape(-1, 3).detach() * pred_norms[papp_mask].reshape(-1, 3)).sum(dim=-1)
+            NdotV1 = (-pviewdirs.reshape(-1, 3).detach() * pred_norms.reshape(-1, 3)).sum(dim=-1)
 
             aweight = weight[app_mask]
-            NdotV2 = (-viewdirs[app_mask].reshape(-1, 3).detach() * world_normal[papp_mask].reshape(-1, 3)).sum(dim=-1)
+            NdotV2 = (-pviewdirs.reshape(-1, 3).detach() * world_normal.reshape(-1, 3)).sum(dim=-1)
             ori_loss = (aweight * (NdotV1.clamp(max=0)**2 + NdotV2.clamp(max=0)**2)).sum()# / B
 
-            midpoint = torch.cat([
-                z_vals,
-                (2*z_vals[:, -1] - z_vals[:, -2])[:, None],
-            ], dim=1)
-            # extend the dt artifically to the background
-            dt = torch.cat([
-                dists,
-                0*dists[:, -2:-1]
-            ], dim=1)
-            full_weight = torch.cat([weight, 1-weight.sum(dim=1, keepdim=True)], dim=1)
+            # midpoint = torch.cat([
+            #     z_vals,
+            #     (2*z_vals[:, -1] - z_vals[:, -2])[:, None],
+            # ], dim=1)
+            # # extend the dt artifically to the background
+            # dt = torch.cat([
+            #     dists,
+            #     0*dists[:, -2:-1]
+            # ], dim=1)
+            # full_weight = torch.cat([weight, 1-weight.sum(dim=1, keepdim=True)], dim=1)
             # TODO REMOVE
-            distortion_loss = calc_distortion_loss(midpoint, full_weight, dt)
-            # distortion_loss = torch.tensor(0.0, device=device) 
+            # distortion_loss = calc_distortion_loss(midpoint, full_weight, dt)
+            distortion_loss = torch.tensor(0.0, device=device) 
 
             if self.align_pred_norms:
-                align_world_loss = 2*(1-(pred_norms[papp_mask] * world_normal[papp_mask]).sum(dim=-1))#**0.5
+                align_world_loss = 2*(1-(pred_norms * world_normal).sum(dim=-1))#**0.5
                 prediction_loss = (aweight * align_world_loss).sum()# / B
             else:
                 prediction_loss = torch.tensor(0.0)
@@ -406,8 +405,8 @@ class TensorNeRF(torch.nn.Module):
             if gt_normals is not None:
                 gt_normals_mask = gt_normals[whole_valid].view(-1, 1, 3).expand(full_shape)[app_mask]
                 gt_mask = gt_normals_mask.sum(dim=1) > 0.9
-                pred_norm_err_a = 2*(1-(pred_norms[papp_mask][gt_mask] * gt_normals_mask[gt_mask]).sum(dim=-1))
-                pred_norm_err_b = 2*(1-(world_normal[papp_mask][gt_mask] * gt_normals_mask[gt_mask]).sum(dim=-1))
+                pred_norm_err_a = 2*(1-(pred_norms[gt_mask] * gt_normals_mask[gt_mask]).sum(dim=-1))
+                pred_norm_err_b = 2*(1-(world_normal[gt_mask] * gt_normals_mask[gt_mask]).sum(dim=-1))
                 pred_norm_err = (aweight[gt_mask] * (pred_norm_err_a + pred_norm_err_b)).sum()# / B
                 statistics['normal_err'] = pred_norm_err
             statistics['brdf_reg'] = -debug['tint'].mean() if 'tint' in debug else torch.tensor(0.0)
