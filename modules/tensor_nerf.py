@@ -157,7 +157,7 @@ class TensorNeRF(torch.nn.Module):
 
     def calculate_normals(self, xyz):
         with torch.enable_grad():
-            xyz_g = xyz.clone()
+            xyz_g = xyz.detach().clone()
             xyz_g.requires_grad = True
 
             # compute sigma

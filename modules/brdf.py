@@ -161,7 +161,19 @@ class MLPBRDF(torch.nn.Module):
     #     ], dim=-1).to(device)
     #     static_vecs = torch.zeros_like(ang_vecs)
     #     self()
-        
+
+    def calibrate(self, efeatures):
+        N = efeatures.shape[0]
+        device = efeatures.device
+        def rand_vecs():
+            v = normalize(2*torch.rand((N, 3), device=device) - 1)
+            return v
+        weight = self(rand_vecs(), rand_vecs(), rand_vecs(), rand_vecs(), rand_vecs(), efeatures, torch.rand((N), device=device))
+        # ic(self(rand_vecs(), rand_vecs(), rand_vecs(), rand_vecs(), rand_vecs(), efeatures, torch.rand((N), device=device)).mean())
+        self.bias += -(weight / (1-weight)).log().mean().detach().item()
+        # ic(self.bias, -(weight / (1-weight)).log().mean().detach().item())
+        # ic(self(rand_vecs(), rand_vecs(), rand_vecs(), rand_vecs(), rand_vecs(), efeatures, torch.rand((N), device=device)).mean())
+
 
     def forward(self, V, L, N, half_vec, diff_vec, efeatures, eroughness):
         # V: (n, 3)-viewdirs, the outgoing light direction

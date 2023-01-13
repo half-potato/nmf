@@ -329,6 +329,11 @@ def reconstruction(args):
     alpha = 1-torch.exp(-sigma_feat * tensorf.sampler.stepsize * tensorf.rf.distance_scale)
     print(f"Mean alpha: {alpha.detach().mean().item():.06f}.")
     ic(sigma_feat.mean())
+    feat = tensorf.rf.compute_appfeature(xyz)
+    tensorf.model.diffuse_module.calibrate(xyz, None, feat)
+    tensorf.model.brdf.calibrate(feat)
+    args.model.arch.model.brdf.bias = tensorf.model.brdf.bias
+    args.model.arch.model.diffuse_module.diffuse_bias = tensorf.model.diffuse_module.diffuse_bias
 
     pbar = tqdm(range(params.n_iters), miniters=args.progress_refresh_rate, file=sys.stdout)
     def init_optimizer(grad_vars):
@@ -402,7 +407,7 @@ def reconstruction(args):
                         # loss = F.huber_loss(rgb_map.clip(0, 1), rgb_train[whole_valid], delta=1, reduction='mean')
                         loss = ((rgb_map.clip(0, 1) - rgb_train[whole_valid].clip(0, 1))**2).sum()
                         # loss = ((rgb_map.clip(0, 1) - rgb_train[whole_valid].clip(0, 1)).abs()).sum()
-                    norm_err = sum(stats['normal_err']) if (stats['normal_err']) == list else stats['normal_err'].sum()
+                    norm_err = sum(stats['normal_err']) if type(stats['normal_err']) == list else stats['normal_err'].sum()
                     # loss = torch.sqrt(F.huber_loss(rgb_map, rgb_train, delta=1, reduction='none') + params.charbonier_eps**2).mean()
                     # photo_loss = ((rgb_map.clip(0, 1) - rgb_train[whole_valid].clip(0, 1)) ** 2).mean().detach()
                     photo_loss = ((rgb_map.clip(0, 1) - rgb_train[whole_valid].clip(0, 1))**2).mean().detach()

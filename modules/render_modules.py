@@ -353,6 +353,15 @@ class HydraMLPDiffuse(torch.nn.Module):
         self.tint_mlp = util.create_mlp(self.in_mlpC, 3, **kwargs)
         self.roughness_mlp = util.create_mlp(self.in_mlpC, 1, **kwargs)
 
+
+    def calibrate(self, *args, **kwargs):
+        diffuse, tint, extra = self(*args, **kwargs)
+        diffuse_v = (diffuse / (1-diffuse)).log().mean().detach().item()
+        # tint_v = (tint / (1-tint)).log()
+        self.diffuse_bias += -1.1 - diffuse_v
+        ic(diffuse_v, self.diffuse_bias)
+        # self.tint_bias += 1.1 - diffuse_v
+
     def forward(self, pts, viewdirs, features, **kwargs):
         if self.allocation > 0:
             features = features[..., :self.allocation]

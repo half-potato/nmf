@@ -110,7 +110,7 @@ class RealBounce(torch.nn.Module):
             mipval = self.brdf_sampler.calculate_mipval(H.detach(), eV, eN.detach(), ray_mask, ea**2)
 
             bounce_rays = torch.cat([
-                exyz,
+                exyz + L*5e-3,
                 L,
             ], dim=-1)
             n = bounce_rays.shape[0]
