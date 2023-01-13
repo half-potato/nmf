@@ -134,8 +134,6 @@ class NerfAccSampler(torch.nn.Module):
         dists[ray_valid] = pdists.reshape(-1)
         z_vals[ray_valid] = pz_vals.reshape(-1)
         xyz_sampled_w[ray_valid] = xyz_sampled
-        # ic(xyz_sampled.shape)
-
 
         if self.max_samples > 0 and is_train and dynamic_batch_size:
             whole_valid = torch.cumsum(ray_valid.sum(dim=1), dim=0) < self.max_samples

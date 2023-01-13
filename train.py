@@ -245,8 +245,8 @@ def reconstruction(args):
     tvreg = TVLoss()
     logger.info(f"initial TV_weight density: {TV_weight_density} appearance: {TV_weight_app}")
 
-    allrgbs = allrgbs.to(device)
-    allrays = allrays.to(device)
+    # allrgbs = allrgbs.to(device)
+    # allrays = allrays.to(device)
     # ratio of meters to pixels at a distance of 1 meter
     focal = (train_dataset.focal[0] if ndc_ray else train_dataset.focal)
     # / train_dataset.img_wh[0]

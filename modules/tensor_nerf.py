@@ -230,7 +230,7 @@ class TensorNeRF(torch.nn.Module):
         def recur_forward(rays, start_mipval):
             if recur < len(self.model.max_brdf_rays)-1:
                 incoming_data, incoming_stats = self(rays, focal, recur=recur+1, bg_col=None, dynamic_batch_size=False, stepmul=self.recur_stepmul,
-                                     start_mipval=start_mipval.reshape(-1), override_near=self.rf.stepSize*5, is_train=is_train,
+                                     start_mipval=start_mipval.reshape(-1), override_near=self.rf.stepSize, is_train=is_train,
                                      ndc_ray=False, N_samples=N_samples, tonemap=False, draw_debug=False)
                 incoming_light = incoming_data['rgb_map']
             else:
