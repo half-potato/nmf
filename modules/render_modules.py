@@ -15,6 +15,9 @@ from mutils import normalize
 from . import util
 import math
 
+def get_dim(encoder, extra=0):
+    return 0 if encoder is None else encoder.dim() + extra
+
 def str2fn(name):
     if name == 'sigmoid':
         return torch.nn.Sigmoid()
@@ -104,8 +107,7 @@ class VisibilityMLP(torch.nn.Module):
         if feape > -1:
             self.in_mlpC += 2*feape*in_channels + in_channels
         self.view_encoder = view_encoder
-        if view_encoder is not None:
-            self.in_mlpC += self.view_encoder.dim()
+        self.in_mlpC += get_dim(self.view_encoder)
         self.feape = feape
 
         self.mlp = torch.nn.Sequential(
@@ -329,8 +331,8 @@ class HydraMLPDiffuse(torch.nn.Module):
     refpe: int
     featureC: int
     num_layers: int
-    def __init__(self, in_channels, pospe=12, view_encoder=None, feape=6, allocation=0, unlit_tint=False, lr=1e-4,
-                 tint_bias=-1, diffuse_bias=-2, diffuse_mul=1, roughness_bias=1, proportion_bias=0, **kwargs):
+    def __init__(self, in_channels, pospe=12, view_encoder=None, roughness_view_encoder=None, roughness_cfg=None, feape=6, allocation=0,
+                 unlit_tint=False, lr=1e-4, tint_bias=-1, diffuse_bias=-2, diffuse_mul=1, roughness_bias=1, proportion_bias=0, **kwargs):
         super().__init__()
 
         in_channels = in_channels if allocation <= 0 else allocation
@@ -347,13 +349,14 @@ class HydraMLPDiffuse(torch.nn.Module):
         self.diffuse_mul = diffuse_mul
 
         self.view_encoder = view_encoder
-        if view_encoder is not None:
-            self.in_mlpC += self.view_encoder.dim() + 3
+        self.roughness_view_encoder = roughness_view_encoder
+        self.in_mlpC += get_dim(self.view_encoder, 3)
         self.feape = feape
         self.pospe = pospe
         self.diffuse_mlp = util.create_mlp(self.in_mlpC, 3, **kwargs)
         self.tint_mlp = util.create_mlp(self.in_mlpC, 3, **kwargs)
-        self.roughness_mlp = util.create_mlp(self.in_mlpC, 2, **kwargs)
+        roughness_cfg = roughness_cfg if roughness_cfg is not None else kwargs
+        self.roughness_mlp = util.create_mlp(self.in_mlpC + get_dim(self.roughness_view_encoder, 3), 2, **roughness_cfg)
         self.proportion_mlp = util.create_mlp(self.in_mlpC, 1, **kwargs)
 
 
@@ -363,11 +366,16 @@ class HydraMLPDiffuse(torch.nn.Module):
         # tint_v = (tint / (1-tint)).log()
         self.diffuse_bias += -1.1 - diffuse_v
         ic(diffuse_v, self.diffuse_bias)
+
+        # roughness = (extra['r1'] + extra['r2']) / 2
+        # roughness_v = (roughness / (1-roughness)).log().mean().detach().item()
+
         # self.tint_bias += 1.1 - diffuse_v
 
     def forward(self, pts, viewdirs, features, **kwargs):
         if self.allocation > 0:
             features = features[..., :self.allocation]
+        device = features.device
         B = pts.shape[0]
         size = pts[..., 3:4].expand(pts[..., :3].shape)
         pts = pts[..., :3]
@@ -382,10 +390,14 @@ class HydraMLPDiffuse(torch.nn.Module):
         if self.feape > 0:
             indata += [positional_encoding(features, self.feape)]
         if self.view_encoder is not None:
-            indata += [self.view_encoder(viewdirs, torch.tensor(1e-3, device=pts.device).expand(B)).reshape(B, -1), viewdirs]
+            indata += [self.view_encoder(viewdirs, torch.tensor(1e-3, device=device).expand(B)).reshape(B, -1), viewdirs]
         mlp_in = torch.cat(indata, dim=-1)
+
+        if self.roughness_view_encoder is not None:
+            indata += [self.roughness_view_encoder(viewdirs, torch.tensor(1e-3, device=device).expand(B)).reshape(B, -1), viewdirs]
+        rough_mlp_in = torch.cat(indata, dim=-1)
         diffuse = torch.sigmoid(self.diffuse_mul*self.diffuse_mlp(mlp_in)+self.diffuse_bias)
-        r = torch.sigmoid(self.roughness_mlp(mlp_in)+self.roughness_bias)
+        r = torch.sigmoid(self.roughness_mlp(rough_mlp_in)+self.roughness_bias)
         tint = torch.sigmoid(self.tint_mlp(mlp_in)+self.tint_bias)
         proportion = torch.sigmoid(self.proportion_mlp(mlp_in)+self.proportion_bias)
 

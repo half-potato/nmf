@@ -8,6 +8,7 @@ from torch.utils.tensorboard import SummaryWriter
 import datetime
 from omegaconf import DictConfig, OmegaConf
 import math
+from mutils import normalize
 
 from dataLoader import dataset_dict
 import sys
@@ -331,7 +332,7 @@ def reconstruction(args):
     print(f"Mean alpha: {alpha.detach().mean().item():.06f}.")
     ic(sigma_feat.mean())
     feat = tensorf.rf.compute_appfeature(xyz)
-    tensorf.model.diffuse_module.calibrate(xyz, None, feat)
+    tensorf.model.diffuse_module.calibrate(xyz, normalize(torch.rand_like(xyz[:, :3])), feat)
     tensorf.model.brdf.calibrate(feat, tensorf.bg_module.mean_color().detach().mean())
     args.model.arch.model.brdf.bias = tensorf.model.brdf.bias
     args.model.arch.model.diffuse_module.diffuse_bias = tensorf.model.diffuse_module.diffuse_bias

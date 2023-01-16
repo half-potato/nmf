@@ -152,6 +152,12 @@ arch:
       # view_encoder:
       #   _target_: modules.render_modules.PE
       #   max_degree: 2
+      roughness_view_encoder:
+        _target_: modules.render_modules.PE
+        max_degree: 2
+      roughness_cfg:
+        hidden_w: 64
+        num_layers: 2
       hidden_w: 64
       num_layers: 1
       initializer: 'xavier_sigmoid'
