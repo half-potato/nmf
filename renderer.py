@@ -169,6 +169,28 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
         bg_path.mkdir(exist_ok=True, parents=True)
         tensorf.bg_module.save(bg_path, prefix=prtx, tonemap=tm)
 
+    # save brdf stuff
+    if hasattr(tensorf.model, 'graph_brdfs'):
+        xyz = torch.rand(200, 4, device=device)*2-1
+        xyz[:, 3] *= 0
+        sigma_feat = tensorf.rf.compute_densityfeature(xyz)
+        xyz = xyz[sigma_feat > sigma_feat.mean()][:8]
+        feat = tensorf.rf.compute_appfeature(xyz)
+        viewangs = torch.linspace(0, np.pi, 8, device=device)
+        viewdirs = torch.stack([
+            torch.cos(viewangs),
+            torch.zeros_like(viewangs),
+            -torch.sin(viewangs),
+        ], dim=-1).reshape(-1, 3).to(device)
+        # ic(viewdirs)
+        res = 100
+        brdf_im = tensorf.model.graph_brdfs(xyz, viewdirs, feat, res).cpu()
+        # ic(brdf_im.shape)
+        bg_path = Path(savePath) / 'brdf'
+        bg_path.mkdir(exist_ok=True, parents=True)
+        imageio.imwrite(bg_path / f'{prtx}brdf_map.exr', brdf_im)
+
+
     try:
         tqdm._instances.clear()
     except Exception:

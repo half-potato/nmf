@@ -88,9 +88,17 @@ arch:
 
     brdf_sampler:
       _target_: brdf_samplers.ggx.GGXSampler
-      # _target_: modules.brdf.CosineLobeSampler
-      # _target_: modules.brdf.BeckmannSampler
       _partial_: True
+
+    # brdf_sampler:
+    #   _target_: brdf_samplers.multisampler.MultiSampler
+    #   _partial_: True
+    #   sampler1:
+    #     _target_: brdf_samplers.ggx.GGXSampler
+    #     _partial_: True
+    #   sampler2:
+    #     _target_: brdf_samplers.ggx.GGXSampler
+    #     _partial_: True
 
     brdf:
       _target_: modules.brdf.MLPBRDF
@@ -152,6 +160,7 @@ arch:
       diffuse_bias: -0.619
       diffuse_mul: 1.5
       roughness_bias: -1
+      proportion_bias: 0
       # allocation: 7
 
     # diffuse_module:

@@ -329,7 +329,8 @@ class HydraMLPDiffuse(torch.nn.Module):
     refpe: int
     featureC: int
     num_layers: int
-    def __init__(self, in_channels, pospe=12, view_encoder=None, feape=6, allocation=0, unlit_tint=False, lr=1e-4, tint_bias=-1, diffuse_bias=-2, diffuse_mul=1, roughness_bias=1, **kwargs):
+    def __init__(self, in_channels, pospe=12, view_encoder=None, feape=6, allocation=0, unlit_tint=False, lr=1e-4,
+                 tint_bias=-1, diffuse_bias=-2, diffuse_mul=1, roughness_bias=1, proportion_bias=0, **kwargs):
         super().__init__()
 
         in_channels = in_channels if allocation <= 0 else allocation
@@ -340,6 +341,7 @@ class HydraMLPDiffuse(torch.nn.Module):
         self.tint_bias = tint_bias
         self.diffuse_bias = diffuse_bias
         self.roughness_bias = roughness_bias
+        self.proportion_bias = proportion_bias
         self.lr = lr
         self.allocation = allocation
         self.diffuse_mul = diffuse_mul
@@ -351,7 +353,8 @@ class HydraMLPDiffuse(torch.nn.Module):
         self.pospe = pospe
         self.diffuse_mlp = util.create_mlp(self.in_mlpC, 3, **kwargs)
         self.tint_mlp = util.create_mlp(self.in_mlpC, 3, **kwargs)
-        self.roughness_mlp = util.create_mlp(self.in_mlpC, 1, **kwargs)
+        self.roughness_mlp = util.create_mlp(self.in_mlpC, 2, **kwargs)
+        self.proportion_mlp = util.create_mlp(self.in_mlpC, 1, **kwargs)
 
 
     def calibrate(self, *args, **kwargs):
@@ -382,16 +385,18 @@ class HydraMLPDiffuse(torch.nn.Module):
             indata += [self.view_encoder(viewdirs, torch.tensor(1e-3, device=pts.device).expand(B)).reshape(B, -1), viewdirs]
         mlp_in = torch.cat(indata, dim=-1)
         diffuse = torch.sigmoid(self.diffuse_mul*self.diffuse_mlp(mlp_in)+self.diffuse_bias)
-        r1 = torch.sigmoid(self.roughness_mlp(mlp_in)+self.roughness_bias)
+        r = torch.sigmoid(self.roughness_mlp(mlp_in)+self.roughness_bias)
         tint = torch.sigmoid(self.tint_mlp(mlp_in)+self.tint_bias)
+        proportion = torch.sigmoid(self.proportion_mlp(mlp_in)+self.proportion_bias)
 
         # ic(f0)
         return diffuse, tint, dict(
             diffuse = diffuse,
-            r1 = r1,
-            r2 = r1,
+            r1 = r[:, 0:1],
+            r2 = r[:, 1:2],
             f0 = tint,
-            tint=tint,
+            tint = tint,
+            proportion = proportion
         )
 
 class MLPDiffuse(torch.nn.Module):

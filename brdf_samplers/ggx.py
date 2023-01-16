@@ -7,8 +7,10 @@ from icecream import ic
 
 class GGXSampler(PseudoRandomSampler):
 
-    def sample(self, viewdir, normal, r1, r2, ray_mask, eps=torch.finfo(torch.float32).eps):
+    def sample(self, viewdir, normal, r1, r2, ray_mask, eps=torch.finfo(torch.float32).eps, **kwargs):
         num_samples = ray_mask.shape[1]
+        # no non isotropic stuff
+        r2 = r1
         # viewdir: (B, 3)
         # normal: (B, 3)
         # r1, r2: B roughness values for anisotropic roughness
@@ -84,12 +86,19 @@ class GGXSampler(PseudoRandomSampler):
 
         return L, row_world_basis_mask
 
-    def calculate_mipval(self, H, V, N, ray_mask, roughness, eps=torch.finfo(torch.float32).eps):
+    def compute_prob(self, halfvec, eN, r1, r2, **kwargs):
+        eps=torch.finfo(torch.float32).eps
+        NdotH = ((halfvec * eN).sum(dim=-1)).abs().clip(min=eps, max=1).reshape(-1, 1)
+        # ic(NdotH.shape, ea.shape, brdf_weight.shape)
+        logD = 2*torch.log(r1.clip(min=eps)) - 2*torch.log((NdotH**2*(r1**2-1)+1).clip(min=eps))
+        return logD.exp()
+
+    def calculate_mipval(self, H, V, N, ray_mask, r1, r2, eps=torch.finfo(torch.float32).eps, **kwargs):
         num_samples = ray_mask.shape[1]
         NdotH = ((H * N).sum(dim=-1)).abs().clip(min=eps, max=1)
         HdotV = (H * V).sum(dim=-1).abs().clip(min=eps, max=1)
         NdotV = (N * V).sum(dim=-1).abs().clip(min=eps, max=1)
-        logD = 2*torch.log(roughness.clip(min=eps)) - 2*torch.log((NdotH**2*(roughness**2-1)+1).clip(min=eps))
+        logD = 2*torch.log(r1.clip(min=eps)) - 2*torch.log((NdotH**2*(r1**2-1)+1).clip(min=eps))
         # ic(NdotH.shape, NdotH, D, D.mean())
         # px.scatter(x=NdotH[0].detach().cpu().flatten(), y=D[0].detach().cpu().flatten()).show()
         # assert(False)

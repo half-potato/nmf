@@ -162,7 +162,7 @@ class MLPBRDF(torch.nn.Module):
     #     static_vecs = torch.zeros_like(ang_vecs)
     #     self()
 
-    def calibrate(self, efeatures):
+    def calibrate(self, efeatures, bg_brightness):
         N = efeatures.shape[0]
         device = efeatures.device
         def rand_vecs():
@@ -170,7 +170,9 @@ class MLPBRDF(torch.nn.Module):
             return v
         weight = self(rand_vecs(), rand_vecs(), rand_vecs(), rand_vecs(), rand_vecs(), efeatures, torch.rand((N), device=device))
         # ic(self(rand_vecs(), rand_vecs(), rand_vecs(), rand_vecs(), rand_vecs(), efeatures, torch.rand((N), device=device)).mean())
-        self.bias += -(weight / (1-weight)).log().mean().detach().item()
+        target_val = 0.25 / bg_brightness.item()
+        ic(bg_brightness, target_val)
+        self.bias += math.log(target_val / (1-target_val)) - (weight / (1-weight)).log().mean().detach().item()
         # ic(self.bias, -(weight / (1-weight)).log().mean().detach().item())
         # ic(self(rand_vecs(), rand_vecs(), rand_vecs(), rand_vecs(), rand_vecs(), efeatures, torch.rand((N), device=device)).mean())
 

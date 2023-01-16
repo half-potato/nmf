@@ -135,7 +135,8 @@ def reconstruction(args):
 
     # init dataset
     dataset = dataset_dict[args.dataset.dataset_name]
-    train_dataset = dataset(os.path.join(args.datadir, args.dataset.scenedir), split='train', downsample=args.dataset.downsample_train, is_stack=False, stack_norms=args.dataset.stack_norms)
+    stack_norms = args.dataset.stack_norms if hasattr(args.dataset, 'stack_norms') else False
+    train_dataset = dataset(os.path.join(args.datadir, args.dataset.scenedir), split='train', downsample=args.dataset.downsample_train, is_stack=False, stack_norms=stack_norms)
     test_dataset = dataset(os.path.join(args.datadir, args.dataset.scenedir), split='test', downsample=args.dataset.downsample_train, is_stack=True)
     white_bg = train_dataset.white_bg
     train_dataset.near_far = args.dataset.near_far
@@ -331,7 +332,7 @@ def reconstruction(args):
     ic(sigma_feat.mean())
     feat = tensorf.rf.compute_appfeature(xyz)
     tensorf.model.diffuse_module.calibrate(xyz, None, feat)
-    tensorf.model.brdf.calibrate(feat)
+    tensorf.model.brdf.calibrate(feat, tensorf.bg_module.mean_color().detach().mean())
     args.model.arch.model.brdf.bias = tensorf.model.brdf.bias
     args.model.arch.model.diffuse_module.diffuse_bias = tensorf.model.diffuse_module.diffuse_bias
 
