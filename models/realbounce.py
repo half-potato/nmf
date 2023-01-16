@@ -54,6 +54,9 @@ class RealBounce(torch.nn.Module):
             torch.cos(ele_grid) * torch.cos(azi_grid),
         ], dim=-1).reshape(1, 1, -1, 3).to(device)
 
+        assert(xyzs.shape[0] == viewdirs.shape[0])
+        assert(xyzs.shape[0] == app_features.shape[0])
+
         diffuse, tint, matprop = self.diffuse_module(
             xyzs, viewdirs, app_features)
 

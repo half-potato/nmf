@@ -51,6 +51,7 @@ arch:
     multiplier: 2
     ema_decay: 0.95
     occ_thre: 0.01
+    alpha_thres: 1e-4
     max_samples: -1
 
   normal_module:
@@ -213,7 +214,7 @@ arch:
     mipbias: 0
     activation: 'exp'
     lr: 0.01
-    init_val: -1.897
+    init_val: -0.6
     # init_val: -0.602
     mul_lr: 0.001
     brightness_lr: 0

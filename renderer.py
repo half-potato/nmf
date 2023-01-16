@@ -171,10 +171,14 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
 
     # save brdf stuff
     if hasattr(tensorf.model, 'graph_brdfs'):
-        xyz = torch.rand(200, 4, device=device)*2-1
-        xyz[:, 3] *= 0
-        sigma_feat = tensorf.rf.compute_densityfeature(xyz)
-        xyz = xyz[sigma_feat > sigma_feat.mean()][:8]
+        N = 8
+        n = 0
+        while n < N:
+            xyz = torch.rand(200, 4, device=device)*2-1
+            xyz[:, 3] *= 0
+            sigma_feat = tensorf.rf.compute_densityfeature(xyz)
+            xyz = xyz[sigma_feat > sigma_feat.mean()][:8]
+            n = xyz.shape[0]
         feat = tensorf.rf.compute_appfeature(xyz)
         viewangs = torch.linspace(0, np.pi, 8, device=device)
         viewdirs = torch.stack([
