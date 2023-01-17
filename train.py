@@ -421,7 +421,7 @@ def reconstruction(args):
                     ori_loss = stats['ori_loss'].sum()
 
                     # adjust number of rays
-                    mean_samples = (n_samples + prev_n_samples) / 2 if prev_n_samples is not None else n_samples
+                    mean_samples = max(n_samples, prev_n_samples) if prev_n_samples is not None else n_samples
                     prev_n_samples = n_samples
                     num_rays = int(num_rays * params.target_num_samples / mean_samples + 1)
                     # tensorf.eval_batch_size = num_rays
