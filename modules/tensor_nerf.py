@@ -202,7 +202,7 @@ class TensorNeRF(torch.nn.Module):
 
         xyz_normed = self.rf.normalize_coord(xyz_sampled)
         full_shape = (B, max_samps, 3)
-        n_samples = full_shape[1]
+        n_samples = xyz_sampled.shape[0]
 
         M = xyz_sampled.shape[0]
  
@@ -211,7 +211,6 @@ class TensorNeRF(torch.nn.Module):
         viewdirs = rays[whole_valid, 3:6].view(-1, 1, 3).expand(full_shape)
         # rays_up = rays[:, 6:9]
         # rays_up = rays_up.view(-1, 1, 3).expand(full_shape)
-        n_samples = full_shape[1]
 
         # sigma.shape: (N, N_samples)
         sigma = torch.zeros(full_shape[:-1], device=device)
@@ -228,15 +227,16 @@ class TensorNeRF(torch.nn.Module):
             sigma[ray_valid] = psigma
 
         def recur_forward(rays, start_mipval):
+            nonlocal n_samples
             if recur < len(self.model.max_brdf_rays)-1:
                 incoming_data, incoming_stats = self(rays, focal, recur=recur+1, bg_col=None, dynamic_batch_size=False, stepmul=self.recur_stepmul,
                                      start_mipval=start_mipval.reshape(-1), override_near=self.rf.stepSize*5, is_train=is_train,
                                      ndc_ray=False, N_samples=N_samples, tonemap=False, draw_debug=False)
                 incoming_light = incoming_data['rgb_map']
+                # n_samples += incoming_stats['n_samples']
             else:
                 incoming_light = self.render_just_bg(rays, start_mipval.reshape(-1))
             return incoming_light
-
 
         # weight: [N_rays, N_samples]
         # ic((dists * self.rf.distance_scale).mean())
@@ -299,6 +299,7 @@ class TensorNeRF(torch.nn.Module):
         statistics = dict(
             recur=recur,
             whole_valid=whole_valid, 
+            n_samples=n_samples,
         )
 
         if not is_train and draw_debug:

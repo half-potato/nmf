@@ -357,42 +357,47 @@ def reconstruction(args):
     ic(normal_decay)
 
     OmegaConf.save(config=args, f=f'{logfolder}/config.yaml')
+    num_rays = params.starting_batch_size
+    prev_n_samples = None
     if True:
     # with torch.profiler.profile(record_shapes=True, schedule=torch.profiler.schedule(wait=1, warmup=1, active=params.n_iters-1), with_stack=True) as p:
     # with torch.autograd.detect_anomaly():
         for iteration in pbar:
-            rays_remaining = params.batch_size
             optimizer.zero_grad()
             losses, roughnesses, envmap_regs = [],[],[]
             pred_losses, ori_losses = [], []
             TVs = []
 
-            ray_idx, rgb_idx = trainingSampler.nextids(rays_remaining)
-            rays_train, rgba_train = allrays[ray_idx].to(device), allrgbs[rgb_idx].reshape(-1, allrgbs.shape[-1]).to(device)
-            match params.bg_col:
-                case 'rand':
-                    bg_col = torch.rand(3, device=device)
-                case 'white':
-                    bg_col = torch.ones((3), device=device)
-                case 'black':
-                    bg_col = torch.zeros((3), device=device)
-                case _:
-                    raise Exception(f"Unknown bg col: {params.bg_col}")
-            if rgba_train.shape[-1] == 4:
-                rgb_train = rgba_train[:, :3] * rgba_train[:, -1:] + (1 - rgba_train[:, -1:])*bg_col  # blend A to RGB
-                alpha_train = rgba_train[..., 3]
-            else:
-                rgb_train = rgba_train
-                alpha_train = None
-            gt_normal_map = train_dataset.all_norms[ray_idx].to(device) if train_dataset.stack_norms else None
-
-            while rays_remaining > 0:
+            lbatch_size = params.min_batch_size if num_rays < params.batch_size else num_rays
+            num_remaining = lbatch_size
+            while num_remaining > 0:
+                lnum_rays = min(num_rays, num_remaining)
+                num_remaining -= lnum_rays
+                ray_idx, rgb_idx = trainingSampler.nextids(lnum_rays)
+                rays_train, rgba_train = allrays[ray_idx].to(device), allrgbs[rgb_idx].reshape(-1, allrgbs.shape[-1]).to(device)
+                match params.bg_col:
+                    case 'rand':
+                        bg_col = torch.rand(3, device=device)
+                    case 'white':
+                        bg_col = torch.ones((3), device=device)
+                    case 'black':
+                        bg_col = torch.zeros((3), device=device)
+                    case _:
+                        raise Exception(f"Unknown bg col: {params.bg_col}")
+                if rgba_train.shape[-1] == 4:
+                    rgb_train = rgba_train[:, :3] * rgba_train[:, -1:] + (1 - rgba_train[:, -1:])*bg_col  # blend A to RGB
+                    alpha_train = rgba_train[..., 3]
+                else:
+                    rgb_train = rgba_train
+                    alpha_train = None
+                gt_normal_map = train_dataset.all_norms[ray_idx].to(device) if train_dataset.stack_norms else None
 
                 with torch.cuda.amp.autocast(enabled=args.fp16):
                     ims, stats = renderer(rays_train, tensorf, gt_normals=gt_normal_map,
-                            keys = ['rgb_map', 'normal_err', 'distortion_loss', 'prediction_loss', 'ori_loss', 'diffuse_reg', 'roughness', 'whole_valid', 'envmap_reg', 'brdf_reg'],
-                            focal=focal, output_alpha=alpha_train, chunk=params.batch_size, bg_col=bg_col, is_train=True, ndc_ray=ndc_ray)
+                            keys = ['rgb_map', 'normal_err', 'distortion_loss', 'prediction_loss', 'ori_loss', 'diffuse_reg', 'roughness', 'whole_valid', 'envmap_reg', 'brdf_reg', 'n_samples'],
+                            focal=focal, output_alpha=alpha_train, chunk=num_rays, bg_col=bg_col, is_train=True, ndc_ray=ndc_ray)
 
+                    n_samples = int(stats['n_samples'])
                     prediction_loss = stats['prediction_loss'].sum()
                     distortion_loss = stats['distortion_loss'].sum()
                     diffuse_reg = stats['diffuse_reg'].sum()
@@ -415,11 +420,17 @@ def reconstruction(args):
                     photo_loss = ((rgb_map.clip(0, 1) - rgb_train[whole_valid].clip(0, 1))**2).mean().detach()
                     ori_loss = stats['ori_loss'].sum()
 
-                    rays_remaining -= rgb_map.shape[0]
-                    rays_train = rays_train[~whole_valid]
-                    rgb_train = rgb_train[~whole_valid]
-                    if gt_normal_map is not None:
-                        gt_normal_map = gt_normal_map[~whole_valid]
+                    # adjust number of rays
+                    mean_samples = (n_samples + prev_n_samples) / 2 if prev_n_samples is not None else n_samples
+                    prev_n_samples = n_samples
+                    num_rays = int(num_rays * params.target_num_samples / mean_samples + 1)
+                    # tensorf.eval_batch_size = num_rays
+
+                    # rays_remaining -= rgb_map.shape[0]
+                    # rays_train = rays_train[~whole_valid]
+                    # rgb_train = rgb_train[~whole_valid]
+                    # if gt_normal_map is not None:
+                    #     gt_normal_map = gt_normal_map[~whole_valid]
 
                     # loss
                     # ori_lambda = params.ori_lambda if iteration > 1000 else params.ori_lambda * iteration / 1000
@@ -475,27 +486,27 @@ def reconstruction(args):
                         loss_tv = loss_tv + params.TV_weight_bg*tensorf.bg_module.tv_loss()
                     total_loss = total_loss + loss_tv
 
-                    total_loss = total_loss / params.batch_size
+                    total_loss = total_loss / lbatch_size
                     total_loss.backward()
 
-                photo_loss = photo_loss.detach().item()
-            
-                TVs.append(float(loss_tv))
-                ori_losses.append(params.ori_lambda * ori_loss.detach().item())
-                pred_losses.append(params.pred_lambda * prediction_loss.detach().item())
-                losses.append(total_loss.detach().item())
-                roughnesses.append(ims['roughness'].mean().detach().item())
-                envmap_regs.append(envmap_reg.detach().item())
-                PSNRs.append(-10.0 * np.log(photo_loss) / np.log(10.0))
+                    photo_loss = photo_loss.detach().item()
+                
+                    TVs.append(float(loss_tv))
+                    ori_losses.append(params.ori_lambda * ori_loss.detach().item())
+                    pred_losses.append(params.pred_lambda * prediction_loss.detach().item())
+                    losses.append(total_loss.detach().item())
+                    roughnesses.append(ims['roughness'].mean().detach().item())
+                    envmap_regs.append(envmap_reg.detach().item())
+                    PSNRs.append(-10.0 * np.log(photo_loss) / np.log(10.0))
 
-                # summary_writer.add_scalar('train/PSNR', PSNRs[-1], global_step=iteration)
-                # summary_writer.add_scalar('train/mse', photo_loss, global_step=iteration)
-                # summary_writer.add_scalar('train/ori_loss', ori_loss.detach().item(), global_step=iteration)
-                # summary_writer.add_scalar('train/distortion_loss', distortion_loss.detach().item(), global_step=iteration)
-                # summary_writer.add_scalar('train/prediction_loss', prediction_loss.detach().item(), global_step=iteration)
-                # summary_writer.add_scalar('train/diffuse_loss', diffuse_reg.detach().item(), global_step=iteration)
-                #
-                # summary_writer.add_scalar('train/lr', list(optimizer.param_groups)[0]['lr'], global_step=iteration)
+                    # summary_writer.add_scalar('train/PSNR', PSNRs[-1], global_step=iteration)
+                    # summary_writer.add_scalar('train/mse', photo_loss, global_step=iteration)
+                    # summary_writer.add_scalar('train/ori_loss', ori_loss.detach().item(), global_step=iteration)
+                    # summary_writer.add_scalar('train/distortion_loss', distortion_loss.detach().item(), global_step=iteration)
+                    # summary_writer.add_scalar('train/prediction_loss', prediction_loss.detach().item(), global_step=iteration)
+                    # summary_writer.add_scalar('train/diffuse_loss', diffuse_reg.detach().item(), global_step=iteration)
+                    #
+                    # summary_writer.add_scalar('train/lr', list(optimizer.param_groups)[0]['lr'], global_step=iteration)
 
             if params.clip_grad is not None:
                 torch.nn.utils.clip_grad_norm_(tensorf.parameters(), params.clip_grad)
@@ -521,11 +532,12 @@ def reconstruction(args):
                 desc = f'psnr = {float(np.mean(PSNRs)):.2f}' + \
                     f' test_psnr = {float(np.mean(PSNRs_test)):.2f}' + \
                     f' loss = {float(np.mean(losses)):.5f}' + \
-                    f' ori loss = {float(np.mean(ori_losses) / params.batch_size):.5f}' + \
-                    f' pred loss = {float(np.mean(pred_losses) / params.batch_size):.5f}' + \
+                    f' ori loss = {float(np.mean(ori_losses) / num_rays):.5f}' + \
+                    f' pred loss = {float(np.mean(pred_losses) / num_rays):.5f}' + \
                     f' rough = {float(np.mean(roughnesses)):.5f}' + \
                     f' tv = {float(np.mean(TVs)):.5f}' + \
-                    f' envmap = {float(np.mean(envmap_regs)):.5f}'
+                    f' envmap = {float(np.mean(envmap_regs)):.5f}' + \
+                    f' nrays = {num_rays}'
                     # + f' mse = {photo_loss:.6f}'
                 # if tensorf.bg_module is not None:
                 #     desc = desc + \

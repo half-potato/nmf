@@ -10,7 +10,7 @@ def select_bounces(weights, app_mask, num_roughness_rays, percent_bright):
     pt_limit[nopt_mask] = pt_limit[nopt_mask] / pt_limit.max(dim=1, keepdim=True).values.clamp(min=0.9, max=1)[nopt_mask]# + 0.01
     pt_limit = pt_limit[app_mask]
 
-    num_samples = pt_limit.floor().quantile(0.99).int()
+    num_samples = pt_limit.floor().quantile(0.999).int()
 
     # create ray_mask
     ray_mask = torch.arange(num_samples, device=device).reshape(1, -1) < pt_limit.reshape(-1, 1).floor()
@@ -21,6 +21,7 @@ def select_bounces(weights, app_mask, num_roughness_rays, percent_bright):
     bounce_mask = ray_mask.sum(dim=-1) > 0
     ray_mask = ray_mask[bounce_mask]
     bright_mask = bright_mask[bounce_mask]
+    # ic(pt_limit.floor().max(), num_samples, ray_mask.sum(), ray_mask.shape, num_roughness_rays)
 
     return bounce_mask, ray_mask, bright_mask
 

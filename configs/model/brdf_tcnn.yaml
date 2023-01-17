@@ -233,6 +233,10 @@ params:
   eps: 1e-15
   betas: [0.9, 0.99]
 
+  starting_batch_size: 100
+  min_batch_size: 4096
+  target_num_samples: 800000
+
   TV_weight_density: 0.0
   TV_weight_app: 0.0
   TV_weight_bg: 0

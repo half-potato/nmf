@@ -127,6 +127,7 @@ class RealBounce(torch.nn.Module):
         spec = torch.zeros_like(diffuse)
 
         ray_xyz = xyzs[bounce_mask][..., :3].reshape(-1, 1, 3).expand(-1, ray_mask.shape[1], 3)
+        # ic(ray_mask.shape, ray_mask.sum(), diffuse.shape)
         if bounce_mask.any() and ray_mask.any() and ray_xyz.shape[0] == ray_mask.shape[0]:
             bN = normals[bounce_mask]
             if self.detach_N:
@@ -174,7 +175,7 @@ class RealBounce(torch.nn.Module):
             # efeatures = masked[:, 10:]
 
             H = normalize((eV+L)/2)
-            mipval = self.brdf_sampler.calculate_mipval(H.detach(), eV, eN.detach(), ray_mask, ea1.detach()**2, ea2.detach()**2, proportion=eproportion)
+            mipval = self.brdf_sampler.calculate_mipval(H.detach(), eV, eN.detach(), ray_mask, ea1**2, ea2**2, proportion=eproportion)
 
             bounce_rays = torch.cat([
                 exyz + L*5e-3,
