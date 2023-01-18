@@ -8,12 +8,13 @@ import math
 class RealBounce(torch.nn.Module):
     def __init__(self, app_dim, diffuse_module, brdf, brdf_sampler, 
                  anoise, max_brdf_rays,
-                 percent_bright, cold_start_bg_iters, detach_N_iters, max_retrace_rays=[], bright_sampler=None):
+                 percent_bright, cold_start_bg_iters, detach_N_iters, visibility_module=None, max_retrace_rays=[], bright_sampler=None):
         super().__init__()
         self.diffuse_module = diffuse_module(in_channels=app_dim)
         self.brdf = brdf(in_channels=app_dim)
         self.brdf_sampler = brdf_sampler(max_samples=1024)
         self.bright_sampler = bright_sampler if bright_sampler is None else bright_sampler(max_samples=int(100*percent_bright+1))
+        self.visibility_module = visibility_module
 
         self.anoise = anoise
         self.max_brdf_rays = max_brdf_rays
@@ -104,7 +105,7 @@ class RealBounce(torch.nn.Module):
         return im
 
 
-    def forward(self, xyzs, app_features, viewdirs, normals, weights, app_mask, B, recur, render_reflection):
+    def forward(self, xyzs, xyzs_normed, app_features, viewdirs, normals, weights, app_mask, B, recur, render_reflection):
         # xyzs: (M, 4)
         # viewdirs: (M, 3)
         # normals: (M, 3)
@@ -117,7 +118,7 @@ class RealBounce(torch.nn.Module):
 
         noise_app_features = (app_features + torch.randn_like(app_features) * self.anoise)
         diffuse, tint, matprop = self.diffuse_module(
-            xyzs, viewdirs, app_features)
+            xyzs_normed, viewdirs, app_features)
 
         # pick rays to bounce
         num_brdf_rays = self.max_brdf_rays[recur]# // B
@@ -199,17 +200,29 @@ class RealBounce(torch.nn.Module):
             if len(self.max_retrace_rays) > recur:
                 num_retrace_rays = self.max_retrace_rays[recur]# // B
                 num_retrace_rays = min(brdf_weight.shape[0], num_retrace_rays)
-                samp_prob = self.brdf_sampler.compute_prob(halfvec, eN, ea1, ea2, proportion=proportion).reshape(-1, 1)
-                per_sample_factor = weights[bounce_mask] / ray_count * samp_prob
-                per_ray_factor = brdf_weight
-                color_contribution = per_ray_factor * per_sample_factor.expand(ray_mask.shape)[ray_mask]
-                retrace_ray_inds = color_contribution.argsort()[-num_retrace_rays:]
-                notrace_ray_inds = color_contribution.argsort()[:-num_retrace_rays]
+                with torch.no_grad():
+                    samp_prob = self.brdf_sampler.compute_prob(halfvec, eN, ea1.reshape(-1, 1), ea2.reshape(-1, 1), proportion=proportion)
+                    per_sample_factor = weights[app_mask][bounce_mask].reshape(-1, 1) / ray_count
+                    per_ray_factor = brdf_weight.max(dim=-1, keepdim=True).values * ((eV * eN).sum(dim=-1, keepdim=True) > 0) * samp_prob
+
+                    color_contribution = per_ray_factor.reshape(-1) * per_sample_factor.expand(ray_mask.shape)[ray_mask]
+                    if self.visibility_module is not None:
+                        ray_xyzs_normed = xyzs_normed[bounce_mask][..., :3].reshape(-1, 1, 3).expand(-1, ray_mask.shape[1], 3)[ray_mask]
+                        color_contribution *= 1-self.visibility_module(ray_xyzs_normed, L)
+                    color_contribution += 0.2*torch.rand_like(color_contribution)
+                    retrace_ray_inds = color_contribution.argsort()[-num_retrace_rays:]
+                    notrace_ray_inds = color_contribution.argsort()[:-num_retrace_rays]
                 incoming_light = torch.empty((bounce_rays.shape[0], 3), device=device)
-                incoming_light[retrace_ray_inds] = render_reflection(bounce_rays[retrace_ray_inds], mipval[retrace_ray_inds], retrace=True)
-                incoming_light[notrace_ray_inds] = render_reflection(bounce_rays[notrace_ray_inds], mipval[notrace_ray_inds], retrace=False)
+                if len(retrace_ray_inds) > 0:
+                    incoming_light[retrace_ray_inds], bg_vis = render_reflection(bounce_rays[retrace_ray_inds], mipval[retrace_ray_inds], retrace=True)
+                    # bg vis is high when bg is visible
+                    if self.visibility_module is not None:
+                        self.visibility_module.fit(ray_xyzs_normed[retrace_ray_inds], L[retrace_ray_inds], bg_vis > 0.9)
+                    # ic((bg_vis).float().mean())
+                if len(notrace_ray_inds) > 0:
+                    incoming_light[notrace_ray_inds], _ = render_reflection(bounce_rays[notrace_ray_inds], mipval[notrace_ray_inds], retrace=False)
             else:
-                incoming_light = render_reflection(bounce_rays, mipval, retrace=False)
+                incoming_light, _ = render_reflection(bounce_rays, mipval, retrace=False)
 
 
             brdf_color = row_mask_sum(brdf_weight, ray_mask) / ray_count

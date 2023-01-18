@@ -55,7 +55,6 @@ class TensorNeRF(torch.nn.Module):
         self.sampler = sampler(near_far=near_far, aabb=aabb)
         self.model = model(self.rf.app_dim)
         self.bg_module = bg_module
-        self.visibility_module = None
         if tonemap is None:
             self.tonemap = SRGBTonemap()
         else:
@@ -234,9 +233,10 @@ class TensorNeRF(torch.nn.Module):
                                      ndc_ray=False, N_samples=N_samples, tonemap=False, draw_debug=False)
                 incoming_light = incoming_data['rgb_map']
                 # n_samples += incoming_stats['n_samples']
+                return incoming_light, 1-incoming_data['acc_map']
             else:
                 incoming_light = self.render_just_bg(rays, start_mipval.reshape(-1))
-            return incoming_light
+                return incoming_light, None
 
         # weight: [N_rays, N_samples]
         # ic((dists * self.rf.distance_scale).mean())
@@ -249,8 +249,16 @@ class TensorNeRF(torch.nn.Module):
         papp_mask = app_mask[ray_valid]
         # ic(recur, ray_valid.shape, ray_valid.sum(), app_mask.shape, app_mask.sum())
 
-        # if self.visibility_module is not None:
-        #     self.visibility_module.ray_update(xyz_normed, viewdirs[ray_valid], app_mask, ray_valid)
+        # if self.model.visibility_module is not None:
+        #     ray_ori = self.rf.normalize_coord(rays[whole_valid, 0:3])
+        #     ray_dir = rays[whole_valid, 3:6]
+        #     bg_visible = bg_weight > 0.01 # bg is visibile
+        #     self.model.visibility_module.fit(ray_ori, ray_dir, bg_visible)
+        #
+        #     self.model.visibility_module.fit(xyz_normed, viewdirs[ray_valid], bg_visible.reshape(-1, 1).expand(ray_valid.shape)[ray_valid])
+
+            # test vis cache
+            # ic(((bg_visible.reshape(-1) | ~self.model.visibility_module(ray_ori, ray_dir))).float().mean())
 
         if app_mask.any():
             #  Compute normals for app mask
@@ -276,7 +284,7 @@ class TensorNeRF(torch.nn.Module):
             else:
                 v_world_normal = world_normal
 
-            rgb, debug = self.model(app_xyz, app_features, viewdirs[app_mask], v_world_normal[papp_mask], weight, app_mask, weight.shape[0], recur, render_reflection)
+            rgb, debug = self.model(app_xyz, xyz_normed[papp_mask], app_features, viewdirs[app_mask], v_world_normal[papp_mask], weight, app_mask, weight.shape[0], recur, render_reflection)
 
         else:
             debug = {k: torch.empty((0, v), device=device, dtype=weight.dtype) for k, v in self.model.outputs.items()}
@@ -364,19 +372,19 @@ class TensorNeRF(torch.nn.Module):
             NdotV2 = (-viewdirs[app_mask].reshape(-1, 3).detach() * world_normal[papp_mask].reshape(-1, 3)).sum(dim=-1)
             ori_loss = (aweight * (NdotV1.clamp(max=0)**2 + NdotV2.clamp(max=0)**2)).sum()# / B
 
-            midpoint = torch.cat([
-                z_vals,
-                (2*z_vals[:, -1] - z_vals[:, -2])[:, None],
-            ], dim=1)
-            # extend the dt artifically to the background
-            dt = torch.cat([
-                dists,
-                0*dists[:, -2:-1]
-            ], dim=1)
-            full_weight = torch.cat([weight, 1-weight.sum(dim=1, keepdim=True)], dim=1)
+            # midpoint = torch.cat([
+            #     z_vals,
+            #     (2*z_vals[:, -1] - z_vals[:, -2])[:, None],
+            # ], dim=1)
+            # # extend the dt artifically to the background
+            # dt = torch.cat([
+            #     dists,
+            #     0*dists[:, -2:-1]
+            # ], dim=1)
+            # full_weight = torch.cat([weight, 1-weight.sum(dim=1, keepdim=True)], dim=1)
             # TODO REMOVE
-            distortion_loss = calc_distortion_loss(midpoint, full_weight, dt)
-            # distortion_loss = torch.tensor(0.0, device=device) 
+            # distortion_loss = calc_distortion_loss(midpoint, full_weight, dt)
+            distortion_loss = torch.tensor(0.0, device=device) 
 
             if self.align_pred_norms:
                 align_world_loss = 2*(1-(pred_norms[papp_mask] * world_normal[papp_mask]).sum(dim=-1))#**0.5
@@ -443,5 +451,5 @@ class TensorNeRF(torch.nn.Module):
         # ic(opacity, acc_map)
 
         images['rgb_map'] = rgb_map
-        images['acc_map'] = acc_map.detach().cpu()
+        images['acc_map'] = acc_map.detach()
         return images, statistics

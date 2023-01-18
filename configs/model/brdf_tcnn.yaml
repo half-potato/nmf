@@ -171,6 +171,12 @@ arch:
       proportion_bias: 0
       # allocation: 7
 
+    visibility_module:
+      _target_: modules.naive_vis_cache.NaiveVisCache
+      grid_size: 128
+      midpoint: 128
+      jump: 4
+
   bg_module:
     _target_: modules.integral_equirect.IntegralEquirect
     bg_resolution: 1024

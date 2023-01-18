@@ -212,9 +212,9 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
     #     col_map = (col_map.clamp(0, 1).detach().cpu().numpy() * 255).astype('uint8')
     #     imageio.imwrite(f'{savePath}/envmaps/{prtx}view_map.png', col_map)
     #     imageio.imwrite(f'{savePath}/envmaps/{prtx}ref_map.png', env_map)
-    if tensorf.visibility_module is not None:
+    if tensorf.model.visibility_module is not None:
         os.makedirs(savePath+"/viscache", exist_ok=True)
-        tensorf.visibility_module.save(f'{savePath}/viscache/', prtx)
+        tensorf.model.visibility_module.save(f'{savePath}/viscache/', prtx)
 
     T2 = torch.tensor([
         [0.0, 0.0, -1.0],
