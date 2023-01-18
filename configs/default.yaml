@@ -2,8 +2,8 @@ render_mode: center
 
 defaults:
   - _self_
-  - dataset: counter
-  - model: refnerf
+  - dataset: materials
+  - model: brdf_tcnn
   - field: tensorf
 basedir: ./log
 filter_rays: false
