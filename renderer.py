@@ -165,7 +165,7 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
 
     if tensorf.bg_module is not None:
         tm = tonemap.HDRTonemap()
-        bg_path = Path(savePath) / 'bg'
+        bg_path = Path(savePath) / 'envmaps'
         bg_path.mkdir(exist_ok=True, parents=True)
         tensorf.bg_module.save(bg_path, prefix=prtx, tonemap=tm)
 

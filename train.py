@@ -539,11 +539,11 @@ def reconstruction(args):
                     f' envmap = {float(np.mean(envmap_regs)):.5f}' + \
                     f' nrays = {num_rays}'
                     # + f' mse = {photo_loss:.6f}'
-                # if tensorf.bg_module is not None:
-                #     desc = desc + \
-                #     f' mipbias = {float(tensorf.bg_module.mipbias):.1e}' + \
-                #     f' mul = {float(tensorf.bg_module.mul):.1e}' + \
-                #     f' bright = {float(tensorf.bg_module.brightness):.1e}'
+                if tensorf.bg_module is not None:
+                    desc = desc + \
+                    f' mipbias = {float(tensorf.bg_module.mipbias):.1e}'
+                    # f' mul = {float(tensorf.bg_module.mul):.1e}' + \
+                    # f' bright = {float(tensorf.bg_module.brightness):.1e}'
                 pbar.set_description(desc)
                 PSNRs = []
 

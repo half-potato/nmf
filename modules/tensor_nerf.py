@@ -226,9 +226,9 @@ class TensorNeRF(torch.nn.Module):
                 psigma, all_app_features = self.rf.compute_feature(xyz_sampled)
             sigma[ray_valid] = psigma
 
-        def recur_forward(rays, start_mipval):
+        def render_reflection(rays, start_mipval, retrace=False):
             nonlocal n_samples
-            if recur < len(self.model.max_brdf_rays)-1:
+            if retrace:
                 incoming_data, incoming_stats = self(rays, focal, recur=recur+1, bg_col=None, dynamic_batch_size=False, stepmul=self.recur_stepmul,
                                      start_mipval=start_mipval.reshape(-1), override_near=self.rf.stepSize*5, is_train=is_train,
                                      ndc_ray=False, N_samples=N_samples, tonemap=False, draw_debug=False)
@@ -276,7 +276,7 @@ class TensorNeRF(torch.nn.Module):
             else:
                 v_world_normal = world_normal
 
-            rgb, debug = self.model(app_xyz, app_features, viewdirs[app_mask], v_world_normal[papp_mask], weight, app_mask, weight.shape[0], recur, recur_forward)
+            rgb, debug = self.model(app_xyz, app_features, viewdirs[app_mask], v_world_normal[papp_mask], weight, app_mask, weight.shape[0], recur, render_reflection)
 
         else:
             debug = {k: torch.empty((0, v), device=device, dtype=weight.dtype) for k, v in self.model.outputs.items()}
@@ -293,7 +293,8 @@ class TensorNeRF(torch.nn.Module):
         acc_map = torch.sum(weight, 1)
         # rgb_map = torch.sum(weight[..., None] * rgb.clip(min=0, max=1), -2)
         eweight = weight[app_mask][..., None]
-        tmap_rgb = self.tonemap(rgb.clip(min=0, max=1))
+        # tmap_rgb = self.tonemap(rgb.clip(min=0, max=1))
+        tmap_rgb = rgb.clip(min=0, max=1)
         rgb_map = row_mask_sum(eweight * tmap_rgb, app_mask)
         images = {}
         statistics = dict(
@@ -427,6 +428,7 @@ class TensorNeRF(torch.nn.Module):
             #     # noise = 1-torch.rand((*acc_map.shape, 3), device=device)*self.bg_noise
             #     rgb_map = rgb_map + (1 - acc_map[..., None]) * noise
             bg = bg_col.to(device).reshape(1, 3)
+        rgb_map = self.tonemap(rgb_map.clip(0, 1))
         rgb_map = rgb_map + (1 - acc_map[..., None]) * bg
             # if white_bg:
             #     if True:

@@ -7,7 +7,8 @@ import math
 
 class RealBounce(torch.nn.Module):
     def __init__(self, app_dim, diffuse_module, brdf, brdf_sampler, 
-                 anoise, max_brdf_rays, percent_bright, cold_start_bg_iters, detach_N_iters, bright_sampler=None):
+                 anoise, max_brdf_rays,
+                 percent_bright, cold_start_bg_iters, detach_N_iters, max_retrace_rays=[], bright_sampler=None):
         super().__init__()
         self.diffuse_module = diffuse_module(in_channels=app_dim)
         self.brdf = brdf(in_channels=app_dim)
@@ -16,6 +17,7 @@ class RealBounce(torch.nn.Module):
 
         self.anoise = anoise
         self.max_brdf_rays = max_brdf_rays
+        self.max_retrace_rays = max_retrace_rays
         self.percent_bright = percent_bright
         self.cold_start_bg_iters = cold_start_bg_iters
         self.detach_bg = True
@@ -102,16 +104,16 @@ class RealBounce(torch.nn.Module):
         return im
 
 
-
-    def forward(self, xyzs, app_features, viewdirs, normals, weights, app_mask, B, recur, ray_cast_fn):
+    def forward(self, xyzs, app_features, viewdirs, normals, weights, app_mask, B, recur, render_reflection):
         # xyzs: (M, 4)
         # viewdirs: (M, 3)
         # normals: (M, 3)
         # weights: (M)
         # B: number of rays being cast
         # recur: recursion counter
-        # ray_cast_fn: function that casts out rays to allow for recursion
+        # render_reflection: function that casts out rays to allow for recursion
         debug = {}
+        device = xyzs.device
 
         noise_app_features = (app_features + torch.randn_like(app_features) * self.anoise)
         diffuse, tint, matprop = self.diffuse_module(
@@ -119,6 +121,7 @@ class RealBounce(torch.nn.Module):
 
         # pick rays to bounce
         num_brdf_rays = self.max_brdf_rays[recur]# // B
+
         bounce_mask, ray_mask, bright_mask = select_bounces(
                 weights, app_mask, num_brdf_rays, self.percent_bright)
 
@@ -183,7 +186,6 @@ class RealBounce(torch.nn.Module):
             ], dim=-1)
             n = bounce_rays.shape[0]
             D = bounce_rays.shape[-1]
-            incoming_light = ray_cast_fn(bounce_rays, mipval)
 
             # calculate second part of BRDF
             n, m = ray_mask.shape
@@ -192,6 +194,23 @@ class RealBounce(torch.nn.Module):
             # brdf_weight = self.brdf(eV, L, eN, halfvec, diffvec, efeatures, ea)
             brdf_weight = self.brdf(eV, L.detach(), eN.detach(), halfvec.detach(), diffvec.detach(), efeatures, ea1.detach())
             ray_count = (ray_mask.sum(dim=1)+1e-8)[..., None]
+
+            # decide which rays should get more bounces based on how much they contribute to the final color of the ray
+            if len(self.max_retrace_rays) > recur:
+                num_retrace_rays = self.max_retrace_rays[recur]# // B
+                num_retrace_rays = min(brdf_weight.shape[0], num_retrace_rays)
+                samp_prob = self.brdf_sampler.compute_prob(halfvec, eN, ea1, ea2, proportion=proportion).reshape(-1, 1)
+                per_sample_factor = weights[bounce_mask] / ray_count * samp_prob
+                per_ray_factor = brdf_weight
+                color_contribution = per_ray_factor * per_sample_factor.expand(ray_mask.shape)[ray_mask]
+                retrace_ray_inds = color_contribution.argsort()[-num_retrace_rays:]
+                notrace_ray_inds = color_contribution.argsort()[:-num_retrace_rays]
+                incoming_light = torch.empty((bounce_rays.shape[0], 3), device=device)
+                incoming_light[retrace_ray_inds] = render_reflection(bounce_rays[retrace_ray_inds], mipval[retrace_ray_inds], retrace=True)
+                incoming_light[notrace_ray_inds] = render_reflection(bounce_rays[notrace_ray_inds], mipval[notrace_ray_inds], retrace=False)
+            else:
+                incoming_light = render_reflection(bounce_rays, mipval, retrace=False)
+
 
             brdf_color = row_mask_sum(brdf_weight, ray_mask) / ray_count
             tinted_ref_rgb = row_mask_sum(incoming_light * brdf_weight, ray_mask) / ray_count
