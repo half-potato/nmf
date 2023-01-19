@@ -108,7 +108,9 @@ class RealBounce(torch.nn.Module):
     def update_n_samples(self, n_samples):
         assert(len(self.target_num_samples) == len(self.max_retrace_rays))
         if len(n_samples[1:]) == len(self.max_retrace_rays):
-            self.max_retrace_rays = [int(target / actual * current) if actual > 0 else current for target, actual, current in zip(self.target_num_samples, n_samples[1:], self.max_retrace_rays)]
+            self.max_retrace_rays = [
+                    min(int(target / actual * current), maxv) if actual > 0 else current
+                    for target, actual, current, maxv in zip(self.target_num_samples, n_samples[1:], self.max_retrace_rays, self.max_brdf_rays[1:])]
 
 
     def forward(self, xyzs, xyzs_normed, app_features, viewdirs, normals, weights, app_mask, B, recur, render_reflection, bg_module, eps=torch.finfo(torch.float32).eps):
