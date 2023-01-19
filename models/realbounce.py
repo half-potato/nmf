@@ -162,8 +162,8 @@ class RealBounce(torch.nn.Module):
             importance_samp_correction = torch.ones((L.shape[0], 1), device=device)
             # Sample bright spots
             if self.bright_sampler is not None:
-                bL, bsamp_prob = self.bright_sampler.sample(bg_module, bright_mask.sum())
-                pbright_mask = torch.where(bright_mask[ri, rj])
+                bL, bsamp_prob, brightsum = self.bright_sampler.sample(bg_module, bright_mask.sum())
+                pbright_mask = bright_mask[ri, rj]
                 L[pbright_mask] = bL
 
 
@@ -243,6 +243,12 @@ class RealBounce(torch.nn.Module):
                 incoming_light, _ = render_reflection(bounce_rays, mipval, retrace=False)
 
             # ic(incoming_light[pbright_mask].mean(), incoming_light[~pbright_mask].mean())
+
+            if self.bright_sampler is not None:
+                p1 = incoming_light.mean(dim=-1, keepdim=True) / (2 * math.pi * math.pi) / brightsum
+                p2 = samp_prob
+                weight = p2*p2 / (p1*p1+p2*p2).clip(min=eps)
+                importance_samp_correction[~pbright_mask] = weight[~pbright_mask]
 
 
             brdf_color = row_mask_sum(brdf_weight, ray_mask) / ray_count

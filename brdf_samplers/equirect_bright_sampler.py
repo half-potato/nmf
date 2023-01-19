@@ -12,7 +12,8 @@ class ERBrightSampler():
         device = brightness.device
         H, W = brightness.shape
         sin_vals = torch.sin(torch.arange(H, device=device) / H * math.pi)
-        prob = brightness / brightness.sum() * sin_vals.reshape(-1, 1).expand(H, W)
+        brightsum = brightness.sum()
+        prob = brightness / brightsum * sin_vals.reshape(-1, 1).expand(H, W)
         cdf = torch.cumsum(prob.reshape(-1), dim=0)
         # plug random values into inverse cdf
         indices = ((torch.rand((N, 1), device=device) < cdf.reshape(1, -1)) * torch.arange(cdf.shape[0], device=device).reshape(1, -1)).max(dim=-1).indices
@@ -42,4 +43,4 @@ class ERBrightSampler():
         ], dim=-1).reshape(-1, 3)
 
         probs = prob[row, col] / (2 * math.pi * math.pi * torch.sin(theta + math.pi/2)).clip(min=eps)
-        return viewdirs, probs
+        return viewdirs, probs, brightsum
