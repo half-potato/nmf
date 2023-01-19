@@ -397,8 +397,8 @@ def reconstruction(args):
                             keys = ['rgb_map', 'normal_err', 'distortion_loss', 'prediction_loss', 'ori_loss', 'diffuse_reg', 'roughness', 'whole_valid', 'envmap_reg', 'brdf_reg', 'n_samples'],
                             focal=focal, output_alpha=alpha_train, chunk=num_rays, bg_col=bg_col, is_train=True, ndc_ray=ndc_ray)
 
-                    n_samples = int(stats['n_samples'])
-                    if n_samples == 0:
+                    n_samples = stats['n_samples']
+                    if n_samples[0] == 0:
                         continue
                     prediction_loss = stats['prediction_loss'].sum()
                     distortion_loss = stats['distortion_loss'].sum()
@@ -423,9 +423,10 @@ def reconstruction(args):
                     ori_loss = stats['ori_loss'].sum()
 
                     # adjust number of rays
-                    mean_samples = max(n_samples, prev_n_samples) if prev_n_samples is not None else n_samples
+                    mean_samples = [max(a, b) for a, b in zip(n_samples, prev_n_samples)] if prev_n_samples is not None else n_samples
                     prev_n_samples = n_samples
-                    num_rays = int(num_rays * params.target_num_samples / mean_samples + 1)
+                    num_rays = int(num_rays * params.target_num_samples / max(mean_samples[0], 1) + 1)
+                    tensorf.model.update_n_samples(mean_samples)
                     # tensorf.eval_batch_size = num_rays
 
                     # rays_remaining -= rgb_map.shape[0]
@@ -534,12 +535,12 @@ def reconstruction(args):
                 desc = f'psnr = {float(np.mean(PSNRs)):.2f}' + \
                     f' test_psnr = {float(np.mean(PSNRs_test)):.2f}' + \
                     f' loss = {float(np.mean(losses)):.5f}' + \
-                    f' ori loss = {float(np.mean(ori_losses) / num_rays):.5f}' + \
-                    f' pred loss = {float(np.mean(pred_losses) / num_rays):.5f}' + \
                     f' rough = {float(np.mean(roughnesses)):.5f}' + \
-                    f' tv = {float(np.mean(TVs)):.5f}' + \
                     f' envmap = {float(np.mean(envmap_regs)):.5f}' + \
-                    f' nrays = {num_rays}'
+                    f' nrays = {[num_rays] + tensorf.model.max_retrace_rays}'
+                    # f' tv = {float(np.mean(TVs)):.5f}' + \
+                    # f' ori loss = {float(np.mean(ori_losses) / num_rays):.5f}' + \
+                    # f' pred loss = {float(np.mean(pred_losses) / num_rays):.5f}' + \
                     # + f' mse = {photo_loss:.6f}'
                 if tensorf.bg_module is not None:
                     desc = desc + \

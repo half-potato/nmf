@@ -7,7 +7,7 @@ import math
 
 class RealBounce(torch.nn.Module):
     def __init__(self, app_dim, diffuse_module, brdf, brdf_sampler, 
-                 anoise, max_brdf_rays,
+                 anoise, max_brdf_rays, target_num_samples,
                  percent_bright, cold_start_bg_iters, detach_N_iters, visibility_module=None, max_retrace_rays=[], bright_sampler=None):
         super().__init__()
         self.diffuse_module = diffuse_module(in_channels=app_dim)
@@ -17,6 +17,7 @@ class RealBounce(torch.nn.Module):
         self.visibility_module = visibility_module
 
         self.anoise = anoise
+        self.target_num_samples = target_num_samples
         self.max_brdf_rays = max_brdf_rays
         self.max_retrace_rays = max_retrace_rays
         self.percent_bright = percent_bright
@@ -103,6 +104,11 @@ class RealBounce(torch.nn.Module):
         brdf_colors = brdf_colors.reshape(n_features, n_views, res, 2*res, 3)
         im = brdf_colors.permute(0, 2, 1, 3, 4).reshape(n_features*res, 2*n_views*res, 3)
         return im
+
+    def update_n_samples(self, n_samples):
+        assert(len(self.target_num_samples) == len(self.max_retrace_rays))
+        if len(n_samples[1:]) == len(self.max_retrace_rays):
+            self.max_retrace_rays = [int(target / actual * current) if actual > 0 else current for target, actual, current in zip(self.target_num_samples, n_samples[1:], self.max_retrace_rays)]
 
 
     def forward(self, xyzs, xyzs_normed, app_features, viewdirs, normals, weights, app_mask, B, recur, render_reflection, bg_module, eps=torch.finfo(torch.float32).eps):

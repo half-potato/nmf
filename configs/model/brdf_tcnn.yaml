@@ -2,8 +2,7 @@ arch:
   _target_: modules.tensor_nerf.TensorNeRF
   _partial_: True
 
-  rayMarch_weight_thres: 0
-  recur_weight_thres: 0
+  recur_alpha_thres: 1e-4
   lr_scale: 1
   infinity_border: False
   eval_batch_size: 4096
@@ -77,6 +76,7 @@ arch:
     percent_bright: 0.1
     # max_brdf_rays: [3194304]
     max_brdf_rays: [259430]
+    target_num_samples: [800000]
     max_retrace_rays: []
     cold_start_bg_iters: 0
     detach_N_iters: 0
@@ -118,19 +118,19 @@ arch:
       # featureC: 128
       mul_LdotN: False
       feape: 0
-      dotpe: 0
+      dotpe: -1
       # h_encoder:
       #   _target_: modules.render_modules.PE
       #   max_degree: 2
       # d_encoder:
       #   _target_: modules.render_modules.PE
       #   max_degree: 2
-      # h_encoder:
-      #   _target_: modules.ish.ListISH
-      #   degs: [0,1,2,4]
-      # d_encoder:
-      #   _target_: modules.ish.ListISH
-      #   degs: [0,1,2,4]
+      h_encoder:
+        _target_: modules.ish.ListISH
+        degs: [0,1,2,4]
+      d_encoder:
+        _target_: modules.ish.ListISH
+        degs: [0,1,2,4]
       hidden_w: 64
       num_layers: 4
       initializer: 'kaiming'

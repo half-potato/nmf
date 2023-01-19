@@ -65,7 +65,7 @@ class NerfAccSampler(torch.nn.Module):
         self.occupancy_grid.every_n_step(step=0, occ_eval_fn=occ_eval_fn, ema_decay=self.ema_decay, occ_thre=self.occ_thre)
 
     def sample(self, rays_chunk, focal, rf, override_near=None, is_train=False,
-               dynamic_batch_size=True, stepmul=1, **args):
+               dynamic_batch_size=True, override_alpha_thres=None, stepmul=1, **args):
         """
             Parameters:
                 rays_chunk: (B, 6) float. (ox, oy, oz, dx, dy, dz) ray origin and direction
@@ -102,7 +102,7 @@ class NerfAccSampler(torch.nn.Module):
             render_step_size=self.stepsize/stepmul,
             stratified=is_train,
             cone_angle=self.cone_angle,
-            alpha_thre=self.alpha_thres,
+            alpha_thre=self.alpha_thres if override_alpha_thres is None else override_alpha_thres,
         )
         if len(ray_indices) == 0:
             return (torch.empty((0, 4), device=device),
