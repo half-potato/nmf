@@ -398,6 +398,8 @@ def reconstruction(args):
                             focal=focal, output_alpha=alpha_train, chunk=num_rays, bg_col=bg_col, is_train=True, ndc_ray=ndc_ray)
 
                     n_samples = int(stats['n_samples'])
+                    if n_samples == 0:
+                        continue
                     prediction_loss = stats['prediction_loss'].sum()
                     distortion_loss = stats['distortion_loss'].sum()
                     diffuse_reg = stats['diffuse_reg'].sum()

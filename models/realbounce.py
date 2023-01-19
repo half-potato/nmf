@@ -13,7 +13,7 @@ class RealBounce(torch.nn.Module):
         self.diffuse_module = diffuse_module(in_channels=app_dim)
         self.brdf = brdf(in_channels=app_dim)
         self.brdf_sampler = brdf_sampler(max_samples=1024)
-        self.bright_sampler = bright_sampler if bright_sampler is None else bright_sampler(max_samples=int(100*percent_bright+1))
+        self.bright_sampler = bright_sampler
         self.visibility_module = visibility_module
 
         self.anoise = anoise
@@ -35,8 +35,8 @@ class RealBounce(torch.nn.Module):
         return grad_vars
 
     def check_schedule(self, iter, batch_mul, bg_module, **kwargs):
-        if self.bright_sampler is not None:
-            self.bright_sampler.check_schedule(iter, batch_mul, bg_module)
+        # if self.bright_sampler is not None:
+        #     self.bright_sampler.check_schedule(iter, batch_mul, bg_module)
         if iter > batch_mul*self.cold_start_bg_iters:
             self.detach_bg = False
         if iter > batch_mul*self.detach_N_iters:
@@ -105,7 +105,7 @@ class RealBounce(torch.nn.Module):
         return im
 
 
-    def forward(self, xyzs, xyzs_normed, app_features, viewdirs, normals, weights, app_mask, B, recur, render_reflection):
+    def forward(self, xyzs, xyzs_normed, app_features, viewdirs, normals, weights, app_mask, B, recur, render_reflection, bg_module):
         # xyzs: (M, 4)
         # viewdirs: (M, 3)
         # normals: (M, 3)
@@ -147,12 +147,6 @@ class RealBounce(torch.nn.Module):
                     bV, bN,
                     r1**2, r2**2, ray_mask, proportion=proportion)
 
-            # Sample bright spots
-            if self.bright_sampler is not None and self.bright_sampler.is_initialized():
-                bL, bright_mask = self.bright_sampler.sample(bV, bN, ray_mask, bright_mask)
-                pbright_mask = bright_mask[ray_mask]
-                L[pbright_mask] = bL[bright_mask]
-
             n = ray_xyz.shape[0]
             m = ray_mask.shape[1]
 
@@ -163,6 +157,22 @@ class RealBounce(torch.nn.Module):
             efeatures = noise_app_features[bounce_mask].reshape(n, 1, -1).expand(n, m, -1)[ray_mask]
             eproportion = proportion.expand(ray_mask.shape)[ray_mask]
             exyz = ray_xyz[ray_mask]
+
+            importance_samp_correction = torch.ones((L.shape[0], 1), device=device)
+            # Sample bright spots
+            if self.bright_sampler is not None:
+                bL, bsample_prob = self.bright_sampler.sample(bg_module, bright_mask.sum())
+                pbright_mask = bright_mask[ray_mask]
+                L[pbright_mask] = bL
+
+
+            H = normalize((eV+L)/2)
+            diffvec = torch.matmul(row_world_basis.permute(0, 2, 1), L.unsqueeze(-1)).squeeze(-1)
+            halfvec = torch.matmul(row_world_basis.permute(0, 2, 1), H.unsqueeze(-1)).squeeze(-1)
+            samp_prob = self.brdf_sampler.compute_prob(halfvec, eN, ea1.reshape(-1, 1), ea2.reshape(-1, 1), proportion=proportion)
+
+            if self.bright_sampler is not None:
+                importance_samp_correction[pbright_mask] = samp_prob[pbright_mask].reshape(-1, 1) / bsample_prob.reshape(-1, 1)
 
             # stacked = torch.cat([
             #     bV.reshape(-1, 1, 3).expand(-1, m, 3),
@@ -178,7 +188,6 @@ class RealBounce(torch.nn.Module):
             # ea = masked[:, 9:10]
             # efeatures = masked[:, 10:]
 
-            H = normalize((eV+L)/2)
             mipval = self.brdf_sampler.calculate_mipval(H.detach(), eV, eN.detach(), ray_mask, ea1**2, ea2**2, proportion=eproportion)
 
             bounce_rays = torch.cat([
@@ -190,18 +199,15 @@ class RealBounce(torch.nn.Module):
 
             # calculate second part of BRDF
             n, m = ray_mask.shape
-            diffvec = torch.matmul(row_world_basis.permute(0, 2, 1), L.unsqueeze(-1)).squeeze(-1)
-            halfvec = torch.matmul(row_world_basis.permute(0, 2, 1), H.unsqueeze(-1)).squeeze(-1)
             # brdf_weight = self.brdf(eV, L, eN, halfvec, diffvec, efeatures, ea)
             brdf_weight = self.brdf(eV, L.detach(), eN.detach(), halfvec.detach(), diffvec.detach(), efeatures, ea1.detach())
             ray_count = (ray_mask.sum(dim=1)+1e-8)[..., None]
 
-            # decide which rays should get more bounces based on how much they contribute to the final color of the ray
             if len(self.max_retrace_rays) > recur:
+                # decide which rays should get more bounces based on how much they contribute to the final color of the ray
                 num_retrace_rays = self.max_retrace_rays[recur]# // B
                 num_retrace_rays = min(brdf_weight.shape[0], num_retrace_rays)
                 with torch.no_grad():
-                    samp_prob = self.brdf_sampler.compute_prob(halfvec, eN, ea1.reshape(-1, 1), ea2.reshape(-1, 1), proportion=proportion)
                     per_sample_factor = weights[app_mask][bounce_mask].reshape(-1, 1) / ray_count
                     per_ray_factor = brdf_weight.max(dim=-1, keepdim=True).values * ((eV * eN).sum(dim=-1, keepdim=True) > 0) * samp_prob
 
@@ -212,6 +218,8 @@ class RealBounce(torch.nn.Module):
                     color_contribution += 0.2*torch.rand_like(color_contribution)
                     retrace_ray_inds = color_contribution.argsort()[-num_retrace_rays:]
                     notrace_ray_inds = color_contribution.argsort()[:-num_retrace_rays]
+
+                # retrace some of the rays
                 incoming_light = torch.empty((bounce_rays.shape[0], 3), device=device)
                 if len(retrace_ray_inds) > 0:
                     incoming_light[retrace_ray_inds], bg_vis = render_reflection(bounce_rays[retrace_ray_inds], mipval[retrace_ray_inds], retrace=True)
@@ -224,9 +232,11 @@ class RealBounce(torch.nn.Module):
             else:
                 incoming_light, _ = render_reflection(bounce_rays, mipval, retrace=False)
 
+            # ic(incoming_light[pbright_mask].mean(), incoming_light[~pbright_mask].mean())
+
 
             brdf_color = row_mask_sum(brdf_weight, ray_mask) / ray_count
-            tinted_ref_rgb = row_mask_sum(incoming_light * brdf_weight, ray_mask) / ray_count
+            tinted_ref_rgb = row_mask_sum(incoming_light * brdf_weight * importance_samp_correction, ray_mask) / ray_count
             spec[bounce_mask] = row_mask_sum(incoming_light, ray_mask) / ray_count
             # ic(incoming_light.mean(), tinted_ref_rgb.mean())
 

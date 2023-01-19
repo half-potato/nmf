@@ -284,7 +284,8 @@ class TensorNeRF(torch.nn.Module):
             else:
                 v_world_normal = world_normal
 
-            rgb, debug = self.model(app_xyz, xyz_normed[papp_mask], app_features, viewdirs[app_mask], v_world_normal[papp_mask], weight, app_mask, weight.shape[0], recur, render_reflection)
+            rgb, debug = self.model(app_xyz, xyz_normed[papp_mask], app_features, viewdirs[app_mask], v_world_normal[papp_mask],
+                                    weight, app_mask, weight.shape[0], recur, render_reflection, bg_module=self.bg_module)
 
         else:
             debug = {k: torch.empty((0, v), device=device, dtype=weight.dtype) for k, v in self.model.outputs.items()}
