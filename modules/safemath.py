@@ -45,11 +45,12 @@ def safe_sin(x):
     """jnp.sin() on a TPU may NaN out for large values."""
     return safe_trig_helper(x, torch.sin)
 
-def expected_sin(x, x_var):
+@torch.jit.script
+def expected_sin(x, x_var, t: float=100*np.pi):
     """Estimates mean and variance of sin(z), z ~ N(x, var)."""
     # When the variance is wide, shrink sin towards zero.
-    y = torch.exp(-0.5 * x_var) * safe_sin(x)
-    y_var = 0.5 * (1 - torch.exp(-2 * x_var) * safe_cos(2 * x)) - y**2
+    y = torch.exp(-0.5 * x_var) * (x % t).sin()
+    y_var = 0.5 * (1 - torch.exp(-2 * x_var) * ((2 * x) % t).cos()) - y**2
     y_var = y_var.clamp(min=0)
     return y, y_var
 

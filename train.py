@@ -363,7 +363,7 @@ def reconstruction(args):
     # with torch.profiler.profile(record_shapes=True, schedule=torch.profiler.schedule(wait=1, warmup=1, active=params.n_iters-1), with_stack=True) as p:
     # with torch.autograd.detect_anomaly():
         for iteration in pbar:
-            optimizer.zero_grad()
+            optimizer.zero_grad(set_to_none=True)
             losses, roughnesses, envmap_regs = [],[],[]
             pred_losses, ori_losses = [], []
             TVs = []

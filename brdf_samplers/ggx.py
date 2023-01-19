@@ -93,7 +93,7 @@ class GGXSampler(PseudoRandomSampler):
         logD = 2*torch.log(r1.clip(min=eps)) - 2*torch.log((NdotH**2*(r1**2-1)+1).clip(min=eps))
         return logD.exp()
 
-    def calculate_mipval(self, H, V, N, ray_mask, r1, r2, eps=torch.finfo(torch.float32).eps, **kwargs):
+    def calculate_mipval(self, H, V, N, ray_mask, r1, r2, eps: float =torch.finfo(torch.float32).eps, **kwargs):
         num_samples = ray_mask.shape[1]
         NdotH = ((H * N).sum(dim=-1)).abs().clip(min=eps, max=1)
         HdotV = (H * V).sum(dim=-1).abs().clip(min=eps, max=1)

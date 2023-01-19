@@ -6,12 +6,14 @@ class ERBrightSampler():
     def __init__(self):
         pass
 
-    def sample(self, bg_module, N):
+    def sample(self, bg_module, N, eps=torch.finfo(torch.float32).eps):
         brightness = bg_module.activation_fn(bg_module.bg_mat[0]).mean(dim=-1)
-        prob = brightness / brightness.sum()
-        H, W = brightness.shape
-        cdf = torch.cumsum(prob.reshape(-1), dim=0)
+        # multiply by sin of elevation
         device = brightness.device
+        H, W = brightness.shape
+        sin_vals = torch.sin(torch.arange(H, device=device) / H * math.pi)
+        prob = brightness / brightness.sum() * sin_vals.reshape(-1, 1).expand(H, W)
+        cdf = torch.cumsum(prob.reshape(-1), dim=0)
         # plug random values into inverse cdf
         indices = ((torch.rand((N, 1), device=device) < cdf.reshape(1, -1)) * torch.arange(cdf.shape[0], device=device).reshape(1, -1)).max(dim=-1).indices
         # indices to angles
@@ -39,5 +41,5 @@ class ERBrightSampler():
             torch.sin(theta),
         ], dim=-1).reshape(-1, 3)
 
-        probs = prob[row, col]
+        probs = prob[row, col] / (2 * math.pi * math.pi * torch.sin(theta + math.pi/2)).clip(min=eps)
         return viewdirs, probs

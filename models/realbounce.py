@@ -105,7 +105,7 @@ class RealBounce(torch.nn.Module):
         return im
 
 
-    def forward(self, xyzs, xyzs_normed, app_features, viewdirs, normals, weights, app_mask, B, recur, render_reflection, bg_module):
+    def forward(self, xyzs, xyzs_normed, app_features, viewdirs, normals, weights, app_mask, B, recur, render_reflection, bg_module, eps=torch.finfo(torch.float32).eps):
         # xyzs: (M, 4)
         # viewdirs: (M, 3)
         # normals: (M, 3)
@@ -133,6 +133,7 @@ class RealBounce(torch.nn.Module):
         ray_xyz = xyzs[bounce_mask][..., :3].reshape(-1, 1, 3).expand(-1, ray_mask.shape[1], 3)
         # ic(ray_mask.shape, ray_mask.sum(), diffuse.shape)
         if bounce_mask.any() and ray_mask.any() and ray_xyz.shape[0] == ray_mask.shape[0]:
+            ri, rj = torch.where(ray_mask)
             bN = normals[bounce_mask]
             if self.detach_N:
                 bN.detach_()
@@ -150,19 +151,19 @@ class RealBounce(torch.nn.Module):
             n = ray_xyz.shape[0]
             m = ray_mask.shape[1]
 
-            eV = bV.reshape(-1, 1, 3).expand(-1, m, 3)[ray_mask]
-            eN = bN.reshape(-1, 1, 3).expand(-1, m, 3)[ray_mask]
-            ea1 = r1.expand(ray_mask.shape)[ray_mask]
-            ea2 = r2.expand(ray_mask.shape)[ray_mask]
-            efeatures = noise_app_features[bounce_mask].reshape(n, 1, -1).expand(n, m, -1)[ray_mask]
-            eproportion = proportion.expand(ray_mask.shape)[ray_mask]
-            exyz = ray_xyz[ray_mask]
+            eV = bV.reshape(-1, 1, 3).expand(-1, m, 3)[ri, rj]
+            eN = bN.reshape(-1, 1, 3).expand(-1, m, 3)[ri, rj]
+            ea1 = r1.expand(ray_mask.shape)[ri, rj]
+            ea2 = r2.expand(ray_mask.shape)[ri, rj]
+            efeatures = noise_app_features[bounce_mask].reshape(n, 1, -1).expand(n, m, -1)[ri, rj]
+            eproportion = proportion.expand(ray_mask.shape)[ri, rj]
+            exyz = ray_xyz[ri, rj]
 
             importance_samp_correction = torch.ones((L.shape[0], 1), device=device)
             # Sample bright spots
             if self.bright_sampler is not None:
-                bL, bsample_prob = self.bright_sampler.sample(bg_module, bright_mask.sum())
-                pbright_mask = bright_mask[ray_mask]
+                bL, bsamp_prob = self.bright_sampler.sample(bg_module, bright_mask.sum())
+                pbright_mask = torch.where(bright_mask[ri, rj])
                 L[pbright_mask] = bL
 
 
@@ -172,7 +173,16 @@ class RealBounce(torch.nn.Module):
             samp_prob = self.brdf_sampler.compute_prob(halfvec, eN, ea1.reshape(-1, 1), ea2.reshape(-1, 1), proportion=proportion)
 
             if self.bright_sampler is not None:
-                importance_samp_correction[pbright_mask] = samp_prob[pbright_mask].reshape(-1, 1) / bsample_prob.reshape(-1, 1)
+                p1 = bsamp_prob.reshape(-1, 1)
+                p2 = samp_prob[pbright_mask].reshape(-1, 1)
+                # the first step is to convert everything to probabilities in the area measure (area on the surface of the sphere)
+                # bsamp_prob is in the area measure
+                # samp_prob is in the solid angle measure
+                # turns out, envmaps are in solid angle measure as well, so no need
+
+                weight = p1*p1 / (p1*p1+p2*p2).clip(min=eps)
+                importance_samp_correction[pbright_mask] = p2 / p1.clip(min=eps) * weight
+                # ic(importance_samp_correction[pbright_mask])
 
             # stacked = torch.cat([
             #     bV.reshape(-1, 1, 3).expand(-1, m, 3),
@@ -211,9 +221,9 @@ class RealBounce(torch.nn.Module):
                     per_sample_factor = weights[app_mask][bounce_mask].reshape(-1, 1) / ray_count
                     per_ray_factor = brdf_weight.max(dim=-1, keepdim=True).values * ((eV * eN).sum(dim=-1, keepdim=True) > 0) * samp_prob
 
-                    color_contribution = per_ray_factor.reshape(-1) * per_sample_factor.expand(ray_mask.shape)[ray_mask]
+                    color_contribution = per_ray_factor.reshape(-1) * per_sample_factor.expand(ray_mask.shape)[ri, rj]
                     if self.visibility_module is not None:
-                        ray_xyzs_normed = xyzs_normed[bounce_mask][..., :3].reshape(-1, 1, 3).expand(-1, ray_mask.shape[1], 3)[ray_mask]
+                        ray_xyzs_normed = xyzs_normed[bounce_mask][..., :3].reshape(-1, 1, 3).expand(-1, ray_mask.shape[1], 3)[ri, rj]
                         color_contribution *= 1-self.visibility_module(ray_xyzs_normed, L)
                     color_contribution += 0.2*torch.rand_like(color_contribution)
                     retrace_ray_inds = color_contribution.argsort()[-num_retrace_rays:]

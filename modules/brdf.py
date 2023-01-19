@@ -191,8 +191,13 @@ class MLPBRDF(torch.nn.Module):
         if self.dotpe >= 0:
 
             VdotN = (V * N).sum(dim=-1, keepdim=True).clip(min=1e-8)
+            LdotH = (L * half).sum(dim=-1, keepdim=True).clip(min=1e-8)
             NdotH = ((half * N).sum(dim=-1, keepdim=True)+1e-3).clip(min=1e-20, max=1)
-            indata = [LdotN, torch.sqrt((1-LdotN**2).clip(min=1e-8, max=1)),
+            # indata = [LdotN, torch.sqrt((1-LdotN**2).clip(min=1e-8, max=1)),
+            #           VdotN, torch.sqrt((1-LdotN**2).clip(min=1e-8, max=1)),
+            #           NdotH, torch.sqrt((1-NdotH**2).clip(min=1e-8, max=1))]
+            indata = [LdotH, torch.sqrt((1-LdotN**2).clip(min=1e-8, max=1)),
+                      # LdotN, torch.sqrt((1-LdotN**2).clip(min=1e-8, max=1)),
                       VdotN, torch.sqrt((1-LdotN**2).clip(min=1e-8, max=1)),
                       NdotH, torch.sqrt((1-NdotH**2).clip(min=1e-8, max=1))]
             indata = [d.reshape(-1, 1) for d in indata]

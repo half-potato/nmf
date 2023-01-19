@@ -110,6 +110,16 @@ class IntegralEquirect(torch.nn.Module):
         
         return miplevel_w.clip(0), miplevel_h.clip(0)
 
+    def tv_loss(self):
+        loss = 0
+        # img = self.activation_fn(imgs[0, i])
+        img = self.bg_mat[0]
+        # img.shape: h, w, 3
+        tv_h = (img[1:, :-1] - img[:-1, :-1]).abs()
+        tv_w = (img[:-1, 1:] - img[:-1, :-1]).abs()
+        loss = (tv_h + tv_w+1e-8).mean()
+        return loss
+
     def forward(self, viewdirs, saSample, max_level=None):
         # Compute width and height of sample
         device = viewdirs.device

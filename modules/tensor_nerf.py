@@ -383,7 +383,6 @@ class TensorNeRF(torch.nn.Module):
             #     0*dists[:, -2:-1]
             # ], dim=1)
             # full_weight = torch.cat([weight, 1-weight.sum(dim=1, keepdim=True)], dim=1)
-            # TODO REMOVE
             # distortion_loss = calc_distortion_loss(midpoint, full_weight, dt)
             distortion_loss = torch.tensor(0.0, device=device) 
 
