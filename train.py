@@ -424,10 +424,16 @@ def reconstruction(args):
                     ori_loss = stats['ori_loss'].sum()
 
                     # adjust number of rays
-                    mean_samples = [max(a, b, c*0.9) for a, b, c in zip(n_samples, prev_n_samples, hist_n_samples)] if prev_n_samples is not None else n_samples
+                    if hist_n_samples is not None:
+                        if len(hist_n_samples) < len(n_samples):
+                            hist_n_samples += n_samples[len(hist_n_samples):]
+                        if len(hist_n_samples) > len(n_samples):
+                            n_samples += hist_n_samples[len(n_samples):]
+
+                    mean_samples = [max(a, b, c*0.0) for a, b, c in zip(n_samples, prev_n_samples, hist_n_samples)] if prev_n_samples is not None else n_samples
                     prev_n_samples = n_samples
                     hist_n_samples = mean_samples
-                    num_rays = int(whole_valid.sum() * params.target_num_samples / max(mean_samples[0], 1) + 1)
+                    num_rays = int(num_rays * params.target_num_samples / max(mean_samples[0], 1) + 1)
                     tensorf.model.update_n_samples(mean_samples)
                     # tensorf.eval_batch_size = num_rays
 

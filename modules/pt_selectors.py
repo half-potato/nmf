@@ -13,6 +13,9 @@ def select_bounces(weights, app_mask, num_roughness_rays, percent_bright):
     pt_limit = pt_limit[app_mask]
 
     num_samples = pt_limit.floor().quantile(0.999).clip(max=500).int()
+    if num_samples == 0:
+        pt_limit = torch.where(torch.rand_like(pt_limit) < num_roughness_rays / pt_limit.shape[0], 1.1, 0)
+        num_samples = 1
 
     # create ray_mask
     ray_mask = torch.arange(num_samples, device=device).reshape(1, -1) < pt_limit.reshape(-1, 1).floor()

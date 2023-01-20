@@ -129,12 +129,12 @@ class NerfAccSampler(torch.nn.Module):
         # pad out dists and z_vals
         dists = torch.zeros(ray_valid.shape, device=device)
         z_vals = torch.zeros(ray_valid.shape, device=device)
-        xyz_sampled_w = torch.zeros((*ray_valid.shape, 4), device=device)
         dists[ray_valid] = pdists.reshape(-1)
         z_vals[ray_valid] = pz_vals.reshape(-1)
-        xyz_sampled_w[ray_valid] = xyz_sampled
 
         if self.max_samples > 0 and is_train and dynamic_batch_size and xyz_sampled.shape[0] > self.max_samples:
+            xyz_sampled_w = torch.zeros((*ray_valid.shape, 4), device=device)
+            xyz_sampled_w[ray_valid] = xyz_sampled
             whole_valid = torch.cumsum(ray_valid.sum(dim=1), dim=0) < self.max_samples
             ray_valid = ray_valid[whole_valid, :] 
             xyz_sampled_w = xyz_sampled_w[whole_valid, :] 

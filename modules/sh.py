@@ -2,6 +2,7 @@ import torch
 import math
 from math import pi, sqrt
 from icecream import ic
+from typing import List
 
 ################## sh function ##################
 C0 = 0.28209479177387814
@@ -141,7 +142,8 @@ def eval_sh_bases(basis_dim : int, dirs : torch.Tensor):
     return result
 
 
-def Al(l, kappa):
+@torch.jit.script
+def Al(l: int, kappa):
     return torch.exp(-l*(l+1)/2/(kappa+1e-8))
 
 def eval_sh_bases_scaled(deg, dirs, kappa):
@@ -236,12 +238,13 @@ def eval_sh_bases_scaled(deg, dirs, kappa):
     return result
 
 
-def sh_basis(degs, dirs, kappa=None):
+@torch.jit.script
+def sh_basis(degs: List[int], dirs, kappa=None):
     # evaluate a list of degrees
     if kappa is not None:
-        kappa = kappa.reshape(*dirs.shape[:-1])
+        kappa = kappa.reshape(-1)
 
-    x, y, z = dirs.T
+    x, y, z = dirs.T[0], dirs.T[1], dirs.T[2]
     xx, yy, zz = x * x, y * y, z * z
     x4, y4, z4 = x**4, y**4, z**4
     x6, y6, z6 = x**6, y**6, z**6
@@ -255,7 +258,7 @@ def sh_basis(degs, dirs, kappa=None):
     for deg in degs:
         scale = Al(deg, kappa) if kappa is not None else 1
         if deg == 0:
-            values.append(scale*C0 * torch.ones_like(x))
+            values.append(scale*0.28209479177387814 * torch.ones_like(x))
 
         if deg == 1:
             values.extend([
