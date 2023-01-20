@@ -359,6 +359,7 @@ def reconstruction(args):
     OmegaConf.save(config=args, f=f'{logfolder}/config.yaml')
     num_rays = params.starting_batch_size
     prev_n_samples = None
+    hist_n_samples = None
     if True:
     # with torch.profiler.profile(record_shapes=True, schedule=torch.profiler.schedule(wait=1, warmup=1, active=params.n_iters-1), with_stack=True) as p:
     # with torch.autograd.detect_anomaly():
@@ -423,9 +424,10 @@ def reconstruction(args):
                     ori_loss = stats['ori_loss'].sum()
 
                     # adjust number of rays
-                    mean_samples = [max(a, b) for a, b in zip(n_samples, prev_n_samples)] if prev_n_samples is not None else n_samples
+                    mean_samples = [max(a, b, c*0.9) for a, b, c in zip(n_samples, prev_n_samples, hist_n_samples)] if prev_n_samples is not None else n_samples
                     prev_n_samples = n_samples
-                    num_rays = int(num_rays * params.target_num_samples / max(mean_samples[0], 1) + 1)
+                    hist_n_samples = mean_samples
+                    num_rays = int(whole_valid.sum() * params.target_num_samples / max(mean_samples[0], 1) + 1)
                     tensorf.model.update_n_samples(mean_samples)
                     # tensorf.eval_batch_size = num_rays
 
@@ -510,6 +512,7 @@ def reconstruction(args):
                     # summary_writer.add_scalar('train/diffuse_loss', diffuse_reg.detach().item(), global_step=iteration)
                     #
                     # summary_writer.add_scalar('train/lr', list(optimizer.param_groups)[0]['lr'], global_step=iteration)
+                del ray_idx, rgb_idx, rays_train, rgba_train, gt_normal_map, ims, stats
 
             if params.clip_grad is not None:
                 torch.nn.utils.clip_grad_norm_(tensorf.parameters(), params.clip_grad)
