@@ -27,6 +27,8 @@ class RealBounce(torch.nn.Module):
         self.detach_N = True
         self.outputs = {'diffuse': 3, 'roughness': 1, 'tint': 3, 'spec': 3}
 
+        self.mean_ratios = None
+
     def get_optparam_groups(self, lr_scale=1):
         grad_vars = []
         grad_vars += [{'params': self.diffuse_module.parameters(),
@@ -107,10 +109,15 @@ class RealBounce(torch.nn.Module):
 
     def update_n_samples(self, n_samples):
         assert(len(self.target_num_samples) == len(self.max_retrace_rays))
-        if len(n_samples[1:]) == len(self.max_retrace_rays):
+        if len(n_samples) == len(self.max_retrace_rays):
+            ratios = [n_rays / n_sample for n_rays, n_sample in zip(self.max_retrace_rays, n_samples)]
+            if self.mean_ratios is None:
+                self.mean_ratios = ratios
+            else:
+                self.mean_ratios = [0.01*ratio + 0.99*mean_ratio for ratio, mean_ratio in zip(ratios, self.mean_ratios)]
             self.max_retrace_rays = [
-                    min(int(target / actual * current), maxv) if actual > 0 else current
-                    for target, actual, current, maxv in zip(self.target_num_samples, n_samples[1:], self.max_retrace_rays, self.max_brdf_rays[1:])]
+                    min(int(target * ratio + 1), maxv)
+                    for target, ratio, maxv in zip(self.target_num_samples, self.mean_ratios, self.max_brdf_rays[1:])]
 
 
     def forward(self, xyzs, xyzs_normed, app_features, viewdirs, normals, weights, app_mask, B, recur, render_reflection, bg_module, eps=torch.finfo(torch.float32).eps):
@@ -171,6 +178,7 @@ class RealBounce(torch.nn.Module):
             # Sample bright spots
             if self.bright_sampler is not None:
                 bL, bsamp_prob, brightsum = self.bright_sampler.sample(bg_module, bright_mask.sum())
+                bsamp_prob = bsamp_prob * self.percent_bright
                 pbright_mask = bright_mask[ri, rj]
                 L[pbright_mask] = bL
 
@@ -181,6 +189,7 @@ class RealBounce(torch.nn.Module):
             samp_prob = self.brdf_sampler.compute_prob(halfvec, eN, ea1.reshape(-1, 1), ea2.reshape(-1, 1), proportion=proportion)
 
             if self.bright_sampler is not None:
+                samp_prob = samp_prob * (1-self.percent_bright)
                 p1 = bsamp_prob.reshape(-1, 1)
                 p2 = samp_prob[pbright_mask].reshape(-1, 1)
                 # the first step is to convert everything to probabilities in the area measure (area on the surface of the sphere)
@@ -232,7 +241,7 @@ class RealBounce(torch.nn.Module):
                     color_contribution = per_ray_factor.reshape(-1) * per_sample_factor.expand(ray_mask.shape)[ri, rj]
                     if self.visibility_module is not None:
                         ray_xyzs_normed = xyzs_normed[bounce_mask][..., :3].reshape(-1, 1, 3).expand(-1, ray_mask.shape[1], 3)[ri, rj]
-                        color_contribution *= 1-self.visibility_module(ray_xyzs_normed, L)
+                        color_contribution *= self.visibility_module(ray_xyzs_normed, L)
                     color_contribution += 0.2*torch.rand_like(color_contribution)
                     retrace_ray_inds = color_contribution.argsort()[-num_retrace_rays:]
                     notrace_ray_inds = color_contribution.argsort()[:-num_retrace_rays]

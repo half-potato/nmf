@@ -120,7 +120,7 @@ def get_spiral(c2ws_all, near_fars, rads_scale=1.0, N_views=120):
 
 
 class LLFFDataset(Dataset):
-    def __init__(self, datadir, split='train', downsample=4, is_stack=False, hold_every=8):
+    def __init__(self, datadir, split='train', downsample=4, is_stack=False, hold_every=8, stack_norms=False):
         """
         spheric_poses: whether the images are taken in a spheric inward-facing manner
                        default: False (forward-facing)
@@ -137,6 +137,8 @@ class LLFFDataset(Dataset):
         self.blender2opencv = np.eye(4)#np.array([[1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]])
         self.read_meta()
         self.white_bg = False
+        self.stack_norms = stack_norms
+        self.hdr = False
 
         #         self.near_far = [np.min(self.near_fars[:,0]),np.max(self.near_fars[:,1])]
         self.near_far = [0.0, 1.0]
@@ -215,7 +217,7 @@ class LLFFDataset(Dataset):
             img = img.view(3, -1).permute(1, 0)  # (h*w, 3) RGB
             self.all_rgbs += [img]
             rays_o, rays_d = get_rays(self.directions, c2w)  # both (h*w, 3)
-            rays_o, rays_d = ndc_rays_blender(H, W, self.focal[0], 1.0, rays_o, rays_d)
+            # rays_o, rays_d = ndc_rays_blender(H, W, self.focal[0], 1.0, rays_o, rays_d)
             # viewdir = rays_d / torch.norm(rays_d, dim=-1, keepdim=True)
 
             self.all_rays += [torch.cat([rays_o, rays_d], 1)]  # (h*w, 6)

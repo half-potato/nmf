@@ -15,13 +15,14 @@ from .ray_utils import *
 
 
 class BlenderDataset(Dataset):
-    def __init__(self, datadir, stack_norms=False, split='train', downsample=1.0, is_stack=False, N_vis=-1):
+    def __init__(self, datadir, stack_norms=False, split='train', downsample=1.0, is_stack=False, N_vis=-1, white_bg=True):
         self.downsample=downsample
         self.N_vis = N_vis
         self.root_dir = datadir
         self.split = split
         self.is_stack = is_stack
         self.stack_norms = stack_norms
+        self.white_bg = white_bg
         self.define_transforms()
         if self.stack_norms:
             print("Stacking normals")
@@ -60,7 +61,7 @@ class BlenderDataset(Dataset):
         if 'white_bg' in self.meta:
             self.white_bg = self.meta['white_bg']
         else:
-            self.white_bg = True
+            self.white_bg = self.white_bg
         if 'w' not in self.meta:
             self.meta['w'] = 800
         if 'h' not in self.meta:
@@ -75,11 +76,16 @@ class BlenderDataset(Dataset):
             self.scene_bbox *= aabb_scale
             self.radius *= aabb_scale
 
-        self.focal = 0.5 * w / np.tan(0.5 * self.meta['camera_angle_x'])  # original focal length
+        if 'camera_angle_x' in self.meta:
+            self.fx = 0.5 * w / np.tan(0.5 * self.meta['camera_angle_x'])  # original focal length
+            self.fy = self.fx
+        else:
+            self.fx = self.meta['fl_x']
+            self.fy = self.meta['fl_y']
 
 
         # ray directions for all pixels, same for all images (same H, W, focal)
-        self.directions = get_ray_directions(h, w, [self.focal,self.focal])  # (h, w, 3)
+        self.directions = get_ray_directions(h, w, [self.fx,self.fy])  # (h, w, 3)
         cam_right = torch.tensor([1.0, 0.0, 0.0]).reshape(1, -1)
         # self.rays_up = torch.linalg.cross(self.directions.reshape(-1, 3), cam_right, dim=-1).reshape(h, w, 3)
         self.rays_up = torch.tensor([0.0, 1.0, 0.0]).reshape(1, 1, 3).expand(h, w, 3)
@@ -90,7 +96,7 @@ class BlenderDataset(Dataset):
         # ], dim=2)
         # self.rays_up /= torch.norm(self.rays_up, dim=2, keepdim=True)
         self.directions = self.directions / torch.norm(self.directions, dim=-1, keepdim=True)
-        self.intrinsics = torch.tensor([[self.focal,0,w/2],[0,self.focal,h/2],[0,0,1]]).float()
+        self.intrinsics = torch.tensor([[self.fx,0,w/2],[0,self.fy,h/2],[0,0,1]]).float()
 
         self.image_paths = []
         self.poses = []
@@ -157,6 +163,8 @@ class BlenderDataset(Dataset):
 #             self.all_depth = torch.cat(self.all_depth, 0)  # (len(self.meta['frames])*h*w, 3)
         else:
             self.all_rays = torch.stack(self.all_rays, 0)  # (len(self.meta['frames]),h*w, 3)
+
+            ic(torch.stack(self.all_rgbs, 0).shape, c)
             self.all_rgbs = torch.stack(self.all_rgbs, 0).reshape(-1,*self.img_wh[::-1], c)[..., :3]  # (len(self.meta['frames]),h,w,3)
             # self.all_masks = torch.stack(self.all_masks, 0).reshape(-1,*self.img_wh[::-1])  # (len(self.meta['frames]),h,w,3)
 

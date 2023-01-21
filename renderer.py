@@ -40,7 +40,10 @@ def chunk_renderer(rays, tensorf, focal, keys=['rgb_map'], chunk=4096, render2co
     ims = defaultdict(list)
     stats = defaultdict(list)
     N_rays_all = rays.shape[0]
-    for chunk_idx in range(N_rays_all // chunk + int(N_rays_all % chunk > 0)):
+    rng = range(N_rays_all // chunk + int(N_rays_all % chunk > 0))
+    if render2completion:
+        rng = tqdm(rng)
+    for chunk_idx in rng:
         rays_chunk = rays[chunk_idx * chunk:(chunk_idx + 1) * chunk]#.to(device)
         if rays_chunk.numel() == 0:
             continue
@@ -89,6 +92,7 @@ class BundleRender:
         device = rays.device
 
         LOGGER.reset()
+        ic(tensorf.eval_batch_size)
         ims, stats = self.base_renderer(
             rays, tensorf, keys=None,
             focal=self.focal, chunk=tensorf.eval_batch_size, render2completion=True, **kwargs)
@@ -202,7 +206,7 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
 
     near_far = test_dataset.near_far
     W, H = test_dataset.img_wh
-    focal = (test_dataset.focal[0] if ndc_ray else test_dataset.focal)
+    focal = (test_dataset.focal[0] if ndc_ray else test_dataset.fx)
     brender = BundleRender(renderer, H, W, focal)
 
     # if tensorf.ref_module is not None:

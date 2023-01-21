@@ -1,0 +1,8 @@
+scenedir: nerf_synthetic/gardenspheres
+dataset_name: blender
+downsample_train: 1
+downsample_test: 1
+ndc_ray: false
+near_far: [1, 4]
+# stack_norms: false
+aabb_scale: 1

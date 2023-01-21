@@ -137,8 +137,11 @@ def reconstruction(args):
     # init dataset
     dataset = dataset_dict[args.dataset.dataset_name]
     stack_norms = args.dataset.stack_norms if hasattr(args.dataset, 'stack_norms') else False
-    train_dataset = dataset(os.path.join(args.datadir, args.dataset.scenedir), split='train', downsample=args.dataset.downsample_train, is_stack=False, stack_norms=stack_norms)
-    test_dataset = dataset(os.path.join(args.datadir, args.dataset.scenedir), split='test', downsample=args.dataset.downsample_train, is_stack=True)
+    white_bg = args.dataset.white_bg if hasattr(args.dataset, 'white_bg') else True
+    train_dataset = dataset(os.path.join(args.datadir, args.dataset.scenedir), split='train',
+                            downsample=args.dataset.downsample_train, is_stack=False, stack_norms=stack_norms, white_bg=white_bg)
+    test_dataset = dataset(os.path.join(args.datadir, args.dataset.scenedir), split='test',
+                           downsample=args.dataset.downsample_train, is_stack=True, white_bg=white_bg)
     white_bg = train_dataset.white_bg
     train_dataset.near_far = args.dataset.near_far
     near_far = train_dataset.near_far
@@ -250,31 +253,32 @@ def reconstruction(args):
     # allrgbs = allrgbs.to(device)
     # allrays = allrays.to(device)
     # ratio of meters to pixels at a distance of 1 meter
-    focal = (train_dataset.focal[0] if ndc_ray else train_dataset.focal)
+    focal = (train_dataset.focal[0] if ndc_ray else train_dataset.fx)
     # / train_dataset.img_wh[0]
     # with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], with_stack=True, record_shapes=True) as prof:
     logger.info(tensorf)
+    ic(white_bg)
     # TODO REMOVE
-    if tensorf.bg_module is not None and not white_bg:
-        if True:
-            pbar = tqdm(range(args.n_bg_iters), miniters=args.progress_refresh_rate, file=sys.stdout)
-            # warm up by training bg
-            for _ in pbar:
-                ray_idx, rgb_idx = trainingSampler.nextids()
-                rays_train, rgba_train = allrays[ray_idx], allrgbs[rgb_idx].reshape(-1, allrgbs.shape[-1])
-                rgb_train = rgba_train[..., :3]
-                if rgba_train.shape[-1] == 4:
-                    alpha_train = rgba_train[..., 3]
-                else:
-                    alpha_train = None
-                roughness = 1e-16*torch.ones(rays_train.shape[0], 1, device=device)
-                rgb = tensorf.render_just_bg(rays_train, roughness)
-                loss = torch.sqrt((rgb - rgb_train) ** 2 + params.charbonier_eps**2).mean()
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-                photo_loss = loss.detach().item()
-                pbar.set_description(f'psnr={-10.0 * np.log(photo_loss) / np.log(10.0):.04f}')
+    # if tensorf.bg_module is not None and not white_bg:
+    #     if True:
+    #         pbar = tqdm(range(args.n_bg_iters), miniters=args.progress_refresh_rate, file=sys.stdout)
+    #         # warm up by training bg
+    #         for _ in pbar:
+    #             ray_idx, rgb_idx = trainingSampler.nextids()
+    #             rays_train, rgba_train = allrays[ray_idx], allrgbs[rgb_idx].reshape(-1, allrgbs.shape[-1])
+    #             rgb_train = rgba_train[..., :3]
+    #             if rgba_train.shape[-1] == 4:
+    #                 alpha_train = rgba_train[..., 3]
+    #             else:
+    #                 alpha_train = None
+    #             roughness = 1e-16*torch.ones(rays_train.shape[0], 1, device=device)
+    #             rgb = tensorf.render_just_bg(rays_train, roughness)
+    #             loss = torch.sqrt((rgb - rgb_train) ** 2 + params.charbonier_eps**2).mean()
+    #             optimizer.zero_grad()
+    #             loss.backward()
+    #             optimizer.step()
+    #             photo_loss = loss.detach().item()
+    #             pbar.set_description(f'psnr={-10.0 * np.log(photo_loss) / np.log(10.0):.04f}')
         # tensorf.bg_module.save('test.png')
 
     # TODO REMOVE
@@ -423,11 +427,14 @@ def reconstruction(args):
                     ori_loss = stats['ori_loss'].sum()
 
                     # adjust number of rays
-                    mean_samples = [max(a, b) for a, b in zip(n_samples, prev_n_samples)] if prev_n_samples is not None else n_samples
-                    prev_n_samples = n_samples
-                    num_rays = int(num_rays * params.target_num_samples / max(mean_samples[0], 1) + 1)
-                    tensorf.model.update_n_samples(mean_samples)
-                    # tensorf.eval_batch_size = num_rays
+                    # need to store mean ratios if I have any hope of stabilizing this
+                    mean_samples = n_samples
+                    ratio = int(whole_valid.sum()) / mean_samples[0]
+                    mean_ratio = ratio if prev_n_samples is None else (0.01*ratio + 0.99*prev_n_samples)
+                    prev_n_samples = mean_ratio
+                    num_rays = int(mean_ratio * params.target_num_samples + 1)
+                    tensorf.model.update_n_samples(n_samples[1:])
+                    tensorf.eval_batch_size = 4*num_rays
 
                     # rays_remaining -= rgb_map.shape[0]
                     # rays_train = rays_train[~whole_valid]
