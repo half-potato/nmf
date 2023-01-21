@@ -223,7 +223,6 @@ class TensorNeRF(torch.nn.Module):
             else:
                 psigma, all_app_features = self.rf.compute_feature(xyz_sampled)
             sigma[ray_valid] = psigma
-            del psigma
 
         def render_reflection(rays, start_mipval, retrace=False):
             nonlocal n_samples
@@ -244,7 +243,6 @@ class TensorNeRF(torch.nn.Module):
 
         # app stands for appearance
         pweight = weight[ray_valid]
-
         # if self.model.visibility_module is not None:
         #     ray_ori = self.rf.normalize_coord(rays[whole_valid, 0:3])
         #     ray_dir = rays[whole_valid, 3:6]
@@ -260,7 +258,6 @@ class TensorNeRF(torch.nn.Module):
             #  Compute normals for app mask
             app_xyz = xyz_sampled
 
-            # TODO REMOVE
             world_normal = self.calculate_normals(app_xyz)
 
             if all_app_features is None:
@@ -278,7 +275,7 @@ class TensorNeRF(torch.nn.Module):
                 v_world_normal = world_normal
 
             rgb, debug = self.model(app_xyz, xyz_normed, app_features, viewdirs[ray_valid], v_world_normal,
-                                    weight, ray_valid, weight.shape[0], recur, render_reflection, bg_module=self.bg_module)
+                                    weight, ray_valid, weight.shape[0], recur, render_reflection, is_train=is_train, bg_module=self.bg_module)
 
         else:
             debug = {k: torch.empty((0, v), device=device, dtype=weight.dtype) for k, v in self.model.outputs.items()}

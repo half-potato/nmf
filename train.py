@@ -363,6 +363,7 @@ def reconstruction(args):
     OmegaConf.save(config=args, f=f'{logfolder}/config.yaml')
     num_rays = params.starting_batch_size
     prev_n_samples = None
+    hist_n_samples = None
     if True:
     # with torch.profiler.profile(record_shapes=True, schedule=torch.profiler.schedule(wait=1, warmup=1, active=params.n_iters-1), with_stack=True) as p:
     # with torch.autograd.detect_anomaly():
@@ -517,6 +518,7 @@ def reconstruction(args):
                     # summary_writer.add_scalar('train/diffuse_loss', diffuse_reg.detach().item(), global_step=iteration)
                     #
                     # summary_writer.add_scalar('train/lr', list(optimizer.param_groups)[0]['lr'], global_step=iteration)
+                del ray_idx, rgb_idx, rays_train, rgba_train, gt_normal_map, ims, stats
 
             if params.clip_grad is not None:
                 torch.nn.utils.clip_grad_norm_(tensorf.parameters(), params.clip_grad)

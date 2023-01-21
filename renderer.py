@@ -31,8 +31,9 @@ def stack_tensors(data):
             else:
                 data[key] = torch.tensor(data[key])
         except:
-            traceback.print_exc()
-            ic(key, data[key][0])
+            pass
+        #     traceback.print_exc()
+        #     ic(key, data[key][0])
     return data
 
 def chunk_renderer(rays, tensorf, focal, keys=['rgb_map'], chunk=4096, render2completion=False, **kwargs):

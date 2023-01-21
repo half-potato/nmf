@@ -120,7 +120,7 @@ class RealBounce(torch.nn.Module):
                     for target, ratio, maxv in zip(self.target_num_samples, self.mean_ratios, self.max_brdf_rays[1:])]
 
 
-    def forward(self, xyzs, xyzs_normed, app_features, viewdirs, normals, weights, app_mask, B, recur, render_reflection, bg_module, eps=torch.finfo(torch.float32).eps):
+    def forward(self, xyzs, xyzs_normed, app_features, viewdirs, normals, weights, app_mask, B, recur, render_reflection, bg_module, is_train, eps=torch.finfo(torch.float32).eps):
         # xyzs: (M, 4)
         # viewdirs: (M, 3)
         # normals: (M, 3)
@@ -176,6 +176,7 @@ class RealBounce(torch.nn.Module):
 
             importance_samp_correction = torch.ones((L.shape[0], 1), device=device)
             # Sample bright spots
+            # ic(ray_mask.sum(), bright_mask.sum(), num_brdf_rays)
             if self.bright_sampler is not None:
                 bL, bsamp_prob, brightsum = self.bright_sampler.sample(bg_module, bright_mask.sum())
                 bsamp_prob = bsamp_prob * self.percent_bright
@@ -243,8 +244,10 @@ class RealBounce(torch.nn.Module):
                         ray_xyzs_normed = xyzs_normed[bounce_mask][..., :3].reshape(-1, 1, 3).expand(-1, ray_mask.shape[1], 3)[ri, rj]
                         color_contribution *= self.visibility_module(ray_xyzs_normed, L)
                     color_contribution += 0.2*torch.rand_like(color_contribution)
-                    retrace_ray_inds = color_contribution.argsort()[-num_retrace_rays:]
-                    notrace_ray_inds = color_contribution.argsort()[:-num_retrace_rays]
+                    cc_as = color_contribution.argsort()
+                    retrace_ray_inds = cc_as[-num_retrace_rays:]
+                    notrace_ray_inds = cc_as[:-num_retrace_rays]
+                # ic(num_retrace_rays, color_contribution.shape, brdf_weight.shape, bounce_mask.shape, bounce_mask.sum(), ray_mask.sum())
 
                 # retrace some of the rays
                 incoming_light = torch.empty((bounce_rays.shape[0], 3), device=device)

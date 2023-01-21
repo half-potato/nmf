@@ -1,6 +1,52 @@
 import torch
 import math
 from icecream import ic
+import warp as wp
+from modules.distortion_loss_warp import from_torch
+import time
+
+wp.init()
+
+@wp.kernel
+def kern_inv_cdf(
+        cdf: wp.array(dtype=float),
+        rand_vals: wp.array(dtype=float),
+        output: wp.array(dtype=wp.int32),
+        cdf_len: int,
+        samp_len: int):
+
+    ti = wp.tid()
+    if ti < samp_len:
+        v = rand_vals[ti]
+        found = int(0) # no booleans?
+        for i in range(cdf_len):
+            if cdf[i] > v and found == 0:
+                output[ti] = i
+                found = 1
+        if found == 0:
+            output[ti] = cdf_len-1
+                # break
+                # break is not supported
+
+def inv_cdf_wp(cdf, rand_vals):
+    device = cdf.device
+    cdf_len = cdf.shape[0]
+    samp_len = rand_vals.shape[0]
+    output = -torch.ones((samp_len), device=device, dtype=torch.int32)
+
+    wcdf = wp.from_torch(cdf)
+    wrand_vals = wp.from_torch(rand_vals)
+    woutput = wp.from_torch(output, dtype=wp.int32)
+    wp.launch(kernel=kern_inv_cdf,
+              dim=(samp_len),
+              inputs=[wcdf, wrand_vals, woutput, cdf_len, samp_len],
+              device='cuda')
+    return output
+
+def inv_cdf(cdf, rand_vals):
+    device = cdf.device
+    indices = ((rand_vals.reshape(-1, 1) < cdf.reshape(1, -1)) * torch.arange(cdf.shape[0], device=device).reshape(1, -1)).max(dim=-1).indices
+    return indices
 
 class ERBrightSampler():
     def __init__(self):
@@ -13,11 +59,17 @@ class ERBrightSampler():
         H, W = brightness.shape
         sin_vals = torch.sin(torch.arange(H, device=device) / H * math.pi)
         prob = brightness * sin_vals.reshape(-1, 1).expand(H, W)
-        brightsum = prob.sum()
-        prob = prob / brightsum
-        cdf = torch.cumsum(prob.reshape(-1), dim=0)
+        brightsum = brightness.sum()
+        prob = brightness / brightsum
+        cdf = torch.cumsum(prob.reshape(-1), dim=0).reshape(-1)
+        rand_vals = torch.rand((N), device=device)
+        # indices = inv_cdf_wp(cdf, rand_vals).long()
+        indices = inv_cdf(cdf, rand_vals)
+        # indices2 = inv_cdf(cdf, rand_vals)
+        # ic(indices, indices2, rand_vals, cdf[indices], cdf[indices2])
+
         # plug random values into inverse cdf
-        indices = ((torch.rand((N, 1), device=device) < cdf.reshape(1, -1)) * torch.arange(cdf.shape[0], device=device).reshape(1, -1)).max(dim=-1).indices
+        # ic(cdf.shape, N)
         # indices to angles
         row = indices // W
         col = indices % W

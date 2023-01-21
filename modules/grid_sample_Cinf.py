@@ -9,15 +9,17 @@ def gaussian_partial(squaredbit, std):
     dist = torch.exp(-0.5*squaredbit) / (std*math.sqrt(2*math.pi))
     return dist / (dist.sum()+1e-8)
 
-def gaussian_fn(M, std, **kwargs):
-    n = torch.arange(0, M, **kwargs) - (M - 1.0) / 2.0
+@torch.jit.script
+def gaussian_fn(M: int, std: float, device: torch.device):
+    n = torch.arange(0, M, device=device) - (M - 1.0) / 2.0
     sig2 = 2 * std * std
     w = torch.exp(-n ** 2 / sig2)
     return w
 
-def gkern(kernlen=256, std=128, **kwargs):
+@torch.jit.script
+def gkern(kernlen:int, std: float, device: torch.device):
     """Returns a 2D Gaussian kernel array."""
-    gkern1d = gaussian_fn(kernlen, std=std, **kwargs) 
+    gkern1d = gaussian_fn(kernlen, std=std, device=device) 
     gkern2d = torch.outer(gkern1d, gkern1d)
     return gkern2d
 
@@ -101,7 +103,7 @@ class GridSampler2D(torch.autograd.Function):
                 dx_filter = dy_filter.permute(0, 1, 3, 2, 4)
                 dz_filter = dy_filter.permute(0, 1, 2, 4, 3)
 
-                g1 = gaussian_fn(kernlen, std=smoothing+1e-8, device=grad_output.device)
+                g1 = gaussian_fn(kernlen, std=smoothing+1e-8)
                 smooth_kern = g1[:, None, None] * g1[None, :, None] * g1[None, None, :]
                 smooth_kern /= smooth_kern.sum()
                 sm_dx_filter = combine_kernels3d(smooth_kern, dx_filter)
@@ -233,7 +235,7 @@ class GridSampler1D(torch.autograd.Function):
             l = len(f_edge)
 
             dz_filter = f_edge.reshape(1, 1, l)
-            smooth_kern = gaussian_fn(2*int(smoothing)+3, std=smoothing, device=grad_output.device)
+            smooth_kern = gaussian_fn(2*int(smoothing)+3, std=smoothing)
             sm_dx_filter = combine_kernels2d(smooth_kern, dz_filter)
             s = sm_dx_filter.shape[-1]
 
