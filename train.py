@@ -435,7 +435,7 @@ def reconstruction(args):
                     prev_n_samples = mean_ratio
                     num_rays = int(mean_ratio * params.target_num_samples + 1)
                     tensorf.model.update_n_samples(n_samples[1:])
-                    tensorf.eval_batch_size = 4*num_rays
+                    tensorf.eval_batch_size = num_rays
 
                     # rays_remaining -= rgb_map.shape[0]
                     # rays_train = rays_train[~whole_valid]

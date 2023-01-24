@@ -42,8 +42,8 @@ def chunk_renderer(rays, tensorf, focal, keys=['rgb_map'], chunk=4096, render2co
     stats = defaultdict(list)
     N_rays_all = rays.shape[0]
     rng = range(N_rays_all // chunk + int(N_rays_all % chunk > 0))
-    if render2completion:
-        rng = tqdm(rng)
+    # if render2completion:
+    #     rng = tqdm(rng)
     for chunk_idx in rng:
         rays_chunk = rays[chunk_idx * chunk:(chunk_idx + 1) * chunk]#.to(device)
         if rays_chunk.numel() == 0:
@@ -93,7 +93,6 @@ class BundleRender:
         device = rays.device
 
         LOGGER.reset()
-        ic(tensorf.eval_batch_size)
         ims, stats = self.base_renderer(
             rays, tensorf, keys=None,
             focal=self.focal, chunk=tensorf.eval_batch_size, render2completion=True, **kwargs)
@@ -101,8 +100,6 @@ class BundleRender:
         LOGGER.save('rays.pkl')
         LOGGER.reset()
         points = ims['termination_xyz']
-        # ic(data['backwards_rays_loss'].mean(), acc_map.max())
-        #  ind = [598,532]
         point = points[len(points)//2].to(device)
 
         if hasattr(tensorf.model, 'recover_envmap') and False:
@@ -191,10 +188,8 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
             torch.zeros_like(viewangs),
             -torch.sin(viewangs),
         ], dim=-1).reshape(-1, 3).to(device)
-        # ic(viewdirs)
         res = 100
         brdf_im = tensorf.model.graph_brdfs(xyz, viewdirs, feat, res).cpu()
-        # ic(brdf_im.shape)
         bg_path = Path(savePath) / 'brdf'
         bg_path.mkdir(exist_ok=True, parents=True)
         imageio.imwrite(bg_path / f'{prtx}brdf_map.exr', brdf_im)

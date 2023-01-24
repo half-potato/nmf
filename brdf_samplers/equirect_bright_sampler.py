@@ -34,9 +34,9 @@ def inv_cdf_wp(cdf, rand_vals):
     samp_len = rand_vals.shape[0]
     output = -torch.ones((samp_len), device=device, dtype=torch.int32)
 
-    wcdf = wp.from_torch(cdf)
-    wrand_vals = wp.from_torch(rand_vals)
-    woutput = wp.from_torch(output, dtype=wp.int32)
+    wcdf = from_torch(cdf, requires_grad=False)
+    wrand_vals = from_torch(rand_vals, requires_grad=False)
+    woutput = from_torch(output, dtype=wp.int32, requires_grad=False)
     wp.launch(kernel=kern_inv_cdf,
               dim=(samp_len),
               inputs=[wcdf, wrand_vals, woutput, cdf_len, samp_len],
@@ -63,8 +63,8 @@ class ERBrightSampler():
         prob = brightness / brightsum
         cdf = torch.cumsum(prob.reshape(-1), dim=0).reshape(-1)
         rand_vals = torch.rand((N), device=device)
-        # indices = inv_cdf_wp(cdf, rand_vals).long()
-        indices = inv_cdf(cdf, rand_vals)
+        indices = inv_cdf_wp(cdf, rand_vals).long()
+        # indices = inv_cdf(cdf, rand_vals)
         # indices2 = inv_cdf(cdf, rand_vals)
         # ic(indices, indices2, rand_vals, cdf[indices], cdf[indices2])
 
