@@ -6,6 +6,14 @@ def select_bounces(weights, app_mask, num_roughness_rays, percent_bright):
     device = weights.device
 
     # pt_limit = weights * num_roughness_rays + 0.5
+    # assert((num_roughness_rays - app_mask.sum()) > 0)
+    weights = weights + 1e-3*torch.rand_like(weights)
+    # N = (num_roughness_rays - app_mask.sum())
+    # if N > 0:
+    #     pt_limit = weights / (weights.sum().clip(min=1e-3)) * N + 1
+    #     ic(pt_limit.floor().min())
+    # else:
+    #     pt_limit = weights / (weights.sum().clip(min=1e-3)) * num_roughness_rays + 0.5
     pt_limit = weights / (weights.sum().clip(min=1e-3)) * num_roughness_rays + 0.5
     
     # nopt_mask = pt_limit.max(dim=1).values < 1

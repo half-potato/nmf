@@ -7,6 +7,7 @@ from icecream import ic
 import numpy as np
 import imageio
 import cv2
+from modules import sh
 
 class IntegralEquirect(torch.nn.Module):
     def __init__(self, bg_resolution, init_val, activation='identity',
@@ -34,6 +35,10 @@ class IntegralEquirect(torch.nn.Module):
         self.betas = betas
 
         self.activation = activation
+
+        sh_A = torch.tensor([3.141593, *([2.094395]*3), *([0.785398]*5), *([0]*7), *([-0.1309]*9)])
+        sh_A = torch.tensor(sum([[sh.Al2(l)]*(2*l+1) for l in range(16)], []))
+        self.register_buffer('sh_A', sh_A)
 
     def get_optparam_groups(self, lr_scale=1):
         # lr_scale = 1
@@ -79,6 +84,33 @@ class IntegralEquirect(torch.nn.Module):
 
     def mean_color(self):
         return self.activation_fn(self.bg_mat).reshape(-1, 3).mean(dim=0)
+
+    def get_spherical_harmonics(self, G, mipval=0):
+        device = self.get_device()
+        _theta = torch.linspace(0, np.pi, G//2, device=device)
+        _phi = torch.linspace(0, 2*np.pi, G, device=device)
+        theta, phi = torch.meshgrid(_theta, _phi, indexing='ij')
+        sh_samples = torch.stack([
+            torch.sin(theta) * torch.cos(phi),
+            torch.sin(theta) * torch.sin(phi),
+            torch.cos(theta),
+        ], dim=-1).reshape(-1, 3)
+        # compute 
+        SB = sh_samples.shape[0]
+        samp_mipval = mipval*torch.ones(SB, 1, device=device)
+        bg = self(sh_samples, samp_mipval)
+        evaled = sh.eval_sh_bases(9, sh_samples)
+        # evaled = sh.sh_basis([0, 1, 2, 4, 8, 16], sh_samples)
+        # evaled: (N, 9)
+        # bg: (N, 3)
+        # coeffs: (1, 3, 9)
+        # integral:
+        coeffs = 2*np.pi**2 *(bg.reshape(SB, 1, 3) * evaled.reshape(SB, -1, 1) * torch.sin(theta.reshape(SB, 1, 1))).mean(dim=0)
+        # cols = (coeffs.reshape(1, -1, 3) * evaled.reshape(SB, -1, 1)).sum(dim=1)
+        # ic(cols, bg)
+        conv_coeffs = self.sh_A.reshape(-1, 1)[:coeffs.shape[0]] * coeffs
+        # cols = (conv_coeffs.reshape(1, -1, 3) * evaled.reshape(SB, -1, 1)).sum(dim=1)
+        return coeffs, conv_coeffs / np.pi
 
     @torch.no_grad()
     def save(self, path, prefix='', tonemap=None):

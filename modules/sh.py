@@ -104,7 +104,7 @@ def eval_sh_bases(basis_dim : int, dirs : torch.Tensor):
     :param dirs: torch.Tensor (..., 3) unit directions
     :return: torch.Tensor (..., basis_dim)
     """
-    result = torch.empty((*dirs.shape[:-1], basis_dim), dtype=dirs.dtype, device=dirs.device)
+    result = torch.zeros((*dirs.shape[:-1], basis_dim), dtype=dirs.dtype, device=dirs.device)
     result[..., 0] = SH_C0
     if basis_dim > 1:
         x, y, z = dirs.unbind(-1)
@@ -146,6 +146,16 @@ def eval_sh_bases(basis_dim : int, dirs : torch.Tensor):
 def Al(l: int, kappa):
     return torch.exp(-l*(l+1)/2/(kappa+1e-8))
 
+def Al2(l):
+    if l == 0:
+        return math.pi
+    if l == 1:
+        return 2*math.pi/3
+    if l % 2 == 1:
+        return 0
+    else:
+        return 2*math.pi * (-1)**(l/2-1) / ((l+2)*(l-1)) * ( math.factorial(l) / (2**l*math.factorial(l//2)**2) )
+
 def eval_sh_bases_scaled(deg, dirs, kappa):
     """
     Evaluate spherical harmonics bases at unit directions,
@@ -157,7 +167,7 @@ def eval_sh_bases_scaled(deg, dirs, kappa):
     :return: torch.Tensor (..., (deg+1) ** 2)
     """
     assert deg <= 6 and deg >= 0
-    result = torch.empty((*dirs.shape[:-1], (deg + 1) ** 2), dtype=dirs.dtype, device=dirs.device)
+    result = torch.zeros((*dirs.shape[:-1], (deg + 1) ** 2), dtype=dirs.dtype, device=dirs.device)
     kappa = kappa.reshape(*dirs.shape[:-1])
     result[..., 0] = Al(0, kappa) * C0
     if deg > 0:

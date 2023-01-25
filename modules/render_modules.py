@@ -18,6 +18,13 @@ import math
 def get_dim(encoder, extra=0):
     return 0 if encoder is None else encoder.dim() + extra
 
+def inv_sigmoid(v):
+    a = (v / (1-v))
+    if type(a) == float:
+        return math.log(a)
+    else:
+        return a.log()
+
 def str2fn(name):
     if name == 'sigmoid':
         return torch.nn.Sigmoid()
@@ -362,13 +369,14 @@ class HydraMLPDiffuse(torch.nn.Module):
 
     def calibrate(self, *args, **kwargs):
         diffuse, tint, extra = self(*args, **kwargs)
-        diffuse_v = (diffuse / (1-diffuse)).log().mean().detach().item()
+        diffuse_v = inv_sigmoid(diffuse).mean().detach().item()
         # tint_v = (tint / (1-tint)).log()
-        self.diffuse_bias += -1.1 - diffuse_v
+        self.diffuse_bias += inv_sigmoid(0.25) - diffuse_v
         ic(diffuse_v, self.diffuse_bias)
 
-        # roughness = (extra['r1'] + extra['r2']) / 2
-        # roughness_v = (roughness / (1-roughness)).log().mean().detach().item()
+        roughness = (extra['r1'] + extra['r2']) / 2
+        roughness_v = inv_sigmoid(roughness).mean().detach().item()
+        self.roughness_bias += inv_sigmoid(0.35) - roughness_v
 
         # self.tint_bias += 1.1 - diffuse_v
 

@@ -78,16 +78,6 @@ class CubeUnwrap(torch.nn.Module):
             coords[..., 1][cond] = y[cond] / l
         return coords.reshape(1, 1, -1, 2)
 
-def Al(l):
-    if l == 0:
-        return np.pi
-    if l == 1:
-        return 2*np.pi/3
-    if l % 2 == 1:
-        return 0
-    else:
-        return 2*np.pi * (-1)**(l/2-1) / ((l+2)*(l-1)) * ( math.factorial(l) / (2**l*math.factorial(l//2)**2) )
-
 class HierarchicalCubeMap(torch.nn.Module):
     def __init__(self, bg_resolution=512, num_levels=1, featureC=128, activation='identity', power=2, brightness_lr=0.01, mul_lr=0.01, mul_betas=[0.9, 0.999],
                  stds = [1, 2, 4, 8], betas=[0.9, 0.99], TV_max_scale=1, mipbias=+0.5, init_val=-2, interp_pyramid=True, lr=0.15, mipbias_lr=1e-3, mipnoise=0.5, learnable_bias=True):
@@ -115,7 +105,7 @@ class HierarchicalCubeMap(torch.nn.Module):
         self.register_parameter('mul', torch.nn.Parameter(torch.tensor(1.0, dtype=float)))
 
         sh_A = torch.tensor([3.141593, *([2.094395]*3), *([0.785398]*5), *([0]*7), *([-0.1309]*9)])
-        sh_A = torch.tensor(sum([[Al(l)]*(2*l+1) for l in range(16)], []))
+        sh_A = torch.tensor(sum([[sh.Al2(l)]*(2*l+1) for l in range(16)], []))
         self.register_buffer('sh_A', sh_A)
         if learnable_bias:
             self.register_parameter('mipbias', torch.nn.Parameter(torch.tensor(mipbias, dtype=float)))

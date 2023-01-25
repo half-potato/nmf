@@ -340,6 +340,7 @@ def reconstruction(args):
     tensorf.model.brdf.calibrate(feat, tensorf.bg_module.mean_color().detach().mean())
     args.model.arch.model.brdf.bias = tensorf.model.brdf.bias
     args.model.arch.model.diffuse_module.diffuse_bias = tensorf.model.diffuse_module.diffuse_bias
+    args.model.arch.model.diffuse_module.roughness_bias = tensorf.model.diffuse_module.roughness_bias
 
     pbar = tqdm(range(params.n_iters), miniters=args.progress_refresh_rate, file=sys.stdout)
     def init_optimizer(grad_vars):

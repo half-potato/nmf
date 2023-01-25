@@ -38,7 +38,7 @@ class PBR(torch.nn.Module):
         # mask: mask for matprop
         half = normalize(L + V.reshape(-1, 1, 3))
 
-        LdotN = (L * N).sum(dim=-1, keepdim=True).clip(min=1e-8)
+        LdotN = (L * N).sum(dim=-1, keepdim=True)
         VdotN = (V.reshape(-1, 1, 3) * N).sum(dim=-1, keepdim=True).clip(min=1e-8)
         cos_half = (half * N).sum(dim=-1, keepdim=True)
 
@@ -185,14 +185,13 @@ class MLPBRDF(torch.nn.Module):
         # matprop: dictionary of attributes
         # mask: mask for matprop
 
-        half = normalize(L + V)
 
-        LdotN = (L * N).sum(dim=-1, keepdim=True).clip(min=1e-8)
+        LdotN = (L * N).sum(dim=-1, keepdim=True)
+        LdotH = (L * half_vec).sum(dim=-1, keepdim=True)
         if self.dotpe >= 0:
 
-            VdotN = (V * N).sum(dim=-1, keepdim=True).clip(min=1e-8)
-            LdotH = (L * half).sum(dim=-1, keepdim=True).clip(min=1e-8)
-            NdotH = ((half * N).sum(dim=-1, keepdim=True)+1e-3).clip(min=1e-20, max=1)
+            VdotN = (V * N).sum(dim=-1, keepdim=True)
+            NdotH = ((half_vec * N).sum(dim=-1, keepdim=True)+1e-3)
             # indata = [LdotN, torch.sqrt((1-LdotN**2).clip(min=1e-8, max=1)),
             #           VdotN, torch.sqrt((1-LdotN**2).clip(min=1e-8, max=1)),
             #           NdotH, torch.sqrt((1-NdotH**2).clip(min=1e-8, max=1))]

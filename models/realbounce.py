@@ -4,10 +4,11 @@ from mutils import normalize
 from modules.row_mask_sum import row_mask_sum
 from icecream import ic
 import math
+from modules import sh
 
 class RealBounce(torch.nn.Module):
     def __init__(self, app_dim, diffuse_module, brdf, brdf_sampler, 
-                 anoise, max_brdf_rays, target_num_samples,
+                 anoise, max_brdf_rays, target_num_samples, russian_roulette,
                  percent_bright, cold_start_bg_iters, detach_N_iters, visibility_module=None, max_retrace_rays=[], bright_sampler=None):
         super().__init__()
         self.diffuse_module = diffuse_module(in_channels=app_dim)
@@ -17,6 +18,7 @@ class RealBounce(torch.nn.Module):
         self.visibility_module = visibility_module
 
         self.anoise = anoise
+        self.russian_roulette = russian_roulette
         self.target_num_samples = target_num_samples
         self.max_brdf_rays = max_brdf_rays
         self.max_retrace_rays = max_retrace_rays
@@ -114,10 +116,12 @@ class RealBounce(torch.nn.Module):
             if self.mean_ratios is None:
                 self.mean_ratios = ratios
             else:
-                self.mean_ratios = [min(0.1*ratio + 0.9*mean_ratio, 1) if ratio is not None else mean_ratio for ratio, mean_ratio in zip(ratios, self.mean_ratios)]
+                self.mean_ratios = [
+                        (min(0.1*ratio + 0.9*mean_ratio, 1) if ratio is not None else mean_ratio) if mean_ratio is not None else ratio
+                        for ratio, mean_ratio in zip(ratios, self.mean_ratios)]
             self.max_retrace_rays = [
                     min(int(target * ratio + 1), maxv) if ratio is not None else prev
-                    for target, ratio, maxv, prev in zip(self.target_num_samples, self.mean_ratios, self.max_brdf_rays[1:], self.max_retrace_rays)]
+                    for target, ratio, maxv, prev in zip(self.target_num_samples, self.mean_ratios, self.max_brdf_rays[:-1], self.max_retrace_rays)]
             # ic(ratios, self.mean_ratios, n_samples, self.max_retrace_rays, self.target_num_samples)
 
 
@@ -135,6 +139,12 @@ class RealBounce(torch.nn.Module):
         noise_app_features = (app_features + torch.randn_like(app_features) * self.anoise)
         diffuse, tint, matprop = self.diffuse_module(
             xyzs_normed, viewdirs, app_features)
+
+        # compute spherical harmonic coefficients for the background
+        coeffs, conv_coeffs = bg_module.get_spherical_harmonics(100)
+        evaled = sh.eval_sh_bases(coeffs.shape[0], normals)
+        E = (conv_coeffs.reshape(1, -1, 3) * evaled.reshape(evaled.shape[0], -1, 1)).sum(dim=1).detach()
+        diffuse = diffuse * E.detach()
 
         # pick rays to bounce
         num_brdf_rays = self.max_brdf_rays[recur]# // B
@@ -243,15 +253,33 @@ class RealBounce(torch.nn.Module):
                     color_contribution = per_ray_factor.reshape(-1) * per_sample_factor.expand(ray_mask.shape)[ri, rj]
                     if self.visibility_module is not None:
                         ray_xyzs_normed = xyzs_normed[bounce_mask][..., :3].reshape(-1, 1, 3).expand(-1, ray_mask.shape[1], 3)[ri, rj]
-                        color_contribution *= self.visibility_module(ray_xyzs_normed, L)
+                        color_contribution *= 1-self.visibility_module(ray_xyzs_normed, L)
                     color_contribution += 0.2*torch.rand_like(color_contribution)
                     cc_as = color_contribution.argsort()
-                    retrace_ray_inds = cc_as[-num_retrace_rays:]
-                    notrace_ray_inds = cc_as[:-num_retrace_rays]
-                # ic(num_retrace_rays, color_contribution.shape, brdf_weight.shape, bounce_mask.shape, bounce_mask.sum(), ray_mask.sum())
+                    retrace_ray_inds = cc_as[cc_as.shape[0]-num_retrace_rays:]
+
+                    if self.russian_roulette:
+                        num_retrace = torch.zeros((ray_mask.shape[0]), device=device)
+                        rii = ri[retrace_ray_inds]
+                        num_retrace.scatter_add_(0, rii, torch.ones((1), dtype=num_retrace.dtype, device=device).expand(rii.shape))
+
+
+                        # update ray_count to reflect the new number of rays
+                        min_n = 0
+                        rtmask = num_retrace > min_n
+                        ray_count[rtmask] = num_retrace[rtmask, None]
+
+                        retrace_mask = torch.zeros(color_contribution.shape, device=device, dtype=bool)
+                        retrace_mask[retrace_ray_inds] = True
+                        lrtmask = rtmask.reshape(-1, 1).expand(ray_mask.shape)[ray_mask]
+                        notrace_mask = ~retrace_mask & ~lrtmask
+
+                        notrace_ray_inds, = torch.where(notrace_mask)
+                    else:
+                        notrace_ray_inds = cc_as[:-num_retrace_rays]
 
                 # retrace some of the rays
-                incoming_light = torch.empty((bounce_rays.shape[0], 3), device=device)
+                incoming_light = torch.zeros((bounce_rays.shape[0], 3), device=device)
                 if len(retrace_ray_inds) > 0:
                     incoming_light[retrace_ray_inds], bg_vis = render_reflection(bounce_rays[retrace_ray_inds], mipval[retrace_ray_inds], retrace=True)
                     # bg vis is high when bg is visible
