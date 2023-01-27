@@ -18,3 +18,4 @@ icecream
 warp-lang
 loguru
 git+https://github.com/NVlabs/nvdiffrast
+scikit-learn

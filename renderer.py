@@ -5,6 +5,7 @@ from dataLoader.ray_utils import get_rays
 from utils import *
 from dataLoader.ray_utils import ndc_rays_blender
 from modules import tonemap
+from loguru import logger
 
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
@@ -12,6 +13,8 @@ from icecream import ic
 from modules.tensor_nerf import LOGGER
 import traceback
 from pathlib import Path
+import yaml
+from sklearn import linear_model
 
 class dotdict(dict):
     """dot.notation access to dictionary attributes"""
@@ -141,7 +144,7 @@ def depth_to_normals(depth, focal):
     return normals
 
 def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N_samples=-1,
-               white_bg=False, ndc_ray=False, compute_extra_metrics=True, device='cuda', bundle_size=1):
+               white_bg=False, ndc_ray=False, compute_extra_metrics=True, device='cuda', bundle_size=1, gt_bg=None):
     print("Eval")
     PSNRs, rgb_maps, depth_maps = [], [], []
     norm_errs = []
@@ -165,11 +168,6 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
     os.makedirs(savePath+"/cross_section", exist_ok=True)
     # os.makedirs(savePath+"/envmaps", exist_ok=True)
 
-    if tensorf.bg_module is not None:
-        tm = tonemap.HDRTonemap()
-        bg_path = Path(savePath) / 'envmaps'
-        bg_path.mkdir(exist_ok=True, parents=True)
-        tensorf.bg_module.save(bg_path, prefix=prtx, tonemap=tm)
 
     # save brdf stuff
     if hasattr(tensorf.model, 'graph_brdfs'):
@@ -228,6 +226,7 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
     ])
 
     tensorf.eval()
+    tint_psnrs = []
     for idx, im_idx, rays, gt_rgb in iterator():
 
         ims, stats = brender(rays, tensorf, N_samples=N_samples, ndc_ray=ndc_ray, is_train=False)
@@ -244,6 +243,23 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
         err_map = (ims.rgb_map.clip(0, 1) - gt_rgb.clip(0, 1)) + 0.5
 
         vis_depth_map, _ = visualize_depth_numpy(ims.depth.numpy(),near_far)
+        gt_tint = test_dataset.get_tint(im_idx)
+
+        mask = ims.acc_map.reshape(-1) > 0.1
+        Y = (gt_tint.reshape(-1, 3)[mask]).numpy()
+        X = (ims.tint.reshape(-1, 3)[mask]).numpy()
+        model = linear_model.LinearRegression()
+        model.fit(X, Y)
+        pred_Y = model.predict(X)
+
+        mean_tint_err = ((pred_Y-Y)**2).mean()
+        tint_psnrs.append(-10.0 * np.log(mean_tint_err.item()) / np.log(10.0))
+        # try:
+        #     gt_tint = test_dataset.get_tint(im_idx)
+        #     mean_tint_err = ((gt_tint-ims.tint)**2).mean()
+        #     tint_psnrs.append(-10.0 * np.log(mean_tint_err.item()) / np.log(10.0))
+        # except:
+        #     pass
         if gt_rgb is not None:
             try:
                 gt_normal = test_dataset.get_normal(im_idx)
@@ -325,21 +341,45 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
     #     col_map = (col_map.cpu().numpy() * 255).astype('uint8')
     #     imageio.imwrite(f'{savePath}/{prtx}col_map{i}.png', col_map)
     #     imageio.imwrite(f'{savePath}/{prtx}env_map{i}.png', env_map)
+    final_stats = {}
+    if tint_psnrs:
+
+        final_stats['tint_psnr'] = float(np.mean(np.asarray(tint_psnrs)))
+
+    if tensorf.bg_module is not None:
+        tm = tonemap.HDRTonemap()
+        bg_path = Path(savePath) / 'envmaps'
+        bg_path.mkdir(exist_ok=True, parents=True)
+        tensorf.bg_module.save(bg_path, prefix=prtx, tonemap=tm)
+
+        if gt_bg is not None:
+            bg_psnr = tensorf.bg_module.calc_envmap_psnr(gt_bg)
+            logger.info(f'bg_psnr={float(bg_psnr):.3f}')
+            final_stats['bg_psnr'] = float(bg_psnr)
+
 
     if PSNRs:
         psnr = np.mean(np.asarray(PSNRs))
+        final_stats['psnr'] = psnr.item()
         if len(norm_errs) > 0:
             norm_err = float(np.mean(np.asarray(norm_errs)))
         else:
             norm_err = 0
         print(f"Norm err: {norm_err}")
+        final_stats['norm_err'] = norm_err
         if compute_extra_metrics:
             ssim = np.mean(np.asarray(ssims))
             l_a = np.mean(np.asarray(l_alex))
             l_v = np.mean(np.asarray(l_vgg))
+
+            final_stats['ssim'] = float(ssim)
+            final_stats['l_alex'] = float(l_a)
+            final_stats['l_vgg'] = float(l_v)
             np.savetxt(f'{savePath}/{prtx}mean.txt', np.asarray([psnr, ssim, l_a, l_v]))
         else:
             np.savetxt(f'{savePath}/{prtx}mean.txt', np.asarray([psnr]))
+    with open(f'{savePath}/stats{prtx}.yaml', 'w') as f:
+        yaml.dump(final_stats, f)
 
 
     return dict(psnrs=PSNRs, norm_errs=norm_errs)
