@@ -117,7 +117,7 @@ class RealBounce(torch.nn.Module):
                 self.mean_ratios = ratios
             else:
                 self.mean_ratios = [
-                        (min(0.1*ratio + 0.9*mean_ratio, 1) if ratio is not None else mean_ratio) if mean_ratio is not None else ratio
+                        (min(0.1*ratio + 0.9*mean_ratio, 1, ratio) if ratio is not None else mean_ratio) if mean_ratio is not None else ratio
                         for ratio, mean_ratio in zip(ratios, self.mean_ratios)]
             self.max_retrace_rays = [
                     min(int(target * ratio + 1), maxv) if ratio is not None else prev

@@ -145,5 +145,6 @@ class NerfAccSampler(torch.nn.Module):
             whole_valid = torch.ones((N), dtype=bool, device=device)
             xyzs = xyz_sampled
         # ic(xyz_sampled.shape, whole_valid.sum(), N, ray_valid.sum(), is_train, dynamic_batch_size)
+        # ic(xyz_sampled.shape)
 
         return xyzs, ray_valid, M, z_vals, dists, whole_valid

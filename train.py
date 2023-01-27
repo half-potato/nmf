@@ -432,11 +432,11 @@ def reconstruction(args):
                     # need to store mean ratios if I have any hope of stabilizing this
                     mean_samples = n_samples
                     ratio = int(whole_valid.sum()) / mean_samples[0]
-                    mean_ratio = ratio if prev_n_samples is None else (0.01*ratio + 0.99*prev_n_samples)
+                    mean_ratio = ratio if prev_n_samples is None else min(0.1*ratio + 0.9*prev_n_samples, ratio)
                     prev_n_samples = mean_ratio
                     num_rays = int(mean_ratio * params.target_num_samples + 1)
                     tensorf.model.update_n_samples(n_samples[1:])
-                    tensorf.eval_batch_size = num_rays
+                    tensorf.eval_batch_size = num_rays // 2
 
                     # rays_remaining -= rgb_map.shape[0]
                     # rays_train = rays_train[~whole_valid]
