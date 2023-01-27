@@ -119,19 +119,19 @@ arch:
       # featureC: 128
       mul_LdotN: False
       feape: 0
-      dotpe: 0
+      dotpe: -1
       # h_encoder:
       #   _target_: modules.render_modules.PE
       #   max_degree: 2
       # d_encoder:
       #   _target_: modules.render_modules.PE
       #   max_degree: 2
-      # h_encoder:
-      #   _target_: modules.ish.ListISH
-      #   degs: [0,1,2,4]
-      # d_encoder:
-      #   _target_: modules.ish.ListISH
-      #   degs: [0,1,2,4]
+      h_encoder:
+        _target_: modules.ish.ListISH
+        degs: [0,1,2,4]
+      d_encoder:
+        _target_: modules.ish.ListISH
+        degs: [0,1,2,4]
       hidden_w: 64
       num_layers: 4
       initializer: 'kaiming'
