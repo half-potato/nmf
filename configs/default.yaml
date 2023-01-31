@@ -33,3 +33,4 @@ n_bg_iters: 1000
 save_often: false
 fixed_bg: NULL
 seed: 20211200
+gt_bg: NULL

@@ -106,6 +106,7 @@ class BlenderDataset(Dataset):
         self.all_masks = []
         self.all_depth = []
         self.normal_paths = []
+        self.tint_paths = []
 
         img_eval_interval = 1 if self.N_vis < 0 else len(self.meta['frames']) // self.N_vis
         idxs = list(range(0, len(self.meta['frames']), img_eval_interval))
@@ -118,8 +119,10 @@ class BlenderDataset(Dataset):
 
             image_path = os.path.join(self.root_dir, f"{frame['file_path']}{ext}")
             normal_path = os.path.join(self.root_dir, f"{frame['file_path']}_normal{normal_ext}")
+            tint_path = os.path.join(self.root_dir, 'test', 'tint', f"r_{i}{ext}")
             self.image_paths += [image_path]
             self.normal_paths += [normal_path]
+            self.tint_paths += [tint_path]
             # img = Image.open(image_path)
             img = imageio.imread(image_path)
             
@@ -181,6 +184,10 @@ class BlenderDataset(Dataset):
         
     def __len__(self):
         return len(self.all_rgbs)
+
+    def get_tint(self, idx):
+        tint = imageio.imread(self.tint_paths[idx])
+        return torch.as_tensor(tint)[..., :3]
 
     def get_normal(self, idx):
         norms = imageio.imread(self.normal_paths[idx])

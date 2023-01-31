@@ -8,6 +8,7 @@ import numpy as np
 import imageio
 import cv2
 from modules import sh
+from sklearn import linear_model
 
 class IntegralEquirect(torch.nn.Module):
     def __init__(self, bg_resolution, init_val, activation='identity',
@@ -84,6 +85,35 @@ class IntegralEquirect(torch.nn.Module):
 
     def mean_color(self):
         return self.activation_fn(self.bg_mat).reshape(-1, 3).mean(dim=0)
+
+    @torch.no_grad()
+    def calc_envmap_psnr(self, gt_im, fH=500):
+        fW = 2*fH
+        # gt im should be numpy
+        gH, gW = gt_im.shape[:2]
+        gt_im = gt_im[:, ::-1] # flip
+        gt_im = np.concatenate([gt_im[:, gW//2:], gt_im[:, :gW//2]], axis=1)
+        # import matplotlib.pyplot as plt
+        H, W = self.hw()
+        gt_im = torch.as_tensor(gt_im)
+        F.interpolate
+        gt_im = F.interpolate(gt_im.permute(2, 0, 1).unsqueeze(0), (fH, fW)).squeeze(0).permute(1, 2, 0)
+        # plt.imshow(gt_im)
+        # plt.show()
+        pred_im = self.activation_fn(self.bg_mat[0]).permute(1, 2, 0).detach().cpu()
+        pred_im = F.interpolate(pred_im.permute(2, 0, 1).unsqueeze(0), (fH, fW)).squeeze(0).permute(1, 2, 0)
+
+        Y = gt_im.reshape(-1, 3).numpy()
+        X = pred_im.reshape(-1, 3).numpy()
+        model = linear_model.LinearRegression()
+        model.fit(X, Y)
+        pred_Y = model.predict(X)
+        err_im = (pred_Y - Y)**2
+        # plt.imshow(err_im)
+        # plt.show()
+        psnr = -10.0 * np.log(err_im.mean()) / np.log(10.0)
+        return psnr
+
 
     def get_spherical_harmonics(self, G, mipval=0):
         device = self.get_device()

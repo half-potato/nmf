@@ -71,7 +71,7 @@ class ERBrightSampler():
         # plug random values into inverse cdf
         # ic(cdf.shape, N)
         # indices to angles
-        row = indices // W
+        row = torch.div(indices, W, rounding_mode='floor')
         col = indices % W
 
         # here is the angles to indices function

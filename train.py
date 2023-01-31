@@ -19,6 +19,8 @@ from loguru import logger
 import functools
 from modules.integral_equirect import IntegralEquirect
 
+os.environ["OPENCV_IO_ENABLE_OPENEXR"]="1"
+
 # torch.autograd.set_detect_anomaly(True)
 
 # from torch.profiler import profile, record_function, ProfilerActivity
@@ -365,6 +367,7 @@ def reconstruction(args):
     num_rays = params.starting_batch_size
     prev_n_samples = None
     hist_n_samples = None
+    gt_bg = cv2.imread(args.gt_bg) if args.gt_bg is not None else None
     if True:
     # with torch.profiler.profile(record_shapes=True, schedule=torch.profiler.schedule(wait=1, warmup=1, active=params.n_iters-1), with_stack=True) as p:
     # with torch.autograd.detect_anomaly():
@@ -532,7 +535,7 @@ def reconstruction(args):
                 # tensorf.save(f'{logfolder}/{args.expname}_{iteration}.th', args.model.arch)
                 test_res = evaluation(test_dataset,tensorf, args, renderer, f'{logfolder}/imgs_vis/', N_vis=args.N_vis,
                                         prtx=f'{iteration:06d}_', white_bg = white_bg, ndc_ray=ndc_ray,
-                                        compute_extra_metrics=False)
+                                        compute_extra_metrics=False, gt_bg=gt_bg)
                 PSNRs_test = test_res['psnrs']
                 summary_writer.add_scalar('test/psnr', np.mean(test_res['psnrs']), global_step=iteration)
                 summary_writer.add_scalar('test/norm_err', np.mean(test_res['norm_errs']), global_step=iteration)
@@ -594,13 +597,13 @@ def reconstruction(args):
         os.makedirs(f'{logfolder}/imgs_train_all', exist_ok=True)
         train_dataset = dataset(args.datadir, split='train', downsample=args.downsample_train, is_stack=True)
         test_res = evaluation(train_dataset,tensorf, args, renderer, f'{logfolder}/imgs_train_all/',
-                                N_vis=-1, N_samples=-1, white_bg = white_bg, ndc_ray=ndc_ray,device=device)
+                                N_vis=-1, N_samples=-1, white_bg = white_bg, ndc_ray=ndc_ray,device=device, gt_bg=gt_bg)
         logger.info(f'======> {args.expname} test all psnr: {np.mean(test_res["psnrs"])} <========================')
 
     if args.render_test:
         os.makedirs(f'{logfolder}/imgs_test_all', exist_ok=True)
         test_res = evaluation(test_dataset,tensorf, args, renderer, f'{logfolder}/imgs_test_all/',
-                                N_vis=-1, N_samples=-1, white_bg = white_bg, ndc_ray=ndc_ray,device=device)
+                                N_vis=-1, N_samples=-1, white_bg = white_bg, ndc_ray=ndc_ray,device=device, gt_bg=gt_bg)
         summary_writer.add_scalar('test/psnr_all', np.mean(test_res["psnrs"]), global_step=iteration)
         logger.info(f'======> {args.expname} test all psnr: {np.mean(test_res["psnrs"])} <========================')
 
@@ -610,7 +613,7 @@ def reconstruction(args):
         logger.info('========>',c2ws.shape)
         os.makedirs(f'{logfolder}/imgs_path_all', exist_ok=True)
         evaluation_path(test_dataset,tensorf, c2ws, renderer, f'{logfolder}/imgs_path_all/',
-                        N_vis=-1, N_samples=-1, white_bg = white_bg, ndc_ray=ndc_ray,device=device)
+                        N_vis=-1, N_samples=-1, white_bg = white_bg, ndc_ray=ndc_ray,device=device, gt_bg=gt_bg)
 
 
 @hydra.main(version_base=None, config_path='configs', config_name='default')
