@@ -88,7 +88,7 @@ class GGXSampler(PseudoRandomSampler):
             H_l[:, 0]**2 / (r_mask1**2).clip(min=eps) + 
             H_l[:, 1]**2 / (r_mask2**2).clip(min=eps) + 
             H_l[:, 2]**2
-            )**2).clip(min=eps).log()
+            )**2).clip(min=eps)
 
         return L, row_world_basis_mask, prob
 

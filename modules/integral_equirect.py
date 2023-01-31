@@ -157,17 +157,20 @@ class IntegralEquirect(torch.nn.Module):
         # TODO calculate distortion of cube map for saTexel
         # distortion = 4 * math.pi / 6
         # distortion_w = 1/(1-u[:, 2]**2).clip(min=eps)
-        distortion_w = (1-u[:, 2]**2).clip(min=eps).sqrt() * 2 * math.pi / w
-        distortion_h = torch.ones_like(distortion_w) * math.pi / h
+        dw = (1-u[:, 2]**2).clip(min=eps).sqrt() * 2 * math.pi / w
+        dh = torch.ones_like(dw) * math.pi / h
         saSample = saSample.reshape(-1)
 
-        saTexel_w = distortion_w# / h / w
-        saTexel_h = distortion_h# / h / w
+        saTexel_w = dw.clip(min=eps).log() + dh.clip(min=eps).log()
+        saTexel_h = dw.clip(min=eps).log() + dh.clip(min=eps).log()
         # saTexel is the ratio to the solid angle subtended by one pixel of the 0th mipmap level
         # num_pixels = self.bg_mat.numel() // 3
         # saTexel = distortion / num_pixels
-        miplevel_w = ((saSample - torch.log(saTexel_w.clip(min=eps))) / math.log(2)) + self.mipbias + self.mipnoise * torch.rand_like(saSample)
-        miplevel_h = ((saSample - torch.log(saTexel_h.clip(min=eps))) / math.log(2)) + self.mipbias + self.mipnoise * torch.rand_like(saSample)
+        miplevel_w = ((saSample - saTexel_w) / math.log(2)) / 2 + self.mipbias + self.mipnoise * torch.rand_like(saSample)
+        miplevel_h = ((saSample - saTexel_h) / math.log(2)) / 2 + self.mipbias + self.mipnoise * torch.rand_like(saSample)
+        # saTexel is the ratio to the solid angle subtended by one pixel of the 0th mipmap level
+        # num_pixels = self.bg_mat.numel() // 3
+        # saTexel = distortion / num_pixels
         
         return miplevel_w.clip(0, 9), miplevel_h.clip(0, 9)
 
