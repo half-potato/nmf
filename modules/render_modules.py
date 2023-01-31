@@ -339,7 +339,7 @@ class HydraMLPDiffuse(torch.nn.Module):
     featureC: int
     num_layers: int
     def __init__(self, in_channels, pospe=12, view_encoder=None, roughness_view_encoder=None, roughness_cfg=None, feape=6, allocation=0,
-                 unlit_tint=False, lr=1e-4, tint_bias=-1, diffuse_bias=-2, diffuse_mul=1, roughness_bias=1, proportion_bias=0, **kwargs):
+                 unlit_tint=False, lr=1e-4, tint_bias=-1, diffuse_bias=-2, diffuse_mul=1, roughness_bias=1, **kwargs):
         super().__init__()
 
         in_channels = in_channels if allocation <= 0 else allocation
@@ -350,7 +350,6 @@ class HydraMLPDiffuse(torch.nn.Module):
         self.tint_bias = tint_bias
         self.diffuse_bias = diffuse_bias
         self.roughness_bias = roughness_bias
-        self.proportion_bias = proportion_bias
         self.lr = lr
         self.allocation = allocation
         self.diffuse_mul = diffuse_mul
@@ -364,7 +363,6 @@ class HydraMLPDiffuse(torch.nn.Module):
         self.tint_mlp = util.create_mlp(self.in_mlpC, 3, **kwargs)
         roughness_cfg = roughness_cfg if roughness_cfg is not None else kwargs
         self.roughness_mlp = util.create_mlp(self.in_mlpC + get_dim(self.roughness_view_encoder, 3), 2, **roughness_cfg)
-        self.proportion_mlp = util.create_mlp(self.in_mlpC, 1, **kwargs)
 
 
     def calibrate(self, *args, **kwargs):
@@ -407,7 +405,6 @@ class HydraMLPDiffuse(torch.nn.Module):
         diffuse = torch.sigmoid(self.diffuse_mul*self.diffuse_mlp(mlp_in)+self.diffuse_bias)
         r = torch.sigmoid(self.roughness_mlp(rough_mlp_in)+self.roughness_bias)
         tint = torch.sigmoid(self.tint_mlp(mlp_in)+self.tint_bias)
-        proportion = torch.sigmoid(self.proportion_mlp(mlp_in)+self.proportion_bias)
 
         # ic(f0)
         return diffuse, tint, dict(
@@ -416,7 +413,6 @@ class HydraMLPDiffuse(torch.nn.Module):
             r2 = r[:, 1:2],
             f0 = tint,
             tint = tint,
-            proportion = proportion
         )
 
 class MLPDiffuse(torch.nn.Module):
