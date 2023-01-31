@@ -170,9 +170,10 @@ class RealBounce(torch.nn.Module):
             r2 = matprop['r2'][bounce_mask]
             proportion = matprop['proportion'][bounce_mask]
 
-            L, row_world_basis = self.brdf_sampler.sample(
+            L, row_world_basis, samp_prob = self.brdf_sampler.sample(
                     bV, bN,
                     r1**2, r2**2, ray_mask, proportion=proportion)
+            samp_prob = samp_prob.reshape(-1, 1)
 
             n = ray_xyz.shape[0]
             m = ray_mask.shape[1]
@@ -198,7 +199,7 @@ class RealBounce(torch.nn.Module):
             H = normalize((eV+L)/2)
             diffvec = torch.matmul(row_world_basis.permute(0, 2, 1), L.unsqueeze(-1)).squeeze(-1)
             halfvec = torch.matmul(row_world_basis.permute(0, 2, 1), H.unsqueeze(-1)).squeeze(-1)
-            samp_prob = self.brdf_sampler.compute_prob(halfvec, eN, ea1.reshape(-1, 1), ea2.reshape(-1, 1), proportion=proportion)
+            # samp_prob = self.brdf_sampler.compute_prob(halfvec, eN, ea1.reshape(-1, 1), ea2.reshape(-1, 1), proportion=proportion)
 
             if self.bright_sampler is not None:
                 samp_prob = samp_prob * (1-self.percent_bright)
@@ -227,7 +228,10 @@ class RealBounce(torch.nn.Module):
             # ea = masked[:, 9:10]
             # efeatures = masked[:, 10:]
 
-            mipval = self.brdf_sampler.calculate_mipval(H.detach(), eV, eN.detach(), ray_mask, ea1**2, ea2**2, proportion=eproportion)
+            # mipval = self.brdf_sampler.calculate_mipval(H.detach(), eV, eN.detach(), ray_mask, ea1**2, ea2**2, proportion=eproportion)
+
+            indiv_num_samples = ray_mask.sum(dim=1, keepdim=True).expand(ray_mask.shape)[ray_mask].reshape(-1, 1)
+            mipval = -(samp_prob * indiv_num_samples).clip(min=eps).log()
 
             bounce_rays = torch.cat([
                 exyz + L*5e-3,

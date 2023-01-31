@@ -243,17 +243,20 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
         err_map = (ims.rgb_map.clip(0, 1) - gt_rgb.clip(0, 1)) + 0.5
 
         vis_depth_map, _ = visualize_depth_numpy(ims.depth.numpy(),near_far)
-        gt_tint = test_dataset.get_tint(im_idx)
 
         mask = ims.acc_map.reshape(-1) > 0.1
-        Y = (gt_tint.reshape(-1, 3)[mask]).numpy()
-        X = (ims.tint.reshape(-1, 3)[mask]).numpy()
-        model = linear_model.LinearRegression()
-        model.fit(X, Y)
-        pred_Y = model.predict(X)
+        try:
+            gt_tint = test_dataset.get_tint(im_idx)
+            Y = (gt_tint.reshape(-1, 3)[mask]).numpy()
+            X = (ims.tint.reshape(-1, 3)[mask]).numpy()
+            model = linear_model.LinearRegression()
+            model.fit(X, Y)
+            pred_Y = model.predict(X)
 
-        mean_tint_err = ((pred_Y-Y)**2).mean()
-        tint_psnrs.append(-10.0 * np.log(mean_tint_err.item()) / np.log(10.0))
+            mean_tint_err = ((pred_Y-Y)**2).mean()
+            tint_psnrs.append(-10.0 * np.log(mean_tint_err.item()) / np.log(10.0))
+        except:
+            pass
         # try:
         #     gt_tint = test_dataset.get_tint(im_idx)
         #     mean_tint_err = ((gt_tint-ims.tint)**2).mean()
