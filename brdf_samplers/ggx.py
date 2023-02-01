@@ -84,11 +84,12 @@ class GGXSampler(PseudoRandomSampler):
         # N = normal.reshape(-1, 1, 3).expand(-1, num_samples, 3)[ray_mask]
         L = (2.0 * (V * H).sum(dim=-1, keepdim=True) * H - V)
 
-        prob = -(math.pi * r_mask1 * r_mask2 * (
-            H_l[:, 0]**2 / (r_mask1**2).clip(min=eps) + 
-            H_l[:, 1]**2 / (r_mask2**2).clip(min=eps) + 
-            H_l[:, 2]**2
-            )**2).clip(min=eps)
+        # prob = -(math.pi * r_mask1 * r_mask2 * (
+        #     H_l[:, 0]**2 / (r_mask1**2).clip(min=eps) + 
+        #     H_l[:, 1]**2 / (r_mask2**2).clip(min=eps) + 
+        #     H_l[:, 2]**2
+        #     )**2).clip(min=eps)
+        prob = 2*torch.log(r_mask1.clip(min=eps)) - 2*torch.log(math.pi*(H_l[:, 2]**2*(r_mask1**2-1)+1).clip(min=eps))
 
         return L, row_world_basis_mask, prob
 

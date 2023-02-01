@@ -9,6 +9,7 @@ import imageio
 import cv2
 from modules import sh
 from sklearn import linear_model
+import traceback
 
 class IntegralEquirect(torch.nn.Module):
     def __init__(self, bg_resolution, init_val, activation='identity',
@@ -114,7 +115,7 @@ class IntegralEquirect(torch.nn.Module):
         return psnr
 
 
-    def get_spherical_harmonics(self, G, mipval=0):
+    def get_spherical_harmonics(self, G, mipval=-5):
         device = self.get_device()
         _theta = torch.linspace(0, np.pi, G//2, device=device)
         _phi = torch.linspace(0, 2*np.pi, G, device=device)
@@ -154,24 +155,40 @@ class IntegralEquirect(torch.nn.Module):
 
     def sa2mip(self, u, saSample, eps=torch.finfo(torch.float32).eps):
         h, w = self.hw()
+        saSample = saSample.reshape(-1)
         # TODO calculate distortion of cube map for saTexel
         # distortion = 4 * math.pi / 6
         # distortion_w = 1/(1-u[:, 2]**2).clip(min=eps)
-        dw = (1-u[:, 2]**2).clip(min=eps).sqrt() * 2 * math.pi / w
-        dh = torch.ones_like(dw) * math.pi / h
-        saSample = saSample.reshape(-1)
+        # dw = (1-u[:, 2]**2).clip(min=eps).sqrt() * 2 * math.pi / w
+        # dh = torch.ones_like(dw) * math.pi / h
+        # saSample = saSample.reshape(-1)
+        #
+        # saTexel_w = dw.clip(min=eps).log() + dh.clip(min=eps).log()
+        # saTexel_h = dw.clip(min=eps).log() + dh.clip(min=eps).log()
+        # # saTexel is the ratio to the solid angle subtended by one pixel of the 0th mipmap level
+        # # num_pixels = self.bg_mat.numel() // 3
+        # # saTexel = distortion / num_pixels
+        # miplevel_w = ((saSample - saTexel_w) / math.log(2)) / 2 + self.mipbias + self.mipnoise * torch.rand_like(saSample)
+        # miplevel_h = ((saSample - saTexel_h) / math.log(2)) / 2 + self.mipbias + self.mipnoise * torch.rand_like(saSample)
 
-        saTexel_w = dw.clip(min=eps).log() + dh.clip(min=eps).log()
-        saTexel_h = dw.clip(min=eps).log() + dh.clip(min=eps).log()
+        # dw2 = (1-u[:, 2]**2).clip(min=eps).sqrt()# * 2 * math.pi# / w
+        # dh2 = torch.ones_like(dw2)# * math.pi# / h
+
+        # saTexel_w2 = dw2*dh2 / h / w
+        # saTexel_h2 = dw2*dh2 / h / w
+        # miplevel_w = ((saSample - torch.log(saTexel_w2.clip(min=eps))) / math.log(2))/2 + self.mipbias + self.mipnoise * torch.rand_like(saSample)
+        # miplevel_h = ((saSample - torch.log(saTexel_h2.clip(min=eps))) / math.log(2))/2 + self.mipbias + self.mipnoise * torch.rand_like(saSample)
+        # ic(saSample.min(), saSample.max())
+        # ic(saTexel_h2.min(), saTexel_h2.max())
         # saTexel is the ratio to the solid angle subtended by one pixel of the 0th mipmap level
         # num_pixels = self.bg_mat.numel() // 3
         # saTexel = distortion / num_pixels
-        miplevel_w = ((saSample - saTexel_w) / math.log(2)) / 2 + self.mipbias + self.mipnoise * torch.rand_like(saSample)
-        miplevel_h = ((saSample - saTexel_h) / math.log(2)) / 2 + self.mipbias + self.mipnoise * torch.rand_like(saSample)
-        # saTexel is the ratio to the solid angle subtended by one pixel of the 0th mipmap level
-        # num_pixels = self.bg_mat.numel() // 3
-        # saTexel = distortion / num_pixels
+        d = h * w / (2 * math.pi**2 * (1-u[:, 2]**2).clip(min=eps).sqrt()).clip(min=eps)
+        miplevel_w = (((d/2).log() + saSample) / math.log(2)) / 2
+        miplevel_h = (((d/2).log() + saSample) / math.log(2)) / 2
         
+        miplevel_w = miplevel_w + self.mipbias + self.mipnoise * torch.rand_like(saSample)
+        miplevel_h = miplevel_h + self.mipbias + self.mipnoise * torch.rand_like(saSample)
         return miplevel_w.clip(0, 9), miplevel_h.clip(0, 9)
 
     def tv_loss(self):
@@ -192,6 +209,7 @@ class IntegralEquirect(torch.nn.Module):
         h, w = self.hw()
         sw = 2 ** miplevel_w / h / 2
         sh = 2 ** miplevel_h / h
+        # ic(sh.min(), sh.max())
         # sw = 0.20*torch.ones_like(sw)
         # sh = 0.20*torch.ones_like(sh)
         offset = torch.stack([sw, sh], dim=-1).reshape(1, 1, -1, 2)
