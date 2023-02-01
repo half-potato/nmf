@@ -230,7 +230,7 @@ class RealBounce(torch.nn.Module):
 
             indiv_num_samples = ray_mask.sum(dim=1, keepdim=True).expand(ray_mask.shape)[ray_mask].reshape(-1, 1)
             # # mipval = -(samp_prob * indiv_num_samples).clip(min=eps).log()
-            mipval = -samp_prob.clip(min=eps) - (indiv_num_samples).clip(min=1).log()
+            mipval = -samp_prob.clip(min=eps).log() - (indiv_num_samples).clip(min=1).log()
 
             bounce_rays = torch.cat([
                 exyz + L*5e-3,
