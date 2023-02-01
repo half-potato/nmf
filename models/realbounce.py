@@ -141,10 +141,11 @@ class RealBounce(torch.nn.Module):
             xyzs_normed, viewdirs, app_features)
 
         # compute spherical harmonic coefficients for the background
-        coeffs, conv_coeffs = bg_module.get_spherical_harmonics(100)
-        evaled = sh.eval_sh_bases(coeffs.shape[0], normals)
+        with torch.no_grad():
+            coeffs, conv_coeffs = bg_module.get_spherical_harmonics(100)
+        evaled = sh.eval_sh_bases(conv_coeffs.shape[0], normals)
         E = (conv_coeffs.reshape(1, -1, 3) * evaled.reshape(evaled.shape[0], -1, 1)).sum(dim=1).detach()
-        diffuse = diffuse * E.detach()
+        diffuse = diffuse * E
 
         # pick rays to bounce
         num_brdf_rays = self.max_brdf_rays[recur]# // B
@@ -232,7 +233,8 @@ class RealBounce(torch.nn.Module):
 
             indiv_num_samples = ray_mask.sum(dim=1, keepdim=True).expand(ray_mask.shape)[ray_mask].reshape(-1, 1)
             # # mipval = -(samp_prob * indiv_num_samples).clip(min=eps).log()
-            mipval = -samp_prob.clip(min=eps) - (indiv_num_samples).clip(min=1).log()
+            mipval = -samp_prob.clip(min=eps).log() - (indiv_num_samples).clip(min=1).log()
+            # ic(mipval.min(), mipval.max(), indiv_num_samples.max())
 
             bounce_rays = torch.cat([
                 exyz + L*5e-3,

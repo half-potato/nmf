@@ -30,7 +30,7 @@ class SGGXSampler(PseudoRandomSampler):
         S_diag = torch.diag_embed(torch.stack([r1, r2, torch.ones_like(r1)], dim=0))
         S = torch.matmul(torch.matmul(row_world_basis, S_diag), row_world_basis.permute(0, 2, 1))
         M = torch.zeros((B, 3, 3), device=device)
-        tmp = (S[:, 1, 1]*S[:, 2, 2] - S[:, 1, 2]**2).clip(min=eps).sqrt()
+        tmp = (S[:, 1, 1]*S[:, 2, 2] - S[:, 1, 2]**2).clip(min=eps).sqrt().clip(min=eps)
         M[:, 0, 0] = torch.linalg.det(S).abs().sqrt() / tmp
         # checked
         inv_sqrt_Sii = 1/S[:, 2, 2].clip(min=eps).sqrt().clip(min=eps)
@@ -82,6 +82,6 @@ class SGGXSampler(PseudoRandomSampler):
         L = (2.0 * (V * H).sum(dim=-1, keepdim=True) * H - V)
 
         temp = torch.matmul(torch.matmul(H_l.reshape(-1, 1, 3), S_mask), H_l.reshape(-1, 3, 1))
-        prob = 1 / (math.pi * torch.linalg.det(S).sqrt().reshape(-1) * (temp.reshape(-1))**2)
+        prob = 1 / (math.pi * torch.linalg.det(S).sqrt().reshape(-1) * (temp.reshape(-1))**2).clip(min=eps)
 
         return L, row_world_basis_mask, prob
