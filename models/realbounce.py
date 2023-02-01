@@ -95,7 +95,7 @@ class RealBounce(torch.nn.Module):
             r1.reshape(-1))
 
         # next, compute GGX distribution because it's not represented here
-        brdf_colors = (self.brdf_sampler.compute_prob(halfvec, eN, r1, r2, proportion=proportion).reshape(-1, 1) * brdf_weight)
+        brdf_colors = (self.brdf_sampler.compute_prob(halfvec, eN, r1, r2).reshape(-1, 1) * brdf_weight)
 
         # add indicator of view direction
         viewdir_ind = (L * eV).sum(dim=-1).reshape(n_features*n_views, n_angs).max(dim=1).indices
@@ -169,11 +169,10 @@ class RealBounce(torch.nn.Module):
             # r2 = matprop['r2'][bounce_mask]*0 + 0.0001
             r1 = matprop['r1'][bounce_mask]
             r2 = matprop['r2'][bounce_mask]
-            proportion = matprop['proportion'][bounce_mask]
 
             L, row_world_basis, samp_prob = self.brdf_sampler.sample(
                     bV, bN,
-                    r1**2, r2**2, ray_mask, proportion=proportion)
+                    r1**2, r2**2, ray_mask)
             samp_prob = samp_prob.reshape(-1, 1)
 
             n = ray_xyz.shape[0]
@@ -184,7 +183,6 @@ class RealBounce(torch.nn.Module):
             ea1 = r1.expand(ray_mask.shape)[ri, rj]
             ea2 = r2.expand(ray_mask.shape)[ri, rj]
             efeatures = noise_app_features[bounce_mask].reshape(n, 1, -1).expand(n, m, -1)[ri, rj]
-            eproportion = proportion.expand(ray_mask.shape)[ri, rj]
             exyz = ray_xyz[ri, rj]
 
             importance_samp_correction = torch.ones((L.shape[0], 1), device=device)

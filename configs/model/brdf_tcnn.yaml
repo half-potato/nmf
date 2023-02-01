@@ -169,7 +169,6 @@ arch:
       diffuse_bias: -0.619
       diffuse_mul: 1.5
       roughness_bias: -1
-      proportion_bias: 0
       # allocation: 7
 
     visibility_module:
