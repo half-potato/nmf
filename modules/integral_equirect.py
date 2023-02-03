@@ -11,6 +11,105 @@ from modules import sh
 from sklearn import linear_model
 import traceback
 
+def integrate_area(bl, br, tl, tr, size, cum_mat, interp_mode='bilinear', align_corners=True):
+    bl = bl.clip(min=-1, max=1)
+    br = br.clip(min=-1, max=1)
+    tl = tl.clip(min=-1, max=1)
+    tr = tr.clip(min=-1, max=1)
+    blv = F.grid_sample(cum_mat, bl, mode=interp_mode, align_corners=align_corners, padding_mode='zeros')
+    brv = F.grid_sample(cum_mat, br, mode=interp_mode, align_corners=align_corners, padding_mode='zeros')
+    tlv = F.grid_sample(cum_mat, tl, mode=interp_mode, align_corners=align_corners, padding_mode='zeros')
+    trv = F.grid_sample(cum_mat, tr, mode=interp_mode, align_corners=align_corners, padding_mode='zeros')
+    # norm_size = (tr - bl).abs().clip(min=eps)
+    # size = (norm_size * torch.tensor([w, h], device=device).reshape(1, 1, 1, 2)).prod(dim=-1).reshape(-1, 1)
+    return (trv + blv - tlv - brv).reshape(3, -1).T / size
+
+def integrate_area_wrap_lr(bl, br, tl, tr, size, cum_mat, interp_mode='bilinear', align_corners=True):
+    bg_vals = integrate_area(bl, br, tl, tr, size, cum_mat, interp_mode, align_corners)
+
+    exceed_r = tr[..., 0] > 1
+
+    # set left points to left edge of pano
+    bl_r = bl[exceed_r].reshape(1, 1, -1, 2)
+    bl_r[..., 0] = -torch.ones_like(bl_r[..., 0])
+    tl_r = tl[exceed_r].reshape(1, 1, -1, 2)
+    tl_r[..., 0] = -torch.ones_like(bl_r[..., 0])
+    tr_r = tr[exceed_r].reshape(1, 1, -1, 2)
+    tr_r[..., 0] = tr_r[..., 0] - 2
+    br_r = br[exceed_r].reshape(1, 1, -1, 2)
+    br_r[..., 0] = br_r[..., 0] - 2
+
+    rect_r = integrate_area(bl_r, br_r, tl_r, tr_r, size[exceed_r.reshape(-1)], cum_mat, interp_mode, align_corners)
+    bg_vals[exceed_r.reshape(-1)] += rect_r
+
+    exceed_l = bl[..., 0] < -1
+    # set left points to left edge of pano
+    bl_l = bl[exceed_l].reshape(1, 1, -1, 2)
+    bl_l[..., 0] = bl_l[..., 0] + 2
+    tl_l = tl[exceed_l].reshape(1, 1, -1, 2)
+    tl_l[..., 0] = tl_l[..., 0] + 2
+    tr_l = tr[exceed_l].reshape(1, 1, -1, 2)
+    tr_l[..., 0] = torch.ones_like(tr_l[..., 0])
+    br_l = br[exceed_l].reshape(1, 1, -1, 2)
+    br_l[..., 0] = torch.ones_like(br_l[..., 0])
+
+    rect_l = integrate_area(bl_l, br_l, tl_l, tr_l, size[exceed_l.reshape(-1)], cum_mat, interp_mode, align_corners)
+    bg_vals[exceed_l.reshape(-1)] += rect_l
+    return bg_vals
+
+def integrate_area_wrap(bl, br, tl, tr, size, cum_mat, interp_mode='bilinear', align_corners=True):
+    bg_vals = integrate_area_wrap_lr(bl, br, tl, tr, size,
+                                     cum_mat, interp_mode=interp_mode, align_corners=align_corners)
+
+    exceed_t = tl[..., 1] > 1
+    # set top to be the top of the pano
+    # set bot to be top of pano - overhang
+    tl_t = tl[exceed_t].reshape(1, 1, -1, 2)
+    rot_val_t = torch.where(tl_t[..., 0] > 0, -1, 1)
+    overhang_t = (tl_t[..., 1] - 1).clip(max=0.5, min=0)
+    tl_t[..., 1] = torch.ones_like(tl_t[..., 0])
+    tl_t[..., 0] = tl_t[..., 0] + rot_val_t
+    tr_t = tr[exceed_t].reshape(1, 1, -1, 2)
+    tr_t[..., 1] = torch.ones_like(tr_t[..., 0])
+    tr_t[..., 0] = tr_t[..., 0] + rot_val_t
+
+    bl_t = bl[exceed_t].reshape(1, 1, -1, 2)
+    bl_t[..., 1] = torch.ones_like(bl_t[..., 0]) - overhang_t
+    bl_t[..., 0] = bl_t[..., 0] + rot_val_t
+    br_t = br[exceed_t].reshape(1, 1, -1, 2)
+    br_t[..., 1] = torch.ones_like(br_t[..., 0]) - overhang_t
+    br_t[..., 0] = br_t[..., 0] + rot_val_t
+
+    rect_t = integrate_area_wrap_lr(bl_t, br_t, tl_t, tr_t, size[exceed_t.reshape(-1)],
+                                    cum_mat, interp_mode=interp_mode, align_corners=align_corners)
+    bg_vals[exceed_t.reshape(-1)] += rect_t
+
+    exceed_b = bl[..., 1] < -1
+    # set bot to be the bot of the pano
+    # set top to be bot of pano + overhang
+    tl_b = tl[exceed_b].reshape(1, 1, -1, 2)
+    rot_val_b = torch.where(tl_b[..., 0] > 0, -1, 1)
+
+    bl_b = bl[exceed_b].reshape(1, 1, -1, 2)
+    bl_b[..., 1] = -torch.ones_like(bl_b[..., 0])
+    bl_b[..., 0] = bl_b[..., 0] + rot_val_b
+    br_b = br[exceed_b].reshape(1, 1, -1, 2)
+    br_b[..., 1] = -torch.ones_like(br_b[..., 0])
+    br_b[..., 0] = br_b[..., 0] + rot_val_b
+
+    overhang_b = (-1-bl[exceed_b][..., 1]).clip(max=0.5, min=0)
+    tl_b[..., 1] = -torch.ones_like(tl_b[..., 0]) + overhang_b
+    tl_b[..., 0] = tl_b[..., 0] + rot_val_b
+    tr_b = tr[exceed_b].reshape(1, 1, -1, 2)
+    tr_b[..., 1] = -torch.ones_like(tr_b[..., 0]) + overhang_b
+    tr_b[..., 0] = tr_b[..., 0] + rot_val_b
+
+    rect_b = integrate_area_wrap_lr(bl_b, br_b, tl_b, tr_b, size[exceed_b.reshape(-1)],
+                                    cum_mat, interp_mode=interp_mode, align_corners=align_corners)
+    bg_vals[exceed_b.reshape(-1)] += rect_b
+
+    return bg_vals
+
 class IntegralEquirect(torch.nn.Module):
     def __init__(self, bg_resolution, init_val, activation='identity',
                  mipbias=0, mipnoise=0,
@@ -205,10 +304,14 @@ class IntegralEquirect(torch.nn.Module):
         # Compute width and height of sample
         device = viewdirs.device
         eps = torch.finfo(torch.float32).eps
+
         miplevel_w, miplevel_h = self.sa2mip(viewdirs, saSample)
         h, w = self.hw()
         sw = 2 ** miplevel_w / h / 2
         sh = 2 ** miplevel_h / h
+        # h, w = self.hw()
+        # sw = 2 ** saSample / h / 2
+        # sh = 2 ** saSample / h
         # ic(sh.min(), sh.max())
         # sw = 0.20*torch.ones_like(sw)
         # sh = 0.20*torch.ones_like(sh)
@@ -222,26 +325,6 @@ class IntegralEquirect(torch.nn.Module):
         # ic(cum_mat)
         size = (offset / 2 * torch.tensor([w, h], device=device).reshape(1, 1, 1, 2)).prod(dim=-1).reshape(-1, 1)
 
-        def integrate_area(bl, br, tl, tr, size):
-            exceed_t = (tl[..., 1] - 1).clip(min=0)
-            exceed_b = -(bl[..., 1] + 1).clip(max=0)
-            # if exceed top, add to bot
-            bl[..., 1] += -exceed_t
-            br[..., 1] += -exceed_t
-            tl[..., 1] += exceed_b
-            tr[..., 1] += exceed_b
-
-            bl = bl.clip(min=-1, max=1)
-            br = br.clip(min=-1, max=1)
-            tl = tl.clip(min=-1, max=1)
-            tr = tr.clip(min=-1, max=1)
-            blv = F.grid_sample(cum_mat, bl, mode=self.interp_mode, align_corners=self.align_corners, padding_mode='border')
-            brv = F.grid_sample(cum_mat, br, mode=self.interp_mode, align_corners=self.align_corners, padding_mode='border')
-            tlv = F.grid_sample(cum_mat, tl, mode=self.interp_mode, align_corners=self.align_corners, padding_mode='border')
-            trv = F.grid_sample(cum_mat, tr, mode=self.interp_mode, align_corners=self.align_corners, padding_mode='border')
-            # norm_size = (tr - bl).abs().clip(min=eps)
-            # size = (norm_size * torch.tensor([w, h], device=device).reshape(1, 1, 1, 2)).prod(dim=-1).reshape(-1, 1)
-            return (trv + blv - tlv - brv).reshape(3, -1).T / size
 
         # compute location of sample
         a, b, c = viewdirs[:, 0:1], viewdirs[:, 1:2], viewdirs[:, 2:3]
@@ -261,45 +344,15 @@ class IntegralEquirect(torch.nn.Module):
         tl = x + torch.stack([-sw, sh], dim=-1).reshape(1, 1, -1, 2) / 2
         # for such a simple rectangular shape, it must retain a certain height near the poles, even with clipping
         # to achieve this, half the amount clipped off the top or bottom should be added back to the opposite side
-        bg_vals = integrate_area(bl, br, tl, tr, size)
-
-        exceed_r = tr[..., 0] > 1
-
-        # set left points to left edge of pano
-        bl_r = bl[exceed_r].reshape(1, 1, -1, 2)
-        bl_r[..., 0] = -torch.ones_like(bl_r[..., 0])
-        tl_r = tl[exceed_r].reshape(1, 1, -1, 2)
-        tl_r[..., 0] = -torch.ones_like(bl_r[..., 0])
-        tr_r = tr[exceed_r].reshape(1, 1, -1, 2)
-        tr_r[..., 0] = tr_r[..., 0] - 2
-        br_r = br[exceed_r].reshape(1, 1, -1, 2)
-        br_r[..., 0] = br_r[..., 0] - 2
-
-        rect_r = integrate_area(bl_r, br_r, tl_r, tr_r, size[exceed_r.reshape(-1)])
-        bg_vals[exceed_r.reshape(-1)] += rect_r
-
-        exceed_l = bl[..., 0] < -1
-        # set left points to left edge of pano
-        bl_l = bl[exceed_l].reshape(1, 1, -1, 2)
-        bl_l[..., 0] = bl_l[..., 0] + 2
-        tl_l = tl[exceed_l].reshape(1, 1, -1, 2)
-        tl_l[..., 0] = tl_l[..., 0] + 2
-        tr_l = tr[exceed_l].reshape(1, 1, -1, 2)
-        tr_l[..., 0] = torch.ones_like(tr_l[..., 0])
-        br_l = br[exceed_l].reshape(1, 1, -1, 2)
-        br_l[..., 0] = torch.ones_like(br_l[..., 0])
-
-        rect_l = integrate_area(bl_l, br_l, tl_l, tr_l, size[exceed_l.reshape(-1)])
-        bg_vals[exceed_l.reshape(-1)] += rect_l
+        bg_vals = integrate_area_wrap(bl, br, tl, tr, size, cum_mat,
+                                      interp_mode=self.interp_mode, align_corners=self.align_corners)
 
         # handle top and bottom
-        cutoff = 1 - 2 / h
-        top_row = activated[..., 0, :].mean(dim=-1)
-        bot_row = activated[..., -1, :].mean(dim=-1)
-        bg_vals[coords[:, 1] > cutoff] = bot_row
-        bg_vals[coords[:, 1] < -cutoff] = top_row
-        # return self.activation_fn(bg_vals)
-        # bg_vals = (miplevel_w - miplevel_h).reshape(-1, 1).repeat(repeats=(1, 3))
+        # cutoff = 1 - 2 / h
+        # top_row = activated[..., 0, :].mean(dim=-1)
+        # bot_row = activated[..., -1, :].mean(dim=-1)
+        # bg_vals[coords[:, 1] > cutoff] = bot_row
+        # bg_vals[coords[:, 1] < -cutoff] = top_row
         return bg_vals
 
 if __name__ == "__main__":
@@ -332,12 +385,16 @@ if __name__ == "__main__":
         torch.cos(ele_grid) * torch.sin(azi_grid),
         -torch.sin(ele_grid),
     ], dim=-1).reshape(-1, 3).to(device)
-    sa_sample = -5*torch.ones((ang_vecs.shape[0], 1), device=device)
+    sa_sample = -1*torch.ones((ang_vecs.shape[0], 1), device=device)
     vals = bg_module(ang_vecs, sa_sample)
+    mipvals, _ = bg_module.sa2mip(ang_vecs, sa_sample)
+    mipvals = mipvals.reshape(res, 2*res)
+    ic(mipvals.shape)
     blur_img = vals.reshape(res, 2*res, 3)#.abs()
     imageio.imwrite("bg_blur.exr", blur_img.detach().cpu().numpy())
     imageio.imwrite("bg_blur_abs.exr", blur_img.abs().detach().cpu().numpy())
     imageio.imwrite("bg_noblur.exr", bg_module.bg_mat.exp().squeeze(0).permute(1, 2, 0).detach().cpu().numpy())
+    imageio.imwrite("mipvals.exr", mipvals.detach().cpu().numpy())
 
     # ang_vecs = torch.tensor([1, 0, 0]).reshape(1, 3).to(device)
     # sa_sample = -5*torch.ones((ang_vecs.shape[0], 1), device=device)

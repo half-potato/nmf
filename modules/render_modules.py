@@ -339,7 +339,7 @@ class HydraMLPDiffuse(torch.nn.Module):
     featureC: int
     num_layers: int
     def __init__(self, in_channels, pospe=12, view_encoder=None, roughness_view_encoder=None, roughness_cfg=None, feape=6, allocation=0,
-                 unlit_tint=False, lr=1e-4, tint_bias=-1, diffuse_bias=-2, diffuse_mul=1, roughness_bias=1, **kwargs):
+                 unlit_tint=False, lr=1e-4, tint_bias=-1, diffuse_bias=-2, diffuse_mul=1, roughness_bias=1, start_roughness=0.35, **kwargs):
         super().__init__()
 
         in_channels = in_channels if allocation <= 0 else allocation
@@ -353,6 +353,7 @@ class HydraMLPDiffuse(torch.nn.Module):
         self.lr = lr
         self.allocation = allocation
         self.diffuse_mul = diffuse_mul
+        self.start_roughness = start_roughness
 
         self.view_encoder = view_encoder
         self.roughness_view_encoder = roughness_view_encoder
@@ -374,7 +375,7 @@ class HydraMLPDiffuse(torch.nn.Module):
 
         roughness = (extra['r1'] + extra['r2']) / 2
         roughness_v = inv_sigmoid(roughness).mean().detach().item()
-        self.roughness_bias += inv_sigmoid(0.35) - roughness_v
+        self.roughness_bias += inv_sigmoid(self.start_roughness) - roughness_v
 
         # self.tint_bias += 1.1 - diffuse_v
 

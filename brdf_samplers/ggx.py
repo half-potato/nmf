@@ -81,7 +81,7 @@ class GGXSampler(PseudoRandomSampler):
         # H = torch.einsum('bni,bij->bnj', H_l, row_world_basis)
 
         V = viewdir.unsqueeze(1).expand(-1, num_samples, 3)[ray_mask]
-        # N = normal.reshape(-1, 1, 3).expand(-1, num_samples, 3)[ray_mask]
+        N = normal.reshape(-1, 1, 3).expand(-1, num_samples, 3)[ray_mask]
         L = (2.0 * (V * H).sum(dim=-1, keepdim=True) * H - V)
 
         # prob = -(math.pi * r_mask1 * r_mask2 * (
@@ -89,15 +89,14 @@ class GGXSampler(PseudoRandomSampler):
         #     H_l[:, 1]**2 / (r_mask2**2).clip(min=eps) + 
         #     H_l[:, 2]**2
         #     )**2).clip(min=eps)
-        prob = 2*torch.log(r_mask1.clip(min=eps)) - 2*torch.log(math.pi*(H_l[:, 2]**2*(r_mask1**2-1)+1).clip(min=eps))
-
-        return L, row_world_basis_mask, prob
+        logD = 2*torch.log(r_mask1.clip(min=eps)) - torch.log((math.pi * (H_l[:, 2]**2*(r_mask1**2-1)+1)**2).clip(min=eps))
+        return L, row_world_basis_mask, logD
 
     def compute_prob(self, halfvec, eN, r1, r2, **kwargs):
         eps=torch.finfo(torch.float32).eps
-        NdotH = ((halfvec * eN).sum(dim=-1)).abs().clip(min=eps, max=1).reshape(-1, 1)
-        # ic(NdotH.shape, ea.shape, brdf_weight.shape)
-        logD = 2*torch.log(r1.clip(min=eps)) - 2*torch.log((NdotH**2*(r1**2-1)+1).clip(min=eps))
+        r1 = r1.reshape(-1, 1)
+        NdotH = halfvec[..., 2].abs().clip(min=eps, max=1).reshape(-1, 1)
+        logD = 2*torch.log(r1.clip(min=eps)) - torch.log((math.pi * (NdotH**2*(r1**2-1)+1)**2).clip(min=eps))
         return logD.exp()
 
     def calculate_mipval(self, H, V, N, ray_mask, r1, r2, eps: float =torch.finfo(torch.float32).eps, **kwargs):
@@ -110,7 +109,7 @@ class GGXSampler(PseudoRandomSampler):
         # px.scatter(x=NdotH[0].detach().cpu().flatten(), y=D[0].detach().cpu().flatten()).show()
         # assert(False)
         # ic(NdotH.mean())
-        lpdf = logD + torch.log(HdotV) - torch.log(NdotV)# - torch.log(roughness.clip(min=1e-5))
+        lpdf = logD# + torch.log(HdotV) - torch.log(NdotV)# - torch.log(roughness.clip(min=1e-5))
         # pdf = D * HdotV / NdotV / roughness.reshape(-1, 1)
         # pdf = NdotH / 4 / HdotV
         # pdf = D# / NdotH

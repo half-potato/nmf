@@ -39,7 +39,7 @@ class RealBounce(torch.nn.Module):
                        'lr': self.brdf.lr*lr_scale}]
         return grad_vars
 
-    def check_schedule(self, iter, batch_mul, bg_module, **kwargs):
+    def check_schedule(self, iter, batch_mul, **kwargs):
         # if self.bright_sampler is not None:
         #     self.bright_sampler.check_schedule(iter, batch_mul, bg_module)
         if iter > batch_mul*self.cold_start_bg_iters:
@@ -95,7 +95,7 @@ class RealBounce(torch.nn.Module):
             r1.reshape(-1))
 
         # next, compute GGX distribution because it's not represented here
-        brdf_colors = (self.brdf_sampler.compute_prob(halfvec, eN, r1, r2).reshape(-1, 1) * brdf_weight)
+        brdf_colors = (self.brdf_sampler.compute_prob(halfvec.reshape(-1, 3), eN.reshape(-1, 3), r1.reshape(-1, 1), r2.reshape(-1, 1)).reshape(-1, 1) * brdf_weight)
 
         # add indicator of view direction
         viewdir_ind = (L * eV).sum(dim=-1).reshape(n_features*n_views, n_angs).max(dim=1).indices
@@ -170,10 +170,9 @@ class RealBounce(torch.nn.Module):
             r1 = matprop['r1'][bounce_mask]
             r2 = matprop['r2'][bounce_mask]
 
-            L, row_world_basis, samp_prob = self.brdf_sampler.sample(
+            L, row_world_basis, lpdf = self.brdf_sampler.sample(
                     bV, bN,
-                    r1**2, r2**2, ray_mask)
-            samp_prob = samp_prob.reshape(-1, 1)
+                    r1, r2, ray_mask)
 
             n = ray_xyz.shape[0]
             m = ray_mask.shape[1]
@@ -199,6 +198,7 @@ class RealBounce(torch.nn.Module):
             diffvec = torch.matmul(row_world_basis.permute(0, 2, 1), L.unsqueeze(-1)).squeeze(-1)
             halfvec = torch.matmul(row_world_basis.permute(0, 2, 1), H.unsqueeze(-1)).squeeze(-1)
             # samp_prob = self.brdf_sampler.compute_prob(halfvec, eN, ea1.reshape(-1, 1), ea2.reshape(-1, 1), proportion=proportion)
+            samp_prob = (lpdf).exp().reshape(-1, 1)
 
             if self.bright_sampler is not None:
                 samp_prob = samp_prob * (1-self.percent_bright)
@@ -227,11 +227,9 @@ class RealBounce(torch.nn.Module):
             # ea = masked[:, 9:10]
             # efeatures = masked[:, 10:]
 
-            # mipval = self.brdf_sampler.calculate_mipval(H.detach(), eV, eN.detach(), ray_mask, ea1**2, ea2**2, proportion=eproportion)
-
-            indiv_num_samples = ray_mask.sum(dim=1, keepdim=True).expand(ray_mask.shape)[ray_mask].reshape(-1, 1)
-            # # mipval = -(samp_prob * indiv_num_samples).clip(min=eps).log()
-            mipval = -samp_prob.clip(min=eps).log() - (indiv_num_samples).clip(min=1).log()
+            indiv_num_samples = ray_mask.sum(dim=1, keepdim=True).expand(ray_mask.shape)[ray_mask]
+            mipval = -torch.log(indiv_num_samples.clip(min=1)) - lpdf
+            # mipval = self.brdf_sampler.calculate_mipval(H.detach(), eV, eN.detach(), ray_mask, ea1, ea2, proportion=eproportion)
 
             bounce_rays = torch.cat([
                 exyz + L*5e-3,
@@ -307,14 +305,12 @@ class RealBounce(torch.nn.Module):
             brdf_color = row_mask_sum(brdf_weight, ray_mask) / ray_count
             tinted_ref_rgb = row_mask_sum(incoming_light * brdf_weight * importance_samp_correction, ray_mask) / ray_count
             spec[bounce_mask] = row_mask_sum(incoming_light, ray_mask) / ray_count
-            # ic(incoming_light.mean(), tinted_ref_rgb.mean())
 
             if self.detach_bg:
                 tinted_ref_rgb.detach_()
 
             reflect_rgb[bounce_mask] = tinted_ref_rgb
             brdf_rgb[bounce_mask] = brdf_color
-            # brdf_rgb[bounce_mask] = row_mask_sum((L * eN).sum(dim=-1, keepdim=True).expand(-1, 3), ray_mask) / ray_count
 
         rgb = reflect_rgb + diffuse
         # ic(rgb.mean(), diffuse.mean())

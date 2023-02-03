@@ -2,7 +2,7 @@ arch:
   _target_: modules.tensor_nerf.TensorNeRF
   _partial_: True
 
-  recur_alpha_thres: 1e-4
+  recur_alpha_thres: 1e-3
   lr_scale: 1
   infinity_border: False
   eval_batch_size: 4096
@@ -14,7 +14,7 @@ arch:
   use_predicted_normals: False
   orient_world_normals: True
   align_pred_norms: True
-  detach_inter: True
+  detach_inter: False
   geonorm_iters: 10000
 
   tonemap:
@@ -73,7 +73,7 @@ arch:
   model:
     _partial_: True
     _target_: models.realbounce.RealBounce
-    percent_bright: 0.1
+    percent_bright: 0.05
     # max_brdf_rays: [3194304]
     max_brdf_rays: [259430]
     target_num_samples: [800000]
@@ -165,17 +165,19 @@ arch:
       num_layers: 1
       initializer: 'xavier_sigmoid'
       lr: 1e-3
+      start_roughness: 0.35
       tint_bias: -1.1
       diffuse_bias: -0.619
       diffuse_mul: 1.5
       roughness_bias: -1
       # allocation: 7
 
-    visibility_module:
-      _target_: modules.naive_vis_cache.NaiveVisCache
-      grid_size: 128
-      midpoint: 128
-      jump: 4
+    visibility_module: NULL
+    # visibility_module:
+      # _target_: modules.naive_vis_cache.NaiveVisCache
+      # grid_size: 128
+      # midpoint: 128
+      # jump: 4
 
     bright_sampler:
       _target_: brdf_samplers.equirect_bright_sampler.ERBrightSampler
@@ -216,7 +218,7 @@ params:
   pred_lambda: 3e-2
   final_pred_lambda: 3e-4
   diffuse_lambda: 0
-  ori_lambda: 0.1
+  ori_lambda: 0.05
   final_ori_lambda: Null
   brdf_lambda: 0
   normal_err_lambda: 0

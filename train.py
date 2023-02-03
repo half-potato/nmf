@@ -377,7 +377,7 @@ def reconstruction(args):
             pred_losses, ori_losses = [], []
             TVs = []
 
-            lbatch_size = params.min_batch_size if num_rays < params.batch_size else num_rays
+            lbatch_size = params.min_batch_size if num_rays < params.min_batch_size else num_rays
             num_remaining = lbatch_size
             while num_remaining > 0:
                 lnum_rays = min(num_rays, num_remaining)
@@ -439,7 +439,7 @@ def reconstruction(args):
                     prev_n_samples = mean_ratio
                     num_rays = int(mean_ratio * params.target_num_samples + 1)
                     tensorf.model.update_n_samples(n_samples[1:])
-                    tensorf.eval_batch_size = num_rays // 2
+                    # tensorf.eval_batch_size = num_rays // 2
 
                     # rays_remaining -= rgb_map.shape[0]
                     # rays_train = rays_train[~whole_valid]

@@ -31,7 +31,7 @@ class SGGXSampler(PseudoRandomSampler):
         S_diag = torch.diag_embed(S_diagv)
         S = torch.matmul(torch.matmul(row_world_basis, S_diag), row_world_basis.permute(0, 2, 1))
         M = torch.zeros((B, 3, 3), device=device)
-        tmp = (S[:, 1, 1]*S[:, 2, 2] - S[:, 1, 2]**2).clip(min=eps).sqrt()
+        tmp = (S[:, 1, 1]*S[:, 2, 2] - S[:, 1, 2]**2).clip(min=eps).sqrt().clip(min=eps)
         M[:, 0, 0] = torch.linalg.det(S).abs().clip(min=eps).sqrt() / tmp
         # checked
         inv_sqrt_Sii = 1/S[:, 2, 2].clip(min=eps).sqrt().clip(min=eps)

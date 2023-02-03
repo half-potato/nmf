@@ -69,6 +69,7 @@ class TensorNeRF(torch.nn.Module):
         self.eval_batch_size = eval_batch_size
         self.geonorm_iters = geonorm_iters
         self.recur_stepmul = recur_stepmul
+        self.detach_bg = False
 
         self.detach_inter = detach_inter
 
@@ -137,11 +138,11 @@ class TensorNeRF(torch.nn.Module):
 
     def check_schedule(self, iter, batch_mul):
         require_reassignment = False
-        require_reassignment |= self.model.check_schedule(iter, batch_mul, bg_module=self.bg_module)
+        require_reassignment |= self.model.check_schedule(iter, batch_mul)
         require_reassignment |= self.sampler.check_schedule(iter, batch_mul, self.rf)
         require_reassignment |= self.rf.check_schedule(iter, batch_mul)
-        if require_reassignment:
-            self.sampler.update(self.rf, init=True)
+        # if require_reassignment:
+        #     self.sampler.update(self.rf, init=True)
         self.bg_noise *= self.bg_noise_decay
         if self.geonorm_iters > 0:
             self.use_predicted_normals = self.geonorm_iters*batch_mul < iter
@@ -169,11 +170,12 @@ class TensorNeRF(torch.nn.Module):
             norms = normalize(-g[0][:, :3])
             return norms
 
-    def render_just_bg(self, rays, roughness):
-        if rays.shape[0] == 0:
-            return torch.empty((0, 3), device=rays.device)
-        viewdirs = rays[:, 3:6]
-        bg = self.bg_module(viewdirs[:, :], roughness)
+    def render_just_bg(self, viewdirs, roughness):
+        if viewdirs.shape[0] == 0:
+            return torch.empty((0, 3), device=viewdirs.device)
+        bg = self.bg_module(viewdirs, roughness)
+        if self.detach_bg:
+            bg.detach_()
         return bg.reshape(-1, 3)
 
     def forward(self, rays, focal, start_mipval=None, bg_col=torch.tensor([1, 1, 1]), stepmul=1,
@@ -228,13 +230,13 @@ class TensorNeRF(torch.nn.Module):
             nonlocal n_samples
             if retrace:
                 incoming_data, incoming_stats = self(rays, focal, recur=recur+1, bg_col=None, dynamic_batch_size=False, stepmul=self.recur_stepmul,
-                                     start_mipval=start_mipval.reshape(-1), override_near=0, is_train=is_train, override_alpha_thres=self.recur_alpha_thres,
+                                     start_mipval=start_mipval.reshape(-1), override_near=0*self.sampler.stepsize, is_train=is_train, override_alpha_thres=self.recur_alpha_thres,
                                      ndc_ray=False, N_samples=N_samples, tonemap=False, draw_debug=False)
                 incoming_light = incoming_data['rgb_map']
                 n_samples += incoming_stats['n_samples']
                 return incoming_light, 1-incoming_data['acc_map']
             else:
-                incoming_light = self.render_just_bg(rays, start_mipval.reshape(-1))
+                incoming_light = self.render_just_bg(rays[..., 3:6], start_mipval.reshape(-1))
                 return incoming_light, None
 
         # weight: [N_rays, N_samples]
@@ -413,7 +415,7 @@ class TensorNeRF(torch.nn.Module):
         # ic(rgb[ray_valid].mean(dim=0), rgb_map[acc_map>0.1].mean(dim=0), weight.shape)
         if self.bg_module is not None and bg_col is None:
             bg_roughness = -100*torch.ones(B, 1, device=device) if start_mipval is None else start_mipval
-            bg = self.bg_module(viewdirs[:, 0, :], bg_roughness).reshape(-1, 3)
+            bg = self.render_just_bg(viewdirs[:, 0, :], bg_roughness).reshape(-1, 3)
             if tonemap:
                 bg = self.tonemap(bg, noclip=True)
         else:
@@ -426,7 +428,8 @@ class TensorNeRF(torch.nn.Module):
             #     # noise = 1-torch.rand((*acc_map.shape, 3), device=device)*self.bg_noise
             #     rgb_map = rgb_map + (1 - acc_map[..., None]) * noise
             bg = bg_col.to(device).reshape(1, 3)
-        rgb_map = self.tonemap(rgb_map.clip(0, 1))
+        if tonemap:
+            rgb_map = self.tonemap(rgb_map.clip(0, 1))
         rgb_map = rgb_map + (1 - acc_map[..., None]) * bg
             # if white_bg:
             #     if True:
