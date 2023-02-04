@@ -302,9 +302,10 @@ class RealBounce(torch.nn.Module):
                 importance_samp_correction[~pbright_mask] = weight[~pbright_mask]
 
 
-            brdf_color = row_mask_sum(brdf_weight, ray_mask) / ray_count
-            tinted_ref_rgb = row_mask_sum(incoming_light * brdf_weight * importance_samp_correction, ray_mask) / ray_count
-            spec[bounce_mask] = row_mask_sum(incoming_light, ray_mask) / ray_count
+            eray_count = ray_count.reshape(-1, 1).expand(ray_mask.shape)[ray_mask].reshape(-1, 1)
+            brdf_color = row_mask_sum(brdf_weight / eray_count, ray_mask)# / ray_count
+            tinted_ref_rgb = row_mask_sum(incoming_light * brdf_weight / eray_count * importance_samp_correction, ray_mask)# / ray_count
+            spec[bounce_mask] = row_mask_sum(incoming_light / eray_count, ray_mask)# / ray_count
 
             if self.detach_bg:
                 tinted_ref_rgb.detach_()
@@ -312,7 +313,7 @@ class RealBounce(torch.nn.Module):
             reflect_rgb[bounce_mask] = tinted_ref_rgb
             brdf_rgb[bounce_mask] = brdf_color
 
-        rgb = reflect_rgb + diffuse
+        rgb = reflect_rgb# + diffuse
         # ic(rgb.mean(), diffuse.mean())
         debug['diffuse'] = diffuse
         debug['roughness'] = matprop['r1']

@@ -141,8 +141,8 @@ class TensorNeRF(torch.nn.Module):
         require_reassignment |= self.model.check_schedule(iter, batch_mul)
         require_reassignment |= self.sampler.check_schedule(iter, batch_mul, self.rf)
         require_reassignment |= self.rf.check_schedule(iter, batch_mul)
-        # if require_reassignment:
-        #     self.sampler.update(self.rf, init=True)
+        if require_reassignment:
+            self.sampler.update(self.rf, init=True)
         self.bg_noise *= self.bg_noise_decay
         if self.geonorm_iters > 0:
             self.use_predicted_normals = self.geonorm_iters*batch_mul < iter
@@ -400,7 +400,8 @@ class TensorNeRF(torch.nn.Module):
                 pred_norm_err = (aweight[gt_mask] * (pred_norm_err_a + pred_norm_err_b)).sum()# / B
                 statistics['normal_err'] = pred_norm_err
             statistics['brdf_reg'] = -debug['tint'].mean() if 'tint' in debug else torch.tensor(0.0)
-            statistics['diffuse_reg'] = debug['roughness'].sum() if 'roughness' in debug else torch.tensor(0.0)
+            statistics['diffuse_reg'] = debug['diffuse'].mean()
+            # debug['roughness'].sum() if 'roughness' in debug else torch.tensor(0.0)
             statistics['prediction_loss'] = prediction_loss
             statistics['ori_loss'] = ori_loss
             statistics['distortion_loss'] = distortion_loss

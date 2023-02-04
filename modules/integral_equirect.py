@@ -256,39 +256,42 @@ class IntegralEquirect(torch.nn.Module):
         h, w = self.hw()
         saSample = saSample.reshape(-1)
         # TODO calculate distortion of cube map for saTexel
-        # distortion = 4 * math.pi / 6
-        # distortion_w = 1/(1-u[:, 2]**2).clip(min=eps)
-        # dw = (1-u[:, 2]**2).clip(min=eps).sqrt() * 2 * math.pi / w
-        # dh = torch.ones_like(dw) * math.pi / h
-        # saSample = saSample.reshape(-1)
-        #
-        # saTexel_w = dw.clip(min=eps).log() + dh.clip(min=eps).log()
-        # saTexel_h = dw.clip(min=eps).log() + dh.clip(min=eps).log()
-        # # saTexel is the ratio to the solid angle subtended by one pixel of the 0th mipmap level
-        # # num_pixels = self.bg_mat.numel() // 3
-        # # saTexel = distortion / num_pixels
-        # miplevel_w = ((saSample - saTexel_w) / math.log(2)) / 2 + self.mipbias + self.mipnoise * torch.rand_like(saSample)
-        # miplevel_h = ((saSample - saTexel_h) / math.log(2)) / 2 + self.mipbias + self.mipnoise * torch.rand_like(saSample)
 
-        # dw2 = (1-u[:, 2]**2).clip(min=eps).sqrt()# * 2 * math.pi# / w
-        # dh2 = torch.ones_like(dw2)# * math.pi# / h
-
-        # saTexel_w2 = dw2*dh2 / h / w
-        # saTexel_h2 = dw2*dh2 / h / w
-        # miplevel_w = ((saSample - torch.log(saTexel_w2.clip(min=eps))) / math.log(2))/2 + self.mipbias + self.mipnoise * torch.rand_like(saSample)
-        # miplevel_h = ((saSample - torch.log(saTexel_h2.clip(min=eps))) / math.log(2))/2 + self.mipbias + self.mipnoise * torch.rand_like(saSample)
-        # ic(saSample.min(), saSample.max())
-        # ic(saTexel_h2.min(), saTexel_h2.max())
-        # saTexel is the ratio to the solid angle subtended by one pixel of the 0th mipmap level
-        # num_pixels = self.bg_mat.numel() // 3
-        # saTexel = distortion / num_pixels
-        d = h * w / (2 * math.pi**2 * (1-u[:, 2]**2).clip(min=eps).sqrt()).clip(min=eps)
-        miplevel_w = (((d/2).log() + saSample) / math.log(2)) / 2
-        miplevel_h = (((d/2).log() + saSample) / math.log(2)) / 2
+        cos = (1-u[:, 2]**2).clip(min=eps).sqrt()
+        d = h * w / (2 * math.pi**2 * cos).clip(min=eps)
+        area = ((d/2).log() + saSample).exp()
+        base_rect_area = 1/cos.clip(min=eps)
+        h = (area.clip(min=eps).sqrt() * cos).clip(min=eps)#.clip(max=area)
+        w = area / h
+        # ic(h, w, area, cos)
+        # b*(x * y) = a
+        # miplevel_w = (((d/2).log() + saSample) / math.log(2)) / 2
+        # miplevel_h = (((d/2).log() + saSample) / math.log(2)) / 2
+        miplevel_w = (w.log() / math.log(2))
+        miplevel_h = (h.log() / math.log(2))
         
         miplevel_w = miplevel_w + self.mipbias + self.mipnoise * torch.rand_like(saSample)
         miplevel_h = miplevel_h + self.mipbias + self.mipnoise * torch.rand_like(saSample)
-        return miplevel_w.clip(0, 9), miplevel_h.clip(0, 9)
+        return miplevel_w.clip(0, 7), miplevel_h.clip(0, 7)
+
+    # def sa2mip(self, u, saSample, eps=torch.finfo(torch.float32).eps):
+    #     h, w = self.hw()
+    #     # TODO calculate distortion of cube map for saTexel
+    #     # distortion = 4 * math.pi / 6
+    #     # distortion_w = 1/(1-u[:, 2]**2).clip(min=eps)
+    #     distortion_w = (1-u[:, 2]**2).clip(min=eps).sqrt()
+    #     distortion_h = torch.ones_like(distortion_w)
+    #     saSample = saSample.reshape(-1)
+    #
+    #     saTexel_w = distortion_w / h / w
+    #     saTexel_h = distortion_h / h / w
+    #     # saTexel is the ratio to the solid angle subtended by one pixel of the 0th mipmap level
+    #     # num_pixels = self.bg_mat.numel() // 3
+    #     # saTexel = distortion / num_pixels
+    #     miplevel_w = ((saSample - torch.log(saTexel_w.clip(min=eps))) / math.log(2))/2 + self.mipbias + self.mipnoise * torch.rand_like(saSample)
+    #     miplevel_h = ((saSample - torch.log(saTexel_h.clip(min=eps))) / math.log(2))/2 + self.mipbias + self.mipnoise * torch.rand_like(saSample)
+    #     
+    #     return miplevel_w.clip(0), miplevel_h.clip(0)
 
     def tv_loss(self):
         loss = 0
