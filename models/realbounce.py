@@ -313,7 +313,7 @@ class RealBounce(torch.nn.Module):
             reflect_rgb[bounce_mask] = tinted_ref_rgb
             brdf_rgb[bounce_mask] = brdf_color
 
-        rgb = reflect_rgb# + diffuse
+        rgb = reflect_rgb + diffuse
         # ic(rgb.mean(), diffuse.mean())
         debug['diffuse'] = diffuse
         debug['roughness'] = matprop['r1']

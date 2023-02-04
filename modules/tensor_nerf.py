@@ -400,7 +400,7 @@ class TensorNeRF(torch.nn.Module):
                 pred_norm_err = (aweight[gt_mask] * (pred_norm_err_a + pred_norm_err_b)).sum()# / B
                 statistics['normal_err'] = pred_norm_err
             statistics['brdf_reg'] = -debug['tint'].mean() if 'tint' in debug else torch.tensor(0.0)
-            statistics['diffuse_reg'] = debug['diffuse'].mean()
+            statistics['diffuse_reg'] = (aweight.detach().reshape(-1, 1)*debug['diffuse']).sum() / 3
             # debug['roughness'].sum() if 'roughness' in debug else torch.tensor(0.0)
             statistics['prediction_loss'] = prediction_loss
             statistics['ori_loss'] = ori_loss

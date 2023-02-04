@@ -373,7 +373,7 @@ def reconstruction(args):
     # with torch.autograd.detect_anomaly():
         for iteration in pbar:
             optimizer.zero_grad(set_to_none=True)
-            losses, roughnesses, envmap_regs = [],[],[]
+            losses, roughnesses, envmap_regs, diffuse_regs = [],[],[],[]
             pred_losses, ori_losses = [], []
             TVs = []
 
@@ -511,6 +511,7 @@ def reconstruction(args):
                     pred_losses.append(params.pred_lambda * prediction_loss.detach().item())
                     losses.append(total_loss.detach().item())
                     roughnesses.append(ims['roughness'].mean().detach().item())
+                    diffuse_regs.append(params.diffuse_lambda * diffuse_reg.detach().item() / lbatch_size)
                     envmap_regs.append(envmap_reg.detach().item())
                     PSNRs.append(-10.0 * np.log(photo_loss) / np.log(10.0))
 
@@ -547,10 +548,11 @@ def reconstruction(args):
             if iteration % args.progress_refresh_rate == 0:
                 desc = f'psnr = {float(np.mean(PSNRs)):.2f}' + \
                     f' test_psnr = {float(np.mean(PSNRs_test)):.2f}' + \
-                    f' loss = {float(np.mean(losses)):.5f}' + \
-                    f' rough = {float(np.mean(roughnesses)):.5f}' + \
+                    f' loss = {float(np.sum(losses)):.5f}' + \
                     f' envmap = {float(np.mean(envmap_regs)):.5f}' + \
+                    f' diffuse = {float(np.sum(diffuse_regs)):.5f}' + \
                     f' nrays = {[num_rays] + tensorf.model.max_retrace_rays}'
+                    # f' rough = {float(np.mean(roughnesses)):.5f}' + \
                     # f' tv = {float(np.mean(TVs)):.5f}' + \
                     # f' ori loss = {float(np.mean(ori_losses) / num_rays):.5f}' + \
                     # f' pred loss = {float(np.mean(pred_losses) / num_rays):.5f}' + \
