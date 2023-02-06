@@ -304,8 +304,8 @@ class RealBounce(torch.nn.Module):
 
             eray_count = ray_count.reshape(-1, 1).expand(ray_mask.shape)[ray_mask].reshape(-1, 1)
             brdf_color = row_mask_sum(brdf_weight / eray_count, ray_mask)# / ray_count
-            tinted_ref_rgb = row_mask_sum(incoming_light * brdf_weight / eray_count * importance_samp_correction, ray_mask)# / ray_count
-            spec[bounce_mask] = row_mask_sum(incoming_light / eray_count, ray_mask)# / ray_count
+            tinted_ref_rgb = row_mask_sum(incoming_light * brdf_weight / eray_count * importance_samp_correction, ray_mask)
+            spec[bounce_mask] = row_mask_sum(incoming_light / eray_count, ray_mask)
 
             if self.detach_bg:
                 tinted_ref_rgb.detach_()

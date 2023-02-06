@@ -185,7 +185,7 @@ arch:
   bg_module:
     _target_: modules.integral_equirect.IntegralEquirect
     bg_resolution: 1024
-    mipbias: 0
+    mipbias: 1
     activation: 'exp'
     lr: 0.02
     init_val: -0.6
@@ -215,7 +215,7 @@ params:
   TV_weight_app: 0.0
   TV_weight_bg: 0
   envmap_lambda: 0
-  pred_lambda: 3e-2
+  pred_lambda: 3e-3
   final_pred_lambda: 3e-4
   diffuse_lambda: 0
   ori_lambda: 0.05

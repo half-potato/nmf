@@ -1,6 +1,6 @@
 _partial_: True
 _target_: fields.tcnn.TCNNRF
-distance_scale: 1
+distance_scale: 0.5
 density_shift: 0
 activation: 'exp'
 # activation: 'softplus'

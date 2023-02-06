@@ -124,7 +124,9 @@ class TensorVoxelBase(TensorBase):
         self.density_res_multi = density_res_multi
         self.app_dim = app_dim
         self.step_ratio = step_ratio
-        self.N_voxel_list = (torch.round(torch.exp(torch.linspace(np.log(N_voxel_init), np.log(N_voxel_final), len(upsamp_list)+1))).long()).tolist()[1:]
+        self.N_voxel_list = (torch.round(torch.linspace(N_voxel_init**(1/3), N_voxel_final**(1/3), len(upsamp_list)+1)**3).long()).tolist()[1:]
+        ic(self.N_voxel_list)
+        # self.N_voxel_list = (torch.round(torch.exp(torch.linspace(np.log(N_voxel_init), np.log(N_voxel_final), len(upsamp_list)+1))).long()).tolist()[1:]
         self.upsamp_list = upsamp_list
 
         self.matMode = [[0,1], [0,2], [1,2]]
