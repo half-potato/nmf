@@ -313,11 +313,11 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
             imageio.imwrite(f'{savePath}/rgbd/{prtx}{idx:03d}.exr', ims.depth.numpy())
             imageio.imwrite(f'{savePath}/normal/{prtx}{idx:03d}.png', vis_normal)
             if 'spec' in ims:
-                imageio.imwrite(f'{savePath}/spec/{prtx}{idx:03d}.png', (255*(ims.spec/(1+ims.spec)).numpy()).astype(np.uint8))
+                imageio.imwrite(f'{savePath}/spec/{prtx}{idx:03d}.exr', ims.spec.numpy())
             if 'roughness' in ims:
                 imageio.imwrite(f'{savePath}/roughness/{prtx}{idx:03d}.exr', ims.roughness)
             if 'tint' in ims:
-                imageio.imwrite(f'{savePath}/tint/{prtx}{idx:03d}.png', (255*ims.tint.clamp(0, 1).numpy()).astype(np.uint8))
+                imageio.imwrite(f'{savePath}/tint/{prtx}{idx:03d}.exr', ims.tint.numpy())
             if 'diffuse' in ims:
                 imageio.imwrite(f'{savePath}/diffuse/{prtx}{idx:03d}.png', (255*ims.diffuse.clamp(0, 1).numpy()).astype(np.uint8))
             imageio.imwrite(f'{savePath}/world_normal/{prtx}{idx:03d}.png', vis_world_normal)

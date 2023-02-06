@@ -89,10 +89,12 @@ class RealBounce(torch.nn.Module):
             eV.reshape(-1, 3),
             L.reshape(-1, 3),
             eN.reshape(-1, 3),
+            L.reshape(-1, 3),
             halfvec.reshape(-1, 3),
             diffvec.reshape(-1, 3),
             efeatures.reshape(-1, app_features.shape[-1]),
-            r1.reshape(-1))
+            r1.reshape(-1),
+            r2.reshape(-1))
 
         # next, compute GGX distribution because it's not represented here
         brdf_colors = (self.brdf_sampler.compute_prob(halfvec.reshape(-1, 3), eN.reshape(-1, 3), r1.reshape(-1, 1), r2.reshape(-1, 1)).reshape(-1, 1) * brdf_weight)
@@ -196,6 +198,7 @@ class RealBounce(torch.nn.Module):
 
             H = normalize((eV+L)/2)
             diffvec = torch.matmul(row_world_basis.permute(0, 2, 1), L.unsqueeze(-1)).squeeze(-1)
+            local_v = torch.matmul(row_world_basis.permute(0, 2, 1), eV.unsqueeze(-1)).squeeze(-1)
             halfvec = torch.matmul(row_world_basis.permute(0, 2, 1), H.unsqueeze(-1)).squeeze(-1)
             # samp_prob = self.brdf_sampler.compute_prob(halfvec, eN, ea1.reshape(-1, 1), ea2.reshape(-1, 1), proportion=proportion)
             samp_prob = (lpdf).exp().reshape(-1, 1)
@@ -241,7 +244,7 @@ class RealBounce(torch.nn.Module):
             # calculate second part of BRDF
             n, m = ray_mask.shape
             # brdf_weight = self.brdf(eV, L, eN, halfvec, diffvec, efeatures, ea)
-            brdf_weight = self.brdf(eV, L.detach(), eN.detach(), halfvec.detach(), diffvec.detach(), efeatures, ea1.detach())
+            brdf_weight = self.brdf(eV, L.detach(), eN.detach(), local_v.detach(), halfvec.detach(), diffvec.detach(), efeatures, ea1.detach(), ea2.detach())
             ray_count = (ray_mask.sum(dim=1)+1e-8)[..., None]
 
             if len(self.max_retrace_rays) > recur:
@@ -305,7 +308,8 @@ class RealBounce(torch.nn.Module):
             eray_count = ray_count.reshape(-1, 1).expand(ray_mask.shape)[ray_mask].reshape(-1, 1)
             brdf_color = row_mask_sum(brdf_weight / eray_count, ray_mask)# / ray_count
             tinted_ref_rgb = row_mask_sum(incoming_light * brdf_weight / eray_count * importance_samp_correction, ray_mask)
-            spec[bounce_mask] = row_mask_sum(incoming_light / eray_count, ray_mask)
+            spec[bounce_mask] = row_mask_sum(incoming_light / eray_count * importance_samp_correction, ray_mask)
+            # ic(incoming_light.mean(), spec[bounce_mask].mean(), brdf_weight.mean(), importance_samp_correction.max(), tinted_ref_rgb.mean())
 
             if self.detach_bg:
                 tinted_ref_rgb.detach_()

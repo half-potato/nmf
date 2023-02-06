@@ -125,7 +125,7 @@ class TensorNeRF(torch.nn.Module):
             ic(grid_size)
         else:
             grid_size = None
-        rf = hydra.utils.instantiate(config)(aabb=aabb, near_far=near_far, grid_size=grid_size)
+        rf = hydra.utils.instantiate(config)(aabb=aabb, near_far=near_far, grid_size=grid_size, use_predicted_normals=True)
         # if 'alphaMask.aabb' in ckpt.keys():
         #     #  length = np.prod(ckpt['alphaMask.shape'])
         #     #  alpha_volume = torch.from_numpy(np.unpackbits(ckpt['alphaMask.mask'])[

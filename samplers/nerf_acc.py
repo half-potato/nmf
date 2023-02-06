@@ -12,6 +12,7 @@ class NerfAccSampler(torch.nn.Module):
                  render_n_samples=1024,
                  max_samples=-1,
                  multiplier=1,
+                 test_multiplier=1,
                  update_freq=16,
                  alpha_thres = 0,
                  ema_decay = 0.95,
@@ -31,11 +32,14 @@ class NerfAccSampler(torch.nn.Module):
         self.update_freq = update_freq
         self.cone_angle = 0.0
         self.max_samples = max_samples
+        self.test_multiplier = test_multiplier
+
         self.stepsize = (
             (self.aabb[3:] - self.aabb[:3]).max()
             * math.sqrt(3)
-            / render_n_samples
+            / render_n_samples / self.multiplier
         ).item()
+
         self.occ_thre = occ_thre
         self.ema_decay = ema_decay
 
@@ -53,6 +57,9 @@ class NerfAccSampler(torch.nn.Module):
 
     @torch.no_grad()
     def update(self, rf, init=True):
+        self.nSamples = int(rf.nSamples * self.multiplier)
+        near, far = self.near_far
+        self.stepsize = (far - near) / self.nSamples
         if init:
             self.occupancy_grid = OccupancyGrid(
                 roi_aabb=self.aabb,
@@ -94,6 +101,7 @@ class NerfAccSampler(torch.nn.Module):
                 occ = rf.compute_densityfeature(bx).reshape(-1, 1)
                 occs.append(occ)
             return torch.cat(occs, dim=0)
+        stepmul *= self.test_multiplier if not is_train else 1
         origins = rays_chunk[:, 0:3]
         viewdirs = rays_chunk[:, 3:6]
         ray_indices, t_starts, t_ends = ray_marching(

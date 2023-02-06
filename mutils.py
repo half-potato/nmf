@@ -1,6 +1,9 @@
 import torch
 from typing import Tuple
 
+def signed_clip(v, eps=torch.finfo(torch.float32).eps):
+    return v.sign() * v.abs().clip(min=eps)
+
 def normalize(v, ord=2, eps=torch.finfo(torch.float32).eps):
     if ord == 2:
         return v / (v**2).sum(axis=-1, keepdim=True).clip(min=eps).sqrt()

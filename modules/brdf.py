@@ -7,7 +7,7 @@ from .render_modules import positional_encoding, str2fn
 from icecream import ic
 import matplotlib.pyplot as plt
 from . import safemath
-from mutils import normalize
+from mutils import normalize, signed_clip
 
 from modules import util
 
@@ -24,74 +24,35 @@ def ggx_dist(NdotH, roughness):
     # return a2 / np.pi / ((NdotH**2*(a2-1)+1)**2).clip(min=1e-8)
     return ((a2 / (NdotH.clip(min=0, max=1)**2*(a2-1)+1))**2).clip(min=0, max=1)
 
+def aniso_smith_masking_gtr2(v_local, ax, ay, eps=torch.finfo(torch.float32).eps):
+    v2 = v_local * v_local
+    Lambda = (-1 + (1+(v2[..., 0] * ax*ax + v2[..., 1] * ay*ay) / signed_clip(v2[..., 2])).clip(min=eps).sqrt()) / 2
+    return 1 / (1+Lambda)
 
-class PBR(torch.nn.Module):
-    def __init__(self, in_channels):
+class Specular(torch.nn.Module):
+    def __init__(self, in_channels, lr, bias, **kwargs):
         super().__init__()
-        self.lr=0
+        self.lr=lr
+        self.in_channels = in_channels
+        self.in_mlpC = in_channels
+        self.bias = bias
+        self.C0_mlp = util.create_mlp(self.in_mlpC, 3, **kwargs)
 
-    def forward(self, incoming_light, V, L, N, features, roughness, matprop, mask, ray_mask):
-        # V: (B, 3)-viewdirs, the outgoing light direction
-        # L: (B, M, 3) incoming light direction. bounce_rays
-        # N: (B, 3) outward normal
-        # matprop: dictionary of attributes
-        # mask: mask for matprop
-        half = normalize(L + V.reshape(-1, 1, 3))
+    def calibrate(self, efeatures, bg_brightness):
+        pass
 
-        LdotN = (L * N).sum(dim=-1, keepdim=True)
-        VdotN = (V.reshape(-1, 1, 3) * N).sum(dim=-1, keepdim=True).clip(min=1e-8)
-        cos_half = (half * N).sum(dim=-1, keepdim=True)
+    def forward(self, V, L, N, local_v, half_vec, diff_vec, efeatures, ax, ay):
+        LdotH = (diff_vec * half_vec).sum(dim=-1, keepdim=True)
+        VdotH = (local_v * half_vec).sum(dim=-1, keepdim=True)
 
-        # compute the BRDF (bidirectional reflectance distribution function)
-        # k_d = ratio_diffuse[bounce_mask].reshape(-1, 1, 1)
-        # diffuse vs specular fraction
-        # r = matprop['reflectivity'][mask]
-        # 0.04 is the approximate value of F0 for non-metallic surfaces
-        # f0 = (1-r)*0.04 + r*matprop['tint'][mask]
-
-        f0 = matprop['f0'][mask].reshape(-1, 1, 3)
-        # f0 = matprop['tint'][mask].reshape(-1, 1, 3)
-
-        k_s = schlick(f0, N.double(), half.double()).float()
-
-        # diffuse vs specular intensity
-        # f_d = matprop['reflectivity'].reshape(-1, 1, 1)/np.pi/M
-        k_d = 1-k_s
-
-        # alph = 0*matprop['roughness'][mask].reshape(-1, 1, 1) + 0.1
-        alph = roughness.reshape(-1, 1, 1)
-        a2 = alph**2
-        # k = alph**2 / 2 # ibl
-        # a2 = alph**2
-        D_ggx = ggx_dist(cos_half, alph)
-        k = (alph+1)**2 / 8 # direct lighting
-        G_schlick_smith = 1 / ((VdotN*(1-k)+k)*(LdotN*(1-k)+k)).clip(min=1e-8)
-        
-        # f_s = D_ggx.clip(min=0, max=1) * G_schlick_smith.clip(min=0, max=1) / (4 * LdotN * VdotN).clip(min=1e-8)
-        # f_s = D_ggx / (4 * LdotN * VdotN).clip(min=1e-8)
-
-        f_s = D_ggx * G_schlick_smith / 4
-        # f_s = D_ggx / (4 * LdotN * VdotN).clip(min=1e-8)
-
-
-        # the diffuse light is covered by other components of the rendering equation
-        # ic(k_d.mean(dim=1).mean(dim=0), k_s.mean(dim=1).mean(dim=0))
-        # brdf = k_d*f_d + k_s*f_s
-        albedo = matprop['albedo'][mask].reshape(-1, 1, 3)
-        brdf = k_d*albedo + k_s*f_s
-        brdf *= ray_mask
-        # normalize probabilities so they sum to 1. the rgb dims represent the spectra in equal parts.
-        brdf = brdf / brdf.sum(dim=1, keepdim=True).mean(dim=2, keepdim=True)
-        # brdf = k_s * f_s
-
-        # cos_refl = (noise_rays * refdirs[full_bounce_mask].reshape(-1, 1, 3)).sum(dim=-1, keepdim=True).clip(min=0)
-        # cos_refl = (bounce_rays[..., 3:6] * refdirs[full_bounce_mask].reshape(-1, 1, 3)).sum(dim=-1, keepdim=True).clip(min=0)
-        # ref_rough = roughness[bounce_mask].reshape(-1, 1)
-        # phong shading?
-        # ref_weight = (1-ref_rough) * cos_refl + ref_rough * LdotN
-        ref_weight = brdf * LdotN
-        spec_color = (incoming_light * ref_weight).sum(dim=1)
-        return spec_color
+        C_0 = torch.sigmoid(self.C0_mlp(efeatures)+self.bias)
+        Fm = C_0 + (1-C_0) * VdotH**5
+        Gm = aniso_smith_masking_gtr2(diff_vec, ax, ay) * aniso_smith_masking_gtr2(local_v, ax, ay)
+        # spec = (Fm * Gm.reshape(-1, 1)) / (4 * LdotH.abs()).clip(min=1e-8)
+        # spec = (Fm) / 4
+        spec = (Fm * Gm.reshape(-1, 1)) / 4
+        # ic(C_0, spec.max(dim=0), spec)
+        return spec#.clip(max=1)
 
 
 class MLPBRDF(torch.nn.Module):
@@ -177,7 +138,7 @@ class MLPBRDF(torch.nn.Module):
         # ic(self(rand_vecs(), rand_vecs(), rand_vecs(), rand_vecs(), rand_vecs(), efeatures, torch.rand((N), device=device)).mean())
 
 
-    def forward(self, V, L, N, half_vec, diff_vec, efeatures, eroughness):
+    def forward(self, V, L, N, local_v, half_vec, diff_vec, efeatures, eax, eay):
         # V: (n, 3)-viewdirs, the outgoing light direction
         # L: (n, m, 3) incoming light direction. bounce_rays
         # N: (n, 1, 3) outward normal
@@ -187,11 +148,11 @@ class MLPBRDF(torch.nn.Module):
 
 
         LdotN = (L * N).sum(dim=-1, keepdim=True)
-        LdotH = (L * half_vec).sum(dim=-1, keepdim=True)
+        LdotH = (diff_vec * half_vec).sum(dim=-1, keepdim=True)
         if self.dotpe >= 0:
 
             VdotN = (V * N).sum(dim=-1, keepdim=True)
-            NdotH = ((half_vec * N).sum(dim=-1, keepdim=True)+1e-3)
+            NdotH = half_vec[..., 2]
             # indata = [LdotN, torch.sqrt((1-LdotN**2).clip(min=1e-8, max=1)),
             #           VdotN, torch.sqrt((1-LdotN**2).clip(min=1e-8, max=1)),
             #           NdotH, torch.sqrt((1-NdotH**2).clip(min=1e-8, max=1))]
@@ -211,17 +172,17 @@ class MLPBRDF(torch.nn.Module):
         L = L.reshape(-1, 3)
         B = V.shape[0]
         if self.h_encoder is not None:
-            indata += [self.h_encoder(half_vec, eroughness).reshape(B, -1), half_vec]
+            indata += [self.h_encoder(half_vec, eax).reshape(B, -1), half_vec]
         if self.d_encoder is not None:
-            indata += [self.d_encoder(diff_vec, eroughness).reshape(B, -1), diff_vec]
+            indata += [self.d_encoder(diff_vec, eax).reshape(B, -1), diff_vec]
         if self.feape > 0:
-            indata += [positional_encoding(features, self.feape)]
+            indata += [positional_encoding(efeatures, self.feape)]
         if self.v_encoder is not None:
-            indata += [self.v_encoder(V, eroughness).reshape(B, -1), V]
+            indata += [self.v_encoder(V, eax).reshape(B, -1), V]
         if self.n_encoder is not None:
-            indata += [self.n_encoder(N, eroughness).reshape(B, -1), N]
+            indata += [self.n_encoder(N, eax).reshape(B, -1), N]
         if self.l_encoder is not None:
-            indata += [self.l_encoder(L, eroughness).reshape(B, -1), L]
+            indata += [self.l_encoder(L, eax).reshape(B, -1), L]
 
         # ic("H")
         # for d in indata:
