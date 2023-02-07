@@ -351,11 +351,11 @@ class IntegralEquirect(torch.nn.Module):
                                       interp_mode=self.interp_mode, align_corners=self.align_corners)
 
         # handle top and bottom
-        # cutoff = 1 - 2 / h
-        # top_row = activated[..., 0, :].mean(dim=-1)
-        # bot_row = activated[..., -1, :].mean(dim=-1)
-        # bg_vals[coords[:, 1] > cutoff] = bot_row
-        # bg_vals[coords[:, 1] < -cutoff] = top_row
+        cutoff = 1 - 2 / h * 3
+        top_row = activated[..., 0, :].mean(dim=-1)
+        bot_row = activated[..., -1, :].mean(dim=-1)
+        bg_vals[coords[:, 1] > cutoff] = bot_row
+        bg_vals[coords[:, 1] < -cutoff] = top_row
         return bg_vals
 
 if __name__ == "__main__":

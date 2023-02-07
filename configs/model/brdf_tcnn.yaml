@@ -5,8 +5,8 @@ arch:
   recur_alpha_thres: 1e-3
   lr_scale: 1
   infinity_border: False
-  eval_batch_size: 4096
-  recur_stepmul: 0.1
+  eval_batch_size: 2048
+  recur_stepmul: 0.5
 
   bg_noise: 0.0
   bg_noise_decay: 0.999
@@ -166,10 +166,10 @@ params:
   TV_weight_app: 0.0
   TV_weight_bg: 0
   envmap_lambda: 5e-5
-  pred_lambda: 3e-3
-  final_pred_lambda: 3e-4
+  pred_lambda: 1e-2
+  final_pred_lambda: 3e-2
   diffuse_lambda: 0
-  ori_lambda: 0.05
+  ori_lambda: 0.1
   final_ori_lambda: Null
   brdf_lambda: 0
   normal_err_lambda: 0

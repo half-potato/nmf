@@ -108,28 +108,13 @@ class MLPBRDF(torch.nn.Module):
         # return torch.sigmoid(x)
         # return F.softplus(x+1.0)/2
 
-    # def save(self, features, path, res=50):
-    #     device = features.device
-    #     ele_grid, azi_grid = torch.meshgrid(
-    #         torch.linspace(-np.pi/2, np.pi/2, res, dtype=torch.float32),
-    #         torch.linspace(-np.pi, np.pi, 2*res, dtype=torch.float32), indexing='ij')
-    #     # each col of x ranges from -pi/2 to pi/2
-    #     # each row of y ranges from -pi to pi
-    #     ang_vecs = torch.stack([
-    #         torch.cos(ele_grid) * torch.cos(azi_grid),
-    #         torch.cos(ele_grid) * torch.sin(azi_grid),
-    #         -torch.sin(ele_grid),
-    #     ], dim=-1).to(device)
-    #     static_vecs = torch.zeros_like(ang_vecs)
-    #     self()
-
     def calibrate(self, efeatures, bg_brightness):
         N = efeatures.shape[0]
         device = efeatures.device
         def rand_vecs():
             v = normalize(2*torch.rand((N, 3), device=device) - 1)
             return v
-        weight = self(rand_vecs(), rand_vecs(), rand_vecs(), rand_vecs(), rand_vecs(), efeatures, torch.rand((N), device=device))
+        weight = self(rand_vecs(), rand_vecs(), rand_vecs(), rand_vecs(), rand_vecs(), rand_vecs(), efeatures, torch.rand((N), device=device), torch.rand((N), device=device))
         # ic(self(rand_vecs(), rand_vecs(), rand_vecs(), rand_vecs(), rand_vecs(), efeatures, torch.rand((N), device=device)).mean())
         target_val = 0.25 / bg_brightness.item()
         ic(bg_brightness, target_val)
