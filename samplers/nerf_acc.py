@@ -101,7 +101,7 @@ class NerfAccSampler(torch.nn.Module):
                 occ = rf.compute_densityfeature(bx).reshape(-1, 1)
                 occs.append(occ)
             return torch.cat(occs, dim=0)
-        stepmul *= self.test_multiplier if not is_train else 1
+        stepmul *= (self.test_multiplier if not is_train else 1)
         origins = rays_chunk[:, 0:3]
         viewdirs = rays_chunk[:, 3:6]
         ray_indices, t_starts, t_ends = ray_marching(

@@ -143,6 +143,7 @@ def depth_to_normals(depth, focal):
     normals = torch.stack([dx * inv_denom, -dy * inv_denom, inv_denom], -1)
     return normals
 
+@torch.no_grad()
 def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N_samples=-1,
                white_bg=False, ndc_ray=False, compute_extra_metrics=True, device='cuda', bundle_size=1, gt_bg=None):
     print("Eval")
@@ -227,6 +228,7 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
 
     tensorf.eval()
     tint_psnrs = []
+    ic(tensorf.eval_batch_size)
     for idx, im_idx, rays, gt_rgb in iterator():
 
         ims, stats = brender(rays, tensorf, N_samples=N_samples, ndc_ray=ndc_ray, is_train=False)
@@ -387,7 +389,7 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
 
     return dict(psnrs=PSNRs, norm_errs=norm_errs)
 
-# @torch.no_grad()
+@torch.no_grad()
 def evaluation(test_dataset,tensorf, unused, renderer, *args, N_vis=5, device='cuda', **kwargs):
 
     img_eval_interval = 1 if N_vis < 0 else max(test_dataset.all_rays.shape[0] // N_vis,1)
@@ -404,7 +406,7 @@ def evaluation(test_dataset,tensorf, unused, renderer, *args, N_vis=5, device='c
                 yield idx, idxs[idx], rays, None
     return evaluate(iterator, test_dataset, tensorf, renderer, *args, device=device, **kwargs)
 
-# @torch.no_grad()
+@torch.no_grad()
 def evaluation_path(test_dataset,tensorf, c2ws, renderer, *args, device='cuda', ndc_ray=False, **kwargs):
     W, H = test_dataset.img_wh
     def iterator():

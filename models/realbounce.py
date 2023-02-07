@@ -150,7 +150,7 @@ class RealBounce(torch.nn.Module):
         diffuse = diffuse * E
 
         # pick rays to bounce
-        num_brdf_rays = self.max_brdf_rays[recur]# // B
+        num_brdf_rays = self.max_brdf_rays[recur] // 4 if not is_train else self.max_brdf_rays[recur] # // B
 
         bounce_mask, ray_mask, bright_mask = select_bounces(
                 weights, app_mask, num_brdf_rays, self.percent_bright)

@@ -54,7 +54,8 @@ def render_test(args):
         logger.info('the ckpt path does not exists!!')
         return
 
-    expname = f"{args.dataset.dataset_name}_{args.expname}"
+    expname = f"{args.dataset.scenedir.split('/')[-1]}_{args.expname}"
+    ic(expname)
 
     # init dataset
     dataset = dataset_dict[args.dataset.dataset_name]
@@ -137,7 +138,8 @@ def render_test(args):
 def reconstruction(args):
     params = args.model.params
     ic(params)
-    expname = f"{args.dataset.dataset_name}_{args.expname}"
+    expname = f"{args.dataset.scenedir.split('/')[-1]}_{args.expname}"
+    ic(expname)
 
     # init dataset
     dataset = dataset_dict[args.dataset.dataset_name]
@@ -442,7 +444,7 @@ def reconstruction(args):
                     prev_n_samples = mean_ratio
                     num_rays = int(mean_ratio * params.target_num_samples + 1)
                     tensorf.model.update_n_samples(n_samples[1:])
-                    # tensorf.eval_batch_size = num_rays // 2
+                    tensorf.eval_batch_size = num_rays // 4
 
                     # rays_remaining -= rgb_map.shape[0]
                     # rays_train = rays_train[~whole_valid]
