@@ -1,4 +1,5 @@
 import torch
+import math
 from typing import Tuple
 
 def signed_clip(v, eps=torch.finfo(torch.float32).eps):
@@ -9,6 +10,24 @@ def normalize(v, ord=2, eps=torch.finfo(torch.float32).eps):
         return v / (v**2).sum(axis=-1, keepdim=True).clip(min=eps).sqrt()
     else:
         return v / (torch.linalg.norm(v, dim=-1, keepdim=True, ord=ord)+1e-8)
+
+def inv_sigmoid(v):
+    a = (v / (1-v))
+    if type(a) == float:
+        return math.log(a)
+    else:
+        return a.log()
+
+def inv_activation(a, activation):
+    if activation == 'exp':
+        if type(a) == float:
+            return math.log(a)
+        else:
+            return a.log()
+    elif activation == 'sigmoid':
+        return inv_sigmoid(a)
+    else:
+        raise Exception(f"inv_activation does not support {activation}")
 
 def expand_bits(v):                                                                                                                                                                                                
     v = (v * 0x00010001) & 0xFF0000FF                                                                                                                                                                              

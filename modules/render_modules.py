@@ -11,19 +11,12 @@ from modules.ish import ISH, RandISH
 from typing import List
 import cv2
 from .grid_sample_Cinf import gkern
-from mutils import normalize
+from mutils import normalize, inv_sigmoid
 from . import util
 import math
 
 def get_dim(encoder, extra=0):
     return 0 if encoder is None else encoder.dim() + extra
-
-def inv_sigmoid(v):
-    a = (v / (1-v))
-    if type(a) == float:
-        return math.log(a)
-    else:
-        return a.log()
 
 def str2fn(name):
     if name == 'sigmoid':

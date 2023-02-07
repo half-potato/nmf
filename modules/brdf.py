@@ -7,7 +7,7 @@ from .render_modules import positional_encoding, str2fn
 from icecream import ic
 import matplotlib.pyplot as plt
 from . import safemath
-from mutils import normalize, signed_clip
+from mutils import normalize, signed_clip, inv_activation
 
 from modules import util
 
@@ -118,7 +118,7 @@ class MLPBRDF(torch.nn.Module):
         # ic(self(rand_vecs(), rand_vecs(), rand_vecs(), rand_vecs(), rand_vecs(), efeatures, torch.rand((N), device=device)).mean())
         target_val = 0.25 / bg_brightness.item()
         ic(bg_brightness, target_val)
-        self.bias += math.log(target_val / (1-target_val)) - (weight / (1-weight)).log().mean().detach().item()
+        self.bias += inv_activation(target_val, self.activation_name) - inv_activation(weight, self.activation_name).mean().detach().item()
         # ic(self.bias, -(weight / (1-weight)).log().mean().detach().item())
         # ic(self(rand_vecs(), rand_vecs(), rand_vecs(), rand_vecs(), rand_vecs(), efeatures, torch.rand((N), device=device)).mean())
 
