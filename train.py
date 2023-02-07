@@ -54,6 +54,8 @@ def render_test(args):
         logger.info('the ckpt path does not exists!!')
         return
 
+    expname = f"{args.dataset.dataset_name}_{args.expname}"
+
     # init dataset
     dataset = dataset_dict[args.dataset.dataset_name]
     test_dataset = dataset(os.path.join(args.datadir, args.dataset.scenedir), split='test', downsample=args.dataset.downsample_train, is_stack=True)
@@ -117,7 +119,7 @@ def render_test(args):
         train_dataset = dataset(os.path.join(args.datadir, args.dataset.scenedir), split='train', downsample=args.dataset.downsample_train, is_stack=True)
         test_res = evaluation(train_dataset,tensorf, args, renderer, f'{logfolder}/imgs_train_all/',
                                 N_vis=-1, N_samples=-1, white_bg = white_bg, ndc_ray=ndc_ray,device=device)
-        logger.info(f'======> {args.expname} train all psnr: {np.mean(test_res["psnrs"])} <========================')
+        logger.info(f'======> {expname} train all psnr: {np.mean(test_res["psnrs"])} <========================')
 
     if args.render_test:
         folder = f'{logfolder}/imgs_test_all'
@@ -135,6 +137,7 @@ def render_test(args):
 def reconstruction(args):
     params = args.model.params
     ic(params)
+    expname = f"{args.dataset.dataset_name}_{args.expname}"
 
     # init dataset
     dataset = dataset_dict[args.dataset.dataset_name]
@@ -150,9 +153,9 @@ def reconstruction(args):
     ndc_ray = args.dataset.ndc_ray
 
     if args.add_timestamp:
-        logfolder = f'{args.basedir}/{args.expname}{datetime.datetime.now().strftime("-%Y%m%d-%H%M%S")}'
+        logfolder = f'{args.basedir}/{expname}{datetime.datetime.now().strftime("-%Y%m%d-%H%M%S")}'
     else:
-        logfolder = f'{args.basedir}/{args.expname}'
+        logfolder = f'{args.basedir}/{expname}'
     logger.add(logfolder + "/{time}.log", level="INFO", rotation="100 MB")
     
 
@@ -533,7 +536,7 @@ def reconstruction(args):
             params.pred_lambda *= normal_decay
                 
             if iteration % args.vis_every == args.vis_every - 1 and args.N_vis!=0:
-                # tensorf.save(f'{logfolder}/{args.expname}_{iteration}.th', args.model.arch)
+                # tensorf.save(f'{logfolder}/{expname}_{iteration}.th', args.model.arch)
                 test_res = evaluation(test_dataset,tensorf, args, renderer, f'{logfolder}/imgs_vis/', N_vis=args.N_vis,
                                         prtx=f'{iteration:06d}_', white_bg = white_bg, ndc_ray=ndc_ray,
                                         compute_extra_metrics=False, gt_bg=gt_bg)
@@ -542,7 +545,7 @@ def reconstruction(args):
                 summary_writer.add_scalar('test/norm_err', np.mean(test_res['norm_errs']), global_step=iteration)
                 logger.info(f'test_psnr = {float(np.mean(PSNRs_test)):.2f}')
                 if args.save_often:
-                    tensorf.save(f'{logfolder}/{args.expname}_{iteration:06d}.th', args.model.arch)
+                    tensorf.save(f'{logfolder}/{expname}_{iteration:06d}.th', args.model.arch)
 
             # logger.info the current values of the losses.
             if iteration % args.progress_refresh_rate == 0:
@@ -592,7 +595,7 @@ def reconstruction(args):
     # prof.export_chrome_trace('trace.json')
         
 
-    tensorf.save(f'{logfolder}/{args.expname}.th', args.model.arch)
+    tensorf.save(f'{logfolder}/{expname}.th', args.model.arch)
 
 
     if args.render_train:
@@ -600,14 +603,14 @@ def reconstruction(args):
         train_dataset = dataset(args.datadir, split='train', downsample=args.downsample_train, is_stack=True)
         test_res = evaluation(train_dataset,tensorf, args, renderer, f'{logfolder}/imgs_train_all/',
                                 N_vis=-1, N_samples=-1, white_bg = white_bg, ndc_ray=ndc_ray,device=device, gt_bg=gt_bg)
-        logger.info(f'======> {args.expname} test all psnr: {np.mean(test_res["psnrs"])} <========================')
+        logger.info(f'======> {expname} test all psnr: {np.mean(test_res["psnrs"])} <========================')
 
     if args.render_test:
         os.makedirs(f'{logfolder}/imgs_test_all', exist_ok=True)
         test_res = evaluation(test_dataset,tensorf, args, renderer, f'{logfolder}/imgs_test_all/',
                                 N_vis=-1, N_samples=-1, white_bg = white_bg, ndc_ray=ndc_ray,device=device, gt_bg=gt_bg)
         summary_writer.add_scalar('test/psnr_all', np.mean(test_res["psnrs"]), global_step=iteration)
-        logger.info(f'======> {args.expname} test all psnr: {np.mean(test_res["psnrs"])} <========================')
+        logger.info(f'======> {expname} test all psnr: {np.mean(test_res["psnrs"])} <========================')
 
     if args.render_path:
         c2ws = test_dataset.render_path
