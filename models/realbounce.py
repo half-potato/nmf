@@ -243,7 +243,7 @@ class RealBounce(torch.nn.Module):
 
             # calculate second part of BRDF
             n, m = ray_mask.shape
-            # brdf_weight = self.brdf(eV, L, eN, halfvec, diffvec, efeatures, ea)
+            # brdf_weight = self.brdf(eV, L, eN, local_v, halfvec, diffvec, efeatures, ea1, ea2)
             brdf_weight = self.brdf(eV, L.detach(), eN.detach(), local_v.detach(), halfvec.detach(), diffvec.detach(), efeatures, ea1.detach(), ea2.detach())
             ray_count = (ray_mask.sum(dim=1)+1e-8)[..., None]
 

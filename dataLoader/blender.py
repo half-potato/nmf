@@ -15,7 +15,7 @@ from .ray_utils import *
 
 
 class BlenderDataset(Dataset):
-    def __init__(self, datadir, stack_norms=False, split='train', downsample=1.0, is_stack=False, N_vis=-1, white_bg=True):
+    def __init__(self, datadir, stack_norms=False, split='train', downsample=1.0, is_stack=False, N_vis=-1, white_bg=True, is_testing=False):
         self.downsample=downsample
         self.N_vis = N_vis
         self.root_dir = datadir
@@ -23,6 +23,7 @@ class BlenderDataset(Dataset):
         self.is_stack = is_stack
         self.stack_norms = stack_norms
         self.white_bg = white_bg
+        self.is_testing = is_testing or split == 'test'
         self.define_transforms()
         if self.stack_norms:
             print("Stacking normals")
@@ -140,7 +141,7 @@ class BlenderDataset(Dataset):
             rays = torch.cat([rays_o, rays_d], 1)
 
             c = img.shape[1]
-            if c == 4 and self.split == 'test':
+            if c == 4 and self.is_testing:
                 img[:, :3] = img[:, :3] * img[:, -1:] + (1 - img[:, -1:])  # blend A to RGB
             if img.max() > 1:
                 self.hdr = True

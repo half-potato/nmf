@@ -1,0 +1,15 @@
+- scenedir: nerf_synthetic/materials
+  dataset_name: blender
+  downsample_train: 1
+  downsample_test: 1
+  ndc_ray: false
+  near_far: [2, 6]
+  stack_norms: false
+
+- scenedir: nerf_synthetic/materials_christmas
+  dataset_name: blender
+  downsample_train: 1
+  downsample_test: 1
+  ndc_ray: false
+  near_far: [2, 6]
+  stack_norms: false

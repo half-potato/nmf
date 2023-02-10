@@ -53,7 +53,7 @@ class ERBrightSampler():
         pass
 
     def sample(self, bg_module, N, eps=torch.finfo(torch.float32).eps):
-        brightness = bg_module.activation_fn(bg_module.bg_mat[0]).mean(dim=-1)
+        brightness = bg_module.get_brightness()
         # multiply by sin of elevation
         device = brightness.device
         H, W = brightness.shape
