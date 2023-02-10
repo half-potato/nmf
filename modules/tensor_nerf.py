@@ -4,6 +4,7 @@ import numpy as np
 import time
 from icecream import ic
 
+from omegaconf import OmegaConf
 from . import render_modules
 from .tonemap import SRGBTonemap
 import plotly.express as px
@@ -110,7 +111,12 @@ class TensorNeRF(torch.nn.Module):
 
     @staticmethod
     def load(ckpt, config=None, near_far=None, **kwargs):
-        config = ckpt['config'] if config is None else config
+        if config is not None:
+            config.model.brdf.bias = ckpt['config'].model.brdf.bias
+            config.model.diffuse_module.diffuse_bias = ckpt['config'].model.diffuse_module.diffuse_bias
+            config.model.diffuse_module.roughness_bias = ckpt['config'].model.diffuse_module.roughness_bias
+
+        config = ckpt['config'] if config is None else OmegaConf.merge(ckpt['config'], config)
         aabb = ckpt['state_dict']['rf.aabb']
         # if 'model.brdf_sampler.angs' in ckpt['state_dict']:
         #     c = ckpt['state_dict']['model.brdf_sampler.angs'].shape[0]
@@ -399,7 +405,7 @@ class TensorNeRF(torch.nn.Module):
                 pred_norm_err_b = 2*(1-(world_normal[gt_mask] * gt_normals_mask[gt_mask]).sum(dim=-1))
                 pred_norm_err = (aweight[gt_mask] * (pred_norm_err_a + pred_norm_err_b)).sum()# / B
                 statistics['normal_err'] = pred_norm_err
-            statistics['brdf_reg'] = -debug['tint'].mean() if 'tint' in debug else torch.tensor(0.0)
+            statistics['brdf_reg'] = ((debug['tint']-1).clip(min=0)**2).mean() if 'tint' in debug else torch.tensor(0.0)
             statistics['diffuse_reg'] = (aweight.detach().reshape(-1, 1)*debug['diffuse']).sum() / 3
             # debug['roughness'].sum() if 'roughness' in debug else torch.tensor(0.0)
             statistics['prediction_loss'] = prediction_loss

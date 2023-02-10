@@ -2,7 +2,7 @@ import torch
 import math
 from icecream import ic
 
-from nerfacc import ContractionType, OccupancyGrid, ray_marching
+from nerfacc import ContractionType, OccupancyGrid, ray_marching, contract_inv
 
 class NerfAccSampler(torch.nn.Module):
     def __init__(self,
@@ -14,6 +14,7 @@ class NerfAccSampler(torch.nn.Module):
                  multiplier=1,
                  test_multiplier=1,
                  update_freq=16,
+                 shrink_iters=[],
                  alpha_thres = 0,
                  ema_decay = 0.95,
                  occ_thre=0.01
@@ -33,6 +34,7 @@ class NerfAccSampler(torch.nn.Module):
         self.cone_angle = 0.0
         self.max_samples = max_samples
         self.test_multiplier = test_multiplier
+        self.shrink_iters = shrink_iters
 
         self.stepsize = (
             (self.aabb[3:] - self.aabb[:3]).max()
@@ -50,6 +52,18 @@ class NerfAccSampler(torch.nn.Module):
             return density * self.stepsize
         self.occupancy_grid.every_n_step(step=iteration+1, occ_eval_fn=occ_eval_fn, ema_decay=self.ema_decay, occ_thre=self.occ_thre)
 
+        if iteration in [i*batch_mul for i in self.shrink_iters]:
+            x = self.occupancy_grid.grid_coords[self.occupancy_grid._binary.reshape(-1)] / self.occupancy_grid.resolution
+            x = contract_inv(
+                x,
+                roi=self.occupancy_grid._roi_aabb,
+                type=self.occupancy_grid._contraction_type,
+            )
+            new_aabb = torch.stack([x.min(dim=0).values, x.max(dim=0).values], dim=0)
+            rf.shrink(new_aabb, None)
+            self.update(rf, init=True)
+            return True
+
         self.nSamples = int(rf.nSamples * self.multiplier)
         near, far = self.near_far
         self.stepsize = (far - near) / self.nSamples
@@ -57,9 +71,6 @@ class NerfAccSampler(torch.nn.Module):
 
     @torch.no_grad()
     def update(self, rf, init=True):
-        self.nSamples = int(rf.nSamples * self.multiplier)
-        near, far = self.near_far
-        self.stepsize = (far - near) / self.nSamples
         if init:
             self.occupancy_grid = OccupancyGrid(
                 roi_aabb=self.aabb,

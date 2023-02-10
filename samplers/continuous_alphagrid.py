@@ -435,6 +435,7 @@ class ContinuousAlphagrid(torch.nn.Module):
         if iteration in [i*batch_mul for i in self.shrink_iters]:
             new_aabb = self.get_bounds()
             rf.shrink(new_aabb, self.grid_size)
+            return True
             # self.update(rf, init=True)
         return False
 

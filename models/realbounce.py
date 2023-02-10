@@ -112,7 +112,7 @@ class RealBounce(torch.nn.Module):
         return im
 
     def update_n_samples(self, n_samples):
-        assert(len(self.target_num_samples) == len(self.max_retrace_rays))
+        # assert(len(self.target_num_samples) == len(self.max_retrace_rays))
         if len(n_samples) == len(self.max_retrace_rays):
             ratios = [n_rays / n_sample if n_sample > 0 else None for n_rays, n_sample in zip(self.max_retrace_rays, n_samples)]
             if self.mean_ratios is None:
@@ -305,7 +305,7 @@ class RealBounce(torch.nn.Module):
                 importance_samp_correction[~pbright_mask] = weight[~pbright_mask]
 
 
-            eray_count = ray_count.reshape(-1, 1).expand(ray_mask.shape)[ray_mask].reshape(-1, 1)
+            eray_count = ray_count.reshape(-1, 1).expand(ray_mask.shape)[ray_mask].reshape(-1, 1).clip(min=1)
             brdf_color = row_mask_sum(brdf_weight / eray_count, ray_mask)# / ray_count
             tinted_ref_rgb = row_mask_sum(incoming_light * brdf_weight / eray_count * importance_samp_correction, ray_mask)
             spec[bounce_mask] = row_mask_sum(incoming_light / eray_count * importance_samp_correction, ray_mask)

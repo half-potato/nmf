@@ -69,8 +69,8 @@ class BlenderDataset(Dataset):
 
         w, h = int(self.meta['w']/self.downsample), int(self.meta['h']/self.downsample)
         self.img_wh = [w,h]
-        print(f"Original Image size: {self.meta['w']} x {self.meta['h']}")
-        print(f"Image size: {w} x {h}")
+        # print(f"Original Image size: {self.meta['w']} x {self.meta['h']}")
+        # print(f"Image size: {w} x {h}")
         if 'aabb_scale' in self.meta:
             aabb_scale = self.meta['aabb_scale']
             self.scene_bbox *= aabb_scale
@@ -167,7 +167,6 @@ class BlenderDataset(Dataset):
         else:
             self.all_rays = torch.stack(self.all_rays, 0)  # (len(self.meta['frames]),h*w, 3)
 
-            ic(torch.stack(self.all_rgbs, 0).shape, c)
             self.all_rgbs = torch.stack(self.all_rgbs, 0).reshape(-1,*self.img_wh[::-1], c)[..., :3]  # (len(self.meta['frames]),h,w,3)
             # self.all_masks = torch.stack(self.all_masks, 0).reshape(-1,*self.img_wh[::-1])  # (len(self.meta['frames]),h,w,3)
 

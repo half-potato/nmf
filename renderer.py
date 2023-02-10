@@ -229,6 +229,7 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
     tensorf.eval()
     tint_psnrs = []
     ic(tensorf.eval_batch_size)
+    torch.cuda.empty_cache()
     for idx, im_idx, rays, gt_rgb in iterator():
 
         ims, stats = brender(rays, tensorf, N_samples=N_samples, ndc_ray=ndc_ray, is_train=False)

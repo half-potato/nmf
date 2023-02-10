@@ -137,7 +137,6 @@ def render_test(args):
 
 def reconstruction(args):
     params = args.model.params
-    ic(params)
     expname = f"{args.dataset.scenedir.split('/')[-1]}_{args.expname}"
     ic(expname)
 
@@ -340,7 +339,6 @@ def reconstruction(args):
     xyz[:, 3] *= 0
     sigma_feat = tensorf.rf.compute_densityfeature(xyz)
     alpha = 1-torch.exp(-sigma_feat * tensorf.sampler.stepsize * tensorf.rf.distance_scale)
-    print(f"Mean alpha: {alpha.detach().mean().item():.06f}.")
     ic(sigma_feat.mean())
     feat = tensorf.rf.compute_appfeature(xyz)
     tensorf.model.diffuse_module.calibrate(xyz, normalize(torch.rand_like(xyz[:, :3])), feat)
@@ -444,7 +442,7 @@ def reconstruction(args):
                     prev_n_samples = mean_ratio
                     num_rays = int(mean_ratio * params.target_num_samples + 1)
                     tensorf.model.update_n_samples(n_samples[1:])
-                    tensorf.eval_batch_size = num_rays // 4
+                    # tensorf.eval_batch_size = num_rays // 4
 
                     # rays_remaining -= rgb_map.shape[0]
                     # rays_train = rays_train[~whole_valid]
@@ -572,6 +570,7 @@ def reconstruction(args):
 
             if tensorf.check_schedule(iteration, 1):
                 grad_vars = tensorf.get_optparam_groups()
+                print("reinit optimizer")
                 optimizer, scheduler = init_optimizer(grad_vars)
                 # new_grad_vars = tensorf.get_optparam_groups()
                 # for param_group, new_param_group in zip(optimizer.param_groups, new_grad_vars):
@@ -628,8 +627,8 @@ def train(cfg: DictConfig):
     torch.set_default_dtype(torch.float32)
     torch.manual_seed(cfg.seed)
     np.random.seed(cfg.seed)
-    logger.info(cfg.dataset)
-    logger.info(cfg.model)
+    # logger.info(cfg.dataset)
+    # logger.info(cfg.model)
     cfg.model.arch.rf = cfg.field
 
     if cfg.render_only:
