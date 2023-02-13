@@ -48,7 +48,7 @@ class TensorNeRF(torch.nn.Module):
                  infinity_border=False, recur_stepmul=1,
                  recur_alpha_thres=1e-3,detach_inter=False, bg_noise=0, bg_noise_decay=0.999, use_predicted_normals=True,
                  orient_world_normals=False, align_pred_norms=True,
-                 eval_batch_size=512, geonorm_iters=-1,
+                 eval_batch_size=512, geonorm_iters=-1, geonorm_interp_iters=1,
                  lr_scale=1,
                  **kwargs):
         super(TensorNeRF, self).__init__()
@@ -70,12 +70,14 @@ class TensorNeRF(torch.nn.Module):
         self.recur_alpha_thres = recur_alpha_thres
         self.eval_batch_size = eval_batch_size
         self.geonorm_iters = geonorm_iters
+        self.geonorm_interp_iters = geonorm_interp_iters
         self.recur_stepmul = recur_stepmul
         self.detach_bg = False
 
         self.detach_inter = detach_inter
 
         self.use_predicted_normals = use_predicted_normals and self.normal_module is not None
+        self.predicted_normal_lambda = 1 if self.use_predicted_normals else 0
         self.align_pred_norms = use_predicted_normals | align_pred_norms
         self.orient_world_normals = orient_world_normals | (not self.align_pred_norms)
         ic(self.use_predicted_normals, self.align_pred_norms, self.orient_world_normals)
@@ -96,8 +98,8 @@ class TensorNeRF(torch.nn.Module):
 
     def save(self, path, config):
         print(f"Saving nerf to {path}")
-        if self.bg_module is not None:
-            config['bg_module']['bg_resolution'] = self.bg_module.bg_resolution
+        # if self.bg_module is not None:
+        #     config['bg_module']['bg_resolution'] = self.bg_module.bg_resolution
         config['use_predicted_normals'] = self.use_predicted_normals
         ckpt = {'config': config, 'state_dict': self.state_dict()}
         # if self.alphaMask is not None:
@@ -151,7 +153,7 @@ class TensorNeRF(torch.nn.Module):
             self.sampler.update(self.rf, init=True)
         self.bg_noise *= self.bg_noise_decay
         if self.geonorm_iters > 0:
-            self.use_predicted_normals = self.geonorm_iters*batch_mul < iter
+            self.predicted_normal_lambda = max(min((iter/batch_mul - self.geonorm_iters)/self.geonorm_interp_iters, 1), 0)
             if self.geonorm_iters*batch_mul == iter:
                 logger.info("Switching to predicted normals")
         return require_reassignment
@@ -280,7 +282,13 @@ class TensorNeRF(torch.nn.Module):
             if self.normal_module is not None:
                 pred_norms = torch.zeros_like(pred_norms)
                 pred_norms = self.normal_module(xyz_normed, app_features, world_normal)
-                v_world_normal = pred_norms if self.use_predicted_normals else world_normal
+                # v_world_normal = pred_norms if self.use_predicted_normals else world_normal
+                if self.predicted_normal_lambda == 0:
+                    v_world_normal = world_normal
+                elif self.predicted_normal_lambda == 1:
+                    v_world_normal = pred_norms
+                else:
+                    v_world_normal = normalize(self.predicted_normal_lambda*pred_norms + (1-self.predicted_normal_lambda)*world_normal)
             else:
                 v_world_normal = world_normal
 

@@ -16,6 +16,7 @@ arch:
   align_pred_norms: True
   detach_inter: False
   geonorm_iters: 10000
+  geonorm_interp_iters: 1000
 
   tonemap:
     # _target_: modules.tonemap.HDRTonemap
