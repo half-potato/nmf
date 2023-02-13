@@ -144,7 +144,7 @@ def depth_to_normals(depth, focal):
     return normals
 
 @torch.no_grad()
-def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N_samples=-1,
+def evaluate(iterator, test_dataset, tensorf, renderer, savePath=None, prtx='', N_samples=-1,
                white_bg=False, ndc_ray=False, compute_extra_metrics=True, device='cuda', bundle_size=1, gt_bg=None):
     print("Eval")
     PSNRs, rgb_maps, depth_maps = [], [], []
@@ -391,7 +391,7 @@ def evaluate(iterator, test_dataset,tensorf, renderer, savePath=None, prtx='', N
     return dict(psnrs=PSNRs, norm_errs=norm_errs)
 
 @torch.no_grad()
-def evaluation(test_dataset,tensorf, unused, renderer, *args, N_vis=5, device='cuda', **kwargs):
+def evaluation(test_dataset, tensorf, unused, renderer, *args, N_vis=5, device='cuda', **kwargs):
 
     img_eval_interval = 1 if N_vis < 0 else max(test_dataset.all_rays.shape[0] // N_vis,1)
     idxs = list(range(0, test_dataset.all_rays.shape[0], img_eval_interval))

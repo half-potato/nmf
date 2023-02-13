@@ -20,6 +20,7 @@ import utils
 from modules.row_mask_sum import row_mask_sum
 from modules.distortion_loss_warp import calc_distortion_loss
 from mutils import normalize
+from loguru import logger
 
 LOGGER = Logger(enable=False)
 FIXED_SPHERE = False
@@ -152,6 +153,8 @@ class TensorNeRF(torch.nn.Module):
         self.bg_noise *= self.bg_noise_decay
         if self.geonorm_iters > 0:
             self.use_predicted_normals = self.geonorm_iters*batch_mul < iter
+            if self.geonorm_iters*batch_mul == iter:
+                logger.info("Switching to predicted normals")
         return require_reassignment
 
     def at_infinity(self, xyz_sampled, max_dist=10):
@@ -394,7 +397,7 @@ class TensorNeRF(torch.nn.Module):
             # output['diffuse_reg'] = tint.clip(min=1e-3).mean()
             if self.bg_module is not None:
                 envmap_brightness = self.bg_module.mean_color().mean()
-                statistics['envmap_reg'] = (envmap_brightness).clip(min=0)
+                statistics['envmap_reg'] = (envmap_brightness-1).clip(min=0)**2
             else:
                 statistics['envmap_reg'] = torch.tensor(0.0)
 
@@ -405,7 +408,7 @@ class TensorNeRF(torch.nn.Module):
                 pred_norm_err_b = 2*(1-(world_normal[gt_mask] * gt_normals_mask[gt_mask]).sum(dim=-1))
                 pred_norm_err = (aweight[gt_mask] * (pred_norm_err_a + pred_norm_err_b)).sum()# / B
                 statistics['normal_err'] = pred_norm_err
-            statistics['brdf_reg'] = ((debug['tint']-1).clip(min=0)**2).mean() if 'tint' in debug else torch.tensor(0.0)
+            statistics['brdf_reg'] = ((debug['tint'].mean()-1).clip(min=0)**2) if 'tint' in debug else torch.tensor(0.0)
             statistics['diffuse_reg'] = (aweight.detach().reshape(-1, 1)*debug['diffuse']).sum() / 3
             # debug['roughness'].sum() if 'roughness' in debug else torch.tensor(0.0)
             statistics['prediction_loss'] = prediction_loss

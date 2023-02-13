@@ -377,10 +377,11 @@ def reconstruction(args):
         for iteration in pbar:
             optimizer.zero_grad(set_to_none=True)
             losses, roughnesses, envmap_regs, diffuse_regs = [],[],[],[]
+            brdf_regs = []
             pred_losses, ori_losses = [], []
             TVs = []
 
-            lbatch_size = params.min_batch_size if num_rays < params.min_batch_size else num_rays
+            lbatch_size = min(params.min_batch_size if num_rays < params.min_batch_size else num_rays, params.max_batch_size)
             num_remaining = lbatch_size
             while num_remaining > 0:
                 lnum_rays = min(num_rays, num_remaining)
@@ -516,6 +517,7 @@ def reconstruction(args):
                     roughnesses.append(ims['roughness'].mean().detach().item())
                     diffuse_regs.append(params.diffuse_lambda * diffuse_reg.detach().item() / lbatch_size)
                     envmap_regs.append(envmap_reg.detach().item())
+                    brdf_regs.append(params.brdf_lambda * brdf_reg.detach().item())
                     PSNRs.append(-10.0 * np.log(photo_loss) / np.log(10.0))
 
                     # summary_writer.add_scalar('train/PSNR', PSNRs[-1], global_step=iteration)
@@ -537,6 +539,7 @@ def reconstruction(args):
                 
             if iteration % args.vis_every == args.vis_every - 1 and args.N_vis!=0:
                 # tensorf.save(f'{logfolder}/{expname}_{iteration}.th', args.model.arch)
+                torch.cuda.empty_cache()
                 test_res = evaluation(test_dataset,tensorf, args, renderer, f'{logfolder}/imgs_vis/', N_vis=args.N_vis,
                                         prtx=f'{iteration:06d}_', white_bg = white_bg, ndc_ray=ndc_ray,
                                         compute_extra_metrics=False, gt_bg=gt_bg)
@@ -554,6 +557,7 @@ def reconstruction(args):
                     f' loss = {float(np.sum(losses)):.5f}' + \
                     f' envmap = {float(np.mean(envmap_regs)):.5f}' + \
                     f' diffuse = {float(np.sum(diffuse_regs)):.5f}' + \
+                    f' brdf = {float(np.sum(brdf_regs)):.5f}' + \
                     f' nrays = {[num_rays] + tensorf.model.max_retrace_rays}'
                     # f' rough = {float(np.mean(roughnesses)):.5f}' + \
                     # f' tv = {float(np.mean(TVs)):.5f}' + \
@@ -599,6 +603,7 @@ def reconstruction(args):
     tensorf.save(f'{logfolder}/{expname}.th', args.model.arch)
 
 
+    torch.cuda.empty_cache()
     if args.render_train:
         os.makedirs(f'{logfolder}/imgs_train_all', exist_ok=True)
         train_dataset = dataset(args.datadir, split='train', downsample=args.downsample_train, is_stack=True)
