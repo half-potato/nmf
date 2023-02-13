@@ -1,0 +1,12 @@
+- scenedir: nerf_synthetic/lego
+  dataset_name: blender
+  downsample_train: 1
+  downsample_test: 1
+  ndc_ray: false
+  near_far: [2.5, 7]
+- scenedir: nerf_synthetic/lego2
+  dataset_name: blender
+  downsample_train: 1
+  downsample_test: 1
+  ndc_ray: false
+  near_far: [2.5, 7]

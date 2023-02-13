@@ -136,19 +136,34 @@ arch:
       _target_: brdf_samplers.equirect_bright_sampler.ERBrightSampler
 
   bg_module:
-    _target_: modules.integral_equirect.IntegralEquirect
-    bg_resolution: 1024
-    mipbias: 1
-    activation: 'exp'
-    lr: 0.02
-    init_val: -0.6
-    # init_val: -0.602
-    mul_lr: 0
-    brightness_lr: 0
-    betas: [0.9, 0.99]
-    mul_betas: [0.9, 0.9]
-    mipbias_lr: 1e-4
-    mipnoise: 0.0
+    _target_: modules.dual_bg.MultiBG
+    bgs: 
+      - _target_: modules.integral_equirect.IntegralEquirect
+        bg_resolution: 1024
+        mipbias: 1
+        activation: 'exp'
+        lr: 0.02
+        init_val: -0.6
+        # init_val: -0.602
+        mul_lr: 0
+        brightness_lr: 0
+        betas: [0.9, 0.99]
+        mul_betas: [0.9, 0.9]
+        mipbias_lr: 1e-4
+        mipnoise: 0.0
+      - _target_: modules.integral_equirect.IntegralEquirect
+        bg_resolution: 1024
+        mipbias: 1
+        activation: 'exp'
+        lr: 0.02
+        init_val: -0.6
+        # init_val: -0.602
+        mul_lr: 0
+        brightness_lr: 0
+        betas: [0.9, 0.99]
+        mul_betas: [0.9, 0.9]
+        mipbias_lr: 1e-4
+        mipnoise: 0.0
 
   rf: 'placeholder'
 

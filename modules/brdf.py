@@ -131,7 +131,6 @@ class MLPBRDF(torch.nn.Module):
         # matprop: dictionary of attributes
         # mask: mask for matprop
 
-
         LdotN = (L * N).sum(dim=-1, keepdim=True)
         LdotH = (diff_vec * half_vec).sum(dim=-1, keepdim=True)
         if self.dotpe >= 0:

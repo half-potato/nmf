@@ -116,7 +116,6 @@ class TensorNeRF(torch.nn.Module):
             config.model.brdf.bias = ckpt['config'].model.brdf.bias
             config.model.diffuse_module.diffuse_bias = ckpt['config'].model.diffuse_module.diffuse_bias
             config.model.diffuse_module.roughness_bias = ckpt['config'].model.diffuse_module.roughness_bias
-
         config = ckpt['config'] if config is None else OmegaConf.merge(ckpt['config'], config)
         aabb = ckpt['state_dict']['rf.aabb']
         # if 'model.brdf_sampler.angs' in ckpt['state_dict']:

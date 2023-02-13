@@ -176,6 +176,10 @@ class IntegralEquirect(torch.nn.Module):
         else:
             return torch.exp(x.clip(max=20))
 
+    def get_brightness(self):
+        brightness = self.activation_fn(self.bg_mat[0]).mean(dim=-1)
+        return brightness
+
     def get_device(self):
         return self.bg_mat.device
 

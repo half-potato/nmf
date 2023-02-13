@@ -56,10 +56,11 @@ def render_test(args):
 
     expname = f"{args.dataset.scenedir.split('/')[-1]}_{args.expname}"
     ic(expname)
+    white_bg = True
 
     # init dataset
     dataset = dataset_dict[args.dataset.dataset_name]
-    test_dataset = dataset(os.path.join(args.datadir, args.dataset.scenedir), split='test', downsample=args.dataset.downsample_train, is_stack=True)
+    test_dataset = dataset(os.path.join(args.datadir, args.dataset.scenedir), split='test', downsample=args.dataset.downsample_train, is_stack=True, white_bg=white_bg)
     white_bg = test_dataset.white_bg
     ndc_ray = args.dataset.ndc_ray
 
@@ -117,7 +118,7 @@ def render_test(args):
     logfolder = os.path.dirname(args.ckpt)
     if args.render_train:
         os.makedirs(f'{logfolder}/imgs_train_all', exist_ok=True)
-        train_dataset = dataset(os.path.join(args.datadir, args.dataset.scenedir), split='train', downsample=args.dataset.downsample_train, is_stack=True)
+        train_dataset = dataset(os.path.join(args.datadir, args.dataset.scenedir), split='train', downsample=args.dataset.downsample_train, is_stack=True, white_bg=white_bg, is_testing=True)
         test_res = evaluation(train_dataset,tensorf, args, renderer, f'{logfolder}/imgs_train_all/',
                                 N_vis=-1, N_samples=-1, white_bg = white_bg, ndc_ray=ndc_ray,device=device)
         logger.info(f'======> {expname} train all psnr: {np.mean(test_res["psnrs"])} <========================')
@@ -147,7 +148,7 @@ def reconstruction(args):
     train_dataset = dataset(os.path.join(args.datadir, args.dataset.scenedir), split='train',
                             downsample=args.dataset.downsample_train, is_stack=False, stack_norms=stack_norms, white_bg=white_bg)
     test_dataset = dataset(os.path.join(args.datadir, args.dataset.scenedir), split='test',
-                           downsample=args.dataset.downsample_train, is_stack=True, white_bg=white_bg)
+                           downsample=args.dataset.downsample_train, is_stack=True, white_bg=white_bg, is_testing=True)
     white_bg = train_dataset.white_bg
     train_dataset.near_far = args.dataset.near_far
     near_far = train_dataset.near_far
@@ -558,8 +559,9 @@ def reconstruction(args):
                     f' envmap = {float(np.mean(envmap_regs)):.5f}' + \
                     f' diffuse = {float(np.sum(diffuse_regs)):.5f}' + \
                     f' brdf = {float(np.sum(brdf_regs)):.5f}' + \
+                    f' rough = {float(np.mean(roughnesses)):.5f}' + \
                     f' nrays = {[num_rays] + tensorf.model.max_retrace_rays}'
-                    # f' rough = {float(np.mean(roughnesses)):.5f}' + \
+                    # f' diffuse = {float(np.sum(diffuse_regs)):.5f}' + \
                     # f' tv = {float(np.mean(TVs)):.5f}' + \
                     # f' ori loss = {float(np.mean(ori_losses) / num_rays):.5f}' + \
                     # f' pred loss = {float(np.mean(pred_losses) / num_rays):.5f}' + \
