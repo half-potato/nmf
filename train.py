@@ -613,6 +613,7 @@ def reconstruction(args):
                                 N_vis=-1, N_samples=-1, white_bg = white_bg, ndc_ray=ndc_ray,device=device, gt_bg=gt_bg)
         logger.info(f'======> {expname} test all psnr: {np.mean(test_res["psnrs"])} <========================')
 
+    torch.cuda.empty_cache()
     if args.render_test:
         os.makedirs(f'{logfolder}/imgs_test_all', exist_ok=True)
         test_res = evaluation(test_dataset,tensorf, args, renderer, f'{logfolder}/imgs_test_all/',
@@ -620,6 +621,7 @@ def reconstruction(args):
         summary_writer.add_scalar('test/psnr_all', np.mean(test_res["psnrs"]), global_step=iteration)
         logger.info(f'======> {expname} test all psnr: {np.mean(test_res["psnrs"])} <========================')
 
+    torch.cuda.empty_cache()
     if args.render_path:
         c2ws = test_dataset.render_path
         # c2ws = test_dataset.poses

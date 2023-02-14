@@ -5,7 +5,7 @@ arch:
   recur_alpha_thres: 1e-3
   lr_scale: 1
   infinity_border: False
-  eval_batch_size: 1024
+  eval_batch_size: 10240
   recur_stepmul: 0.5
 
   bg_noise: 0.0
@@ -29,7 +29,7 @@ arch:
     grid_size: 128
     update_freq: 16
     multiplier: 2
-    test_multiplier: 2
+    test_multiplier: 1
     shrink_iters: []
     ema_decay: 0.95
     occ_thre: 0.01
@@ -56,11 +56,11 @@ arch:
   model:
     _partial_: True
     _target_: models.realbounce.RealBounce
-    percent_bright: 0.05
+    percent_bright: 0.0
     # max_brdf_rays: [3194304]
     max_brdf_rays: [259430]
     target_num_samples: [800000]
-    russian_roulette: False
+    russian_roulette: True
     max_retrace_rays: []
     cold_start_bg_iters: 0
     detach_N_iters: 0
@@ -91,7 +91,7 @@ arch:
         _target_: modules.ish.ListISH
         degs: [0,1,2,4]
       hidden_w: 64
-      num_layers: 4
+      num_layers: 3
       initializer: 'kaiming'
 
       bias: 0
@@ -169,8 +169,8 @@ arch:
   rf: 'placeholder'
 
 params:
-  L1_weight_initial: 0
-  L1_weight_rest: 0
+  L1_weight_initial: 8e-5
+  L1_weight_rest: 4e-5
   clip_grad: 10
   weight_decay: 1e-6
   eps: 1e-15
@@ -178,19 +178,19 @@ params:
 
   starting_batch_size: 100
   min_batch_size: 4096
-  max_batch_size: 10240
+  max_batch_size: 64000
   target_num_samples: 400000
 
   TV_weight_density: 0.0
   TV_weight_app: 0.0
   TV_weight_bg: 0
-  envmap_lambda: 5e-5
+  envmap_lambda: 1e-5
   pred_lambda: 1e-2
   final_pred_lambda: 3e-2
   diffuse_lambda: 0
   ori_lambda: 0.1
   final_ori_lambda: Null
-  brdf_lambda: 0
+  brdf_lambda: 1e-2
   normal_err_lambda: 0
   
   distortion_lambda: 0 # 1e-3

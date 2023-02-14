@@ -2,7 +2,7 @@ _partial_: True
 _target_: fields.tensoRF.TensorVMSplit
 # distance_scale: 10
 distance_scale: 0.5
-density_n_comp: 32
+density_n_comp: 16
 # density_n_comp: 24
 appearance_n_comp: 24
 app_dim: 48
@@ -15,7 +15,7 @@ smoothing: 0.5
 activation: 'exp'
 # activation: 'relu_shift'
 interp_mode: bilinear
-init_mode: unifplane
+init_mode: unif
 d_init_val: 0.1
 app_init_val: 0.1
 # init_mode: trig
@@ -23,7 +23,7 @@ density_shift: -0
 # grid_size: [512, 512, 512]
 # grid_size: [128, 128, 128]
 grid_size: [32,32,32]
-dbasis: True
+dbasis: False
 
 # N_voxel_init: 262144
 N_voxel_init: 32768

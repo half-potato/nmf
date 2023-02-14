@@ -22,6 +22,7 @@ class TensoRF(torch.nn.Module):
         self.align_corners = True
         self.lr = lr
         self.smoothing = smoothing
+        self.padding_mode = 'zeros'
         self.init_mode = init_mode
         self.interp_mode = interp_mode
         self.app_plane, self.app_line = self.init_one_svd(dim, self.grid_size, init_val, 0)
@@ -104,10 +105,11 @@ class TensoRF(torch.nn.Module):
         coordinate_plane, coordinate_line = self.coords(xyz_normed)
         feature = []
         for idx_plane in range(len(self.app_plane)):
-            pc = grid_sample(self.app_plane[idx_plane], coordinate_plane[[idx_plane]], mode=self.interp_mode,
-                        align_corners=self.align_corners, smoothing=self.smoothing).view(-1, *xyz_normed.shape[:1])
+            pc = grid_sample(self.app_plane[idx_plane], coordinate_plane[[idx_plane]], mode=self.interp_mode, padding_mode=self.padding_mode,
+                             align_corners=self.align_corners, smoothing=self.smoothing).view(-1, *xyz_normed.shape[:1])
             lc = grid_sample(self.app_line[idx_plane], coordinate_line[[idx_plane]],
-                                            align_corners=self.align_corners, mode=self.interp_mode, smoothing=self.smoothing).view(-1, *xyz_normed.shape[:1])
+                             align_corners=self.align_corners, mode=self.interp_mode,
+                             smoothing=self.smoothing, padding_mode=self.padding_mode).view(-1, *xyz_normed.shape[:1])
             feature.append(pc * lc)
         return feature
 
