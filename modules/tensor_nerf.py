@@ -404,7 +404,7 @@ class TensorNeRF(torch.nn.Module):
             # output['diffuse_reg'] = tint.clip(min=1e-3).mean()
             if self.bg_module is not None:
                 envmap_brightness = self.bg_module.mean_color().mean()
-                statistics['envmap_reg'] = (envmap_brightness-1).clip(min=0)**2
+                statistics['envmap_reg'] = (envmap_brightness-0.05).clip(min=0)
             else:
                 statistics['envmap_reg'] = torch.tensor(0.0)
 
@@ -415,7 +415,8 @@ class TensorNeRF(torch.nn.Module):
                 pred_norm_err_b = 2*(1-(world_normal[gt_mask] * gt_normals_mask[gt_mask]).sum(dim=-1))
                 pred_norm_err = (aweight[gt_mask] * (pred_norm_err_a + pred_norm_err_b)).sum()# / B
                 statistics['normal_err'] = pred_norm_err
-            statistics['brdf_reg'] = ((debug['tint'].mean()-1).clip(min=0)**2) if 'tint' in debug else torch.tensor(0.0)
+            # statistics['brdf_reg'] = ((debug['tint'].mean()-1).clip(min=0)**2) if 'tint' in debug else torch.tensor(0.0)
+            statistics['brdf_reg'] = debug['tint'].mean().clip(min=0) if 'tint' in debug else torch.tensor(0.0)
             statistics['diffuse_reg'] = (aweight.detach().reshape(-1, 1)*debug['diffuse']).sum() / 3
             # debug['roughness'].sum() if 'roughness' in debug else torch.tensor(0.0)
             statistics['prediction_loss'] = prediction_loss

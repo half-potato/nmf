@@ -366,7 +366,7 @@ class HydraMLPDiffuse(torch.nn.Module):
         self.diffuse_bias += inv_sigmoid(0.25) - diffuse_v
         ic(diffuse_v, self.diffuse_bias)
 
-        roughness = (extra['r1'] + extra['r2']) / 2
+        roughness = (extra['r1'] + extra['r2']) / 2 / 2
         roughness_v = inv_sigmoid(roughness).mean().detach().item()
         self.roughness_bias += inv_sigmoid(self.start_roughness) - roughness_v
 
@@ -397,7 +397,7 @@ class HydraMLPDiffuse(torch.nn.Module):
             indata += [self.roughness_view_encoder(viewdirs, torch.tensor(1e-3, device=device).expand(B)).reshape(B, -1), viewdirs]
         rough_mlp_in = torch.cat(indata, dim=-1)
         diffuse = torch.sigmoid(self.diffuse_mul*self.diffuse_mlp(mlp_in)+self.diffuse_bias)
-        r = torch.sigmoid(self.roughness_mlp(rough_mlp_in)+self.roughness_bias)
+        r = torch.sigmoid(self.roughness_mlp(rough_mlp_in)+self.roughness_bias) / 2
         tint = torch.sigmoid(self.tint_mlp(mlp_in)+self.tint_bias)
 
         # ic(f0)

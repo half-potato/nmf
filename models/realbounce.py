@@ -146,7 +146,7 @@ class RealBounce(torch.nn.Module):
         with torch.no_grad():
             coeffs, conv_coeffs = bg_module.get_spherical_harmonics(100)
         evaled = sh.eval_sh_bases(conv_coeffs.shape[0], normals)
-        E = (conv_coeffs.reshape(1, -1, 3) * evaled.reshape(evaled.shape[0], -1, 1)).sum(dim=1).detach()
+        E = (conv_coeffs.reshape(1, -1, 3) * evaled.reshape(evaled.shape[0], -1, 1)).sum(dim=1).clip(min=0, max=1).detach()
         diffuse = diffuse * E
 
         # pick rays to bounce
@@ -317,7 +317,7 @@ class RealBounce(torch.nn.Module):
             reflect_rgb[bounce_mask] = tinted_ref_rgb
             brdf_rgb[bounce_mask] = brdf_color
 
-        rgb = reflect_rgb + diffuse
+        rgb = (1-diffuse)*reflect_rgb + diffuse
         # ic(rgb.mean(), diffuse.mean())
         debug['diffuse'] = diffuse
         debug['roughness'] = matprop['r1']

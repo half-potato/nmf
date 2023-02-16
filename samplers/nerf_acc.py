@@ -17,7 +17,8 @@ class NerfAccSampler(torch.nn.Module):
                  shrink_iters=[],
                  alpha_thres = 0,
                  ema_decay = 0.95,
-                 occ_thre=0.01
+                 occ_thre=0.01,
+                 warmup_iters=256,
                  ):
         super().__init__()
         self.aabb = aabb.reshape(-1)
@@ -35,6 +36,7 @@ class NerfAccSampler(torch.nn.Module):
         self.max_samples = max_samples
         self.test_multiplier = test_multiplier
         self.shrink_iters = shrink_iters
+        self.warmup_iters = warmup_iters
 
         self.stepsize = (
             (self.aabb[3:] - self.aabb[:3]).max()
@@ -50,7 +52,7 @@ class NerfAccSampler(torch.nn.Module):
             # x is in aabb, unnormalized
             density = rf.compute_densityfeature(x).reshape(-1)
             return density * self.stepsize
-        self.occupancy_grid.every_n_step(step=iteration+1, occ_eval_fn=occ_eval_fn, ema_decay=self.ema_decay, occ_thre=self.occ_thre)
+        self.occupancy_grid.every_n_step(step=iteration+1, occ_eval_fn=occ_eval_fn, ema_decay=self.ema_decay, occ_thre=self.occ_thre, warmup_steps=self.warmup_iters)
 
         if iteration in [i*batch_mul for i in self.shrink_iters]:
             x = self.occupancy_grid.grid_coords[self.occupancy_grid._binary.reshape(-1)] / self.occupancy_grid.resolution

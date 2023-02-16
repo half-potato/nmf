@@ -251,10 +251,11 @@ class IntegralEquirect(torch.nn.Module):
         if tonemap is not None:
             im = tonemap(im)
         im = im.clamp(0, 1)
-        im = (255*im).short().permute(0, 2, 3, 1).squeeze(0)
+        # im = (255*im).short().permute(0, 2, 3, 1).squeeze(0)
+        im = (im).permute(0, 2, 3, 1).squeeze(0)
         im = im.cpu().numpy()
         # im = cv2.cvtColor(im.astype(np.uint8), cv2.COLOR_RGB2BGR)
-        imageio.imwrite(str(path / f'{prefix}pano.png'), im)
+        imageio.imwrite(str(path / f'{prefix}pano.exr'), im)
 
     def sa2mip(self, u, saSample, eps=torch.finfo(torch.float32).eps):
         h, w = self.hw()

@@ -297,7 +297,7 @@ def reconstruction(args):
             space_optim = torch.optim.Adam(tensorf.parameters(), lr=0.005, betas=(0.9,0.99))
             pbar = tqdm(range(tensorf.rf.num_pretrain))
             for _ in pbar:
-                xyz = (torch.rand(20000, 3, device=device)*2-1) * tensorf.rf.aabb[1].reshape(1, 3)
+                xyz = (torch.rand(20000, 3, device=device)*2-1) * tensorf.rf.aabb[1].reshape(1, 3) * 0.9
                 sigma_feat = tensorf.rf.compute_densityfeature(xyz)
 
                 # step_size = 0.015
@@ -318,7 +318,7 @@ def reconstruction(args):
                 space_optim.step()
         else:
             # calculate alpha mean
-            xyz = torch.rand(100000, 4, device=device)*2-1
+            xyz = (torch.rand(20000, 3, device=device)*2-1) * tensorf.rf.aabb[1].reshape(1, 3)
             xyz[:, 3] *= 0
             sigma_feat = tensorf.rf.compute_densityfeature(xyz)
 
@@ -467,7 +467,7 @@ def reconstruction(args):
                     total_loss = loss + \
                         params.distortion_lambda*distortion_loss + \
                         ori_lambda*ori_loss + \
-                        params.envmap_lambda * (envmap_reg-0.05).clip(min=0) + \
+                        params.envmap_lambda * envmap_reg + \
                         params.diffuse_lambda * diffuse_reg + \
                         params.brdf_lambda * brdf_reg + \
                         pred_lambda * prediction_loss + \
@@ -517,7 +517,7 @@ def reconstruction(args):
                     losses.append(total_loss.detach().item())
                     roughnesses.append(ims['roughness'].mean().detach().item())
                     diffuse_regs.append(params.diffuse_lambda * diffuse_reg.detach().item() / lbatch_size)
-                    envmap_regs.append(envmap_reg.detach().item())
+                    envmap_regs.append(params.envmap_lambda * envmap_reg.detach().item() / lbatch_size)
                     brdf_regs.append(params.brdf_lambda * brdf_reg.detach().item())
                     PSNRs.append(-10.0 * np.log(photo_loss) / np.log(10.0))
 
@@ -556,7 +556,7 @@ def reconstruction(args):
                 desc = f'psnr = {float(np.mean(PSNRs)):.2f}' + \
                     f' test_psnr = {float(np.mean(PSNRs_test)):.2f}' + \
                     f' loss = {float(np.sum(losses)):.5f}' + \
-                    f' envmap = {float(np.mean(envmap_regs)):.5f}' + \
+                    f' envmap = {float(np.sum(envmap_regs)):.5f}' + \
                     f' diffuse = {float(np.sum(diffuse_regs)):.5f}' + \
                     f' brdf = {float(np.sum(brdf_regs)):.5f}' + \
                     f' rough = {float(np.mean(roughnesses)):.5f}' + \
