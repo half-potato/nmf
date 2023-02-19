@@ -87,6 +87,7 @@ class MLPBRDF(torch.nn.Module):
 
         self.feape = feape
         self.mlp = util.create_mlp(self.in_mlpC, 4, **kwargs)
+        self.init_val = 0.25
         # self.activation = str2fn(activation)
 
     def init_weights(self, m):
@@ -116,7 +117,7 @@ class MLPBRDF(torch.nn.Module):
             return v
         weight = self(rand_vecs(), rand_vecs(), rand_vecs(), rand_vecs(), rand_vecs(), rand_vecs(), efeatures, torch.rand((N), device=device), torch.rand((N), device=device))
         # ic(self(rand_vecs(), rand_vecs(), rand_vecs(), rand_vecs(), rand_vecs(), efeatures, torch.rand((N), device=device)).mean())
-        target_val = 0.5 / bg_brightness.item()
+        target_val = self.init_val / bg_brightness.item()
         ic(bg_brightness, target_val)
         self.bias += inv_activation(target_val, self.activation_name) - inv_activation(weight, self.activation_name).mean().detach().item()
         # ic(self.bias, -(weight / (1-weight)).log().mean().detach().item())

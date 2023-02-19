@@ -297,7 +297,7 @@ def reconstruction(args):
             space_optim = torch.optim.Adam(tensorf.parameters(), lr=0.005, betas=(0.9,0.99))
             pbar = tqdm(range(tensorf.rf.num_pretrain))
             for _ in pbar:
-                xyz = (torch.rand(20000, 3, device=device)*2-1) * tensorf.rf.aabb[1].reshape(1, 3) * 0.9
+                xyz = (torch.rand(20000, 3, device=device)*2-1) * tensorf.rf.aabb[1].reshape(1, 3)
                 sigma_feat = tensorf.rf.compute_densityfeature(xyz)
 
                 # step_size = 0.015
@@ -371,7 +371,11 @@ def reconstruction(args):
     num_rays = params.starting_batch_size
     prev_n_samples = None
     hist_n_samples = None
-    gt_bg = cv2.imread(args.gt_bg) if args.gt_bg is not None else None
+    gt_bg_path = args.gt_bg if args.gt_bg is not None else None
+    if hasattr(args.dataset, 'gt_bg') and args.dataset.gt_bg is not None:
+        gt_bg_path = Path('backgrounds') / args.dataset.gt_bg
+    ic(gt_bg_path)
+    gt_bg = cv2.imread(str(gt_bg_path)) if gt_bg_path is not None else None
     if True:
     # with torch.profiler.profile(record_shapes=True, schedule=torch.profiler.schedule(wait=1, warmup=1, active=params.n_iters-1), with_stack=True) as p:
     # with torch.autograd.detect_anomaly():

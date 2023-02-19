@@ -15,7 +15,7 @@ arch:
   orient_world_normals: True
   align_pred_norms: True
   detach_inter: False
-  geonorm_iters: 10000
+  geonorm_iters: 4000
   geonorm_interp_iters: 1000
 
   tonemap:
@@ -60,6 +60,7 @@ arch:
     percent_bright: 0.0
     # max_brdf_rays: [3194304]
     max_brdf_rays: [259430]
+    conserve_energy: False
     target_num_samples: [800000]
     russian_roulette: True
     max_retrace_rays: []

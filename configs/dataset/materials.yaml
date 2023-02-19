@@ -5,3 +5,4 @@ downsample_test: 1
 ndc_ray: false
 near_far: [2, 6]
 stack_norms: false
+gt_bg: forest.exr

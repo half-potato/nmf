@@ -8,14 +8,18 @@ from modules import sh
 
 class RealBounce(torch.nn.Module):
     def __init__(self, app_dim, diffuse_module, brdf, brdf_sampler, 
-                 anoise, max_brdf_rays, target_num_samples, russian_roulette,
-                 percent_bright, cold_start_bg_iters, detach_N_iters, visibility_module=None, max_retrace_rays=[], bright_sampler=None):
+                 anoise, max_brdf_rays, target_num_samples, russian_roulette, 
+                 percent_bright, cold_start_bg_iters, detach_N_iters, conserve_energy=True,
+                 visibility_module=None, max_retrace_rays=[], bright_sampler=None):
         super().__init__()
         self.diffuse_module = diffuse_module(in_channels=app_dim)
         self.brdf = brdf(in_channels=app_dim)
         self.brdf_sampler = brdf_sampler(max_samples=1024)
         self.bright_sampler = bright_sampler
         self.visibility_module = visibility_module
+
+        self.conserve_energy = conserve_energy
+        self.brdf.init_val = 0.5 if self.conserve_energy else 0.25
 
         self.anoise = anoise
         self.russian_roulette = russian_roulette
@@ -24,6 +28,7 @@ class RealBounce(torch.nn.Module):
         self.max_retrace_rays = max_retrace_rays
         self.percent_bright = percent_bright
         self.cold_start_bg_iters = cold_start_bg_iters
+        self.conserve_energy = conserve_energy
         self.detach_bg = True
         self.detach_N_iters = detach_N_iters
         self.detach_N = True
@@ -317,7 +322,10 @@ class RealBounce(torch.nn.Module):
             reflect_rgb[bounce_mask] = tinted_ref_rgb
             brdf_rgb[bounce_mask] = brdf_color
 
-        rgb = (1-diffuse)*reflect_rgb + diffuse
+        if self.conserve_energy:
+            rgb = (1-diffuse)*reflect_rgb + diffuse
+        else:
+            rgb = reflect_rgb + diffuse
         # ic(rgb.mean(), diffuse.mean())
         debug['diffuse'] = diffuse
         debug['roughness'] = matprop['r1']

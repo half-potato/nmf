@@ -211,7 +211,7 @@ class IntegralEquirect(torch.nn.Module):
         model = linear_model.LinearRegression()
         model.fit(X, Y)
         pred_Y = model.predict(X)
-        err_im = (pred_Y - Y)**2
+        err_im = ((pred_Y - Y)**2).clip(min=0, max=1)
         # plt.imshow(err_im)
         # plt.show()
         psnr = -10.0 * np.log(err_im.mean()) / np.log(10.0)
