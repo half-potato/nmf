@@ -9,7 +9,7 @@ from modules import sh
 class RealBounce(torch.nn.Module):
     def __init__(self, app_dim, diffuse_module, brdf, brdf_sampler, 
                  anoise, max_brdf_rays, target_num_samples, russian_roulette, 
-                 percent_bright, cold_start_bg_iters, detach_N_iters, conserve_energy=True,
+                 percent_bright, cold_start_bg_iters, detach_N_iters, conserve_energy=True, no_emitters=True,
                  visibility_module=None, max_retrace_rays=[], bright_sampler=None):
         super().__init__()
         self.diffuse_module = diffuse_module(in_channels=app_dim)
@@ -20,6 +20,7 @@ class RealBounce(torch.nn.Module):
 
         self.conserve_energy = conserve_energy
         self.brdf.init_val = 0.5 if self.conserve_energy else 0.25
+        self.no_emitters = no_emitters
 
         self.anoise = anoise
         self.russian_roulette = russian_roulette
@@ -148,11 +149,12 @@ class RealBounce(torch.nn.Module):
             xyzs_normed, viewdirs, app_features)
 
         # compute spherical harmonic coefficients for the background
-        with torch.no_grad():
-            coeffs, conv_coeffs = bg_module.get_spherical_harmonics(100)
-        evaled = sh.eval_sh_bases(conv_coeffs.shape[0], normals)
-        E = (conv_coeffs.reshape(1, -1, 3) * evaled.reshape(evaled.shape[0], -1, 1)).sum(dim=1).clip(min=0, max=1).detach()
-        diffuse = diffuse * E
+        if self.no_emitters:
+            with torch.no_grad():
+                coeffs, conv_coeffs = bg_module.get_spherical_harmonics(100)
+            evaled = sh.eval_sh_bases(conv_coeffs.shape[0], normals)
+            E = (conv_coeffs.reshape(1, -1, 3) * evaled.reshape(evaled.shape[0], -1, 1)).sum(dim=1).clip(min=0, max=1).detach()
+            diffuse = diffuse * E
 
         # pick rays to bounce
         num_brdf_rays = self.max_brdf_rays[recur]  if not is_train else self.max_brdf_rays[recur] # // B
@@ -311,8 +313,8 @@ class RealBounce(torch.nn.Module):
 
 
             eray_count = ray_count.reshape(-1, 1).expand(ray_mask.shape)[ray_mask].reshape(-1, 1).clip(min=1)
-            brdf_color = row_mask_sum(brdf_weight / eray_count, ray_mask)# / ray_count
-            tinted_ref_rgb = row_mask_sum(incoming_light * brdf_weight / eray_count * importance_samp_correction, ray_mask)
+            brdf_color = row_mask_sum(brdf_weight / eray_count * importance_samp_correction, ray_mask)# / ray_count
+            tinted_ref_rgb = row_mask_sum(incoming_light / eray_count * brdf_weight * importance_samp_correction, ray_mask)
             spec[bounce_mask] = row_mask_sum(incoming_light / eray_count * importance_samp_correction, ray_mask)
             # ic(incoming_light.mean(), spec[bounce_mask].mean(), brdf_weight.max(), brdf_weight.mean(), importance_samp_correction.max(), tinted_ref_rgb.mean())
 

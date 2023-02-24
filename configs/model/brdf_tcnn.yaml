@@ -67,6 +67,7 @@ arch:
     cold_start_bg_iters: 0
     detach_N_iters: 0
     anoise: 0.25
+    no_emitters: True
 
     brdf_sampler:
       _target_: brdf_samplers.ggx.GGXSampler

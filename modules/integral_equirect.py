@@ -250,7 +250,6 @@ class IntegralEquirect(torch.nn.Module):
         im = self.activation_fn(self.bg_mat)
         if tonemap is not None:
             im = tonemap(im)
-        im = im.clamp(0, 1)
         # im = (255*im).short().permute(0, 2, 3, 1).squeeze(0)
         im = (im).permute(0, 2, 3, 1).squeeze(0)
         im = im.cpu().numpy()
@@ -326,7 +325,8 @@ class IntegralEquirect(torch.nn.Module):
         offset = torch.stack([sw, sh], dim=-1).reshape(1, 1, -1, 2)
 
         activated = self.activation_fn(self.bg_mat)
-        cum_mat = torch.cumsum(torch.cumsum(activated, dim=2), dim=3)
+        multi = 1000
+        cum_mat = torch.cumsum(torch.cumsum(activated / multi, dim=2), dim=3)
         # cum_mat = torch.cumsum(self.bg_mat, dim=2)
         # cum_mat = torch.cumsum(self.bg_mat, dim=3)
         # cum_mat = self.bg_mat
@@ -353,7 +353,7 @@ class IntegralEquirect(torch.nn.Module):
         # for such a simple rectangular shape, it must retain a certain height near the poles, even with clipping
         # to achieve this, half the amount clipped off the top or bottom should be added back to the opposite side
         bg_vals = integrate_area_wrap(bl, br, tl, tr, size, cum_mat,
-                                      interp_mode=self.interp_mode, align_corners=self.align_corners)
+                                      interp_mode=self.interp_mode, align_corners=self.align_corners) * multi
 
         # handle top and bottom
         cutoff = 1 - 2 / h * 3
