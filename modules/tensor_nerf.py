@@ -119,6 +119,7 @@ class TensorNeRF(torch.nn.Module):
             config.model.diffuse_module.diffuse_bias = ckpt['config'].model.diffuse_module.diffuse_bias
             config.model.diffuse_module.roughness_bias = ckpt['config'].model.diffuse_module.roughness_bias
         # config = ckpt['config'] if config is None else OmegaConf.merge(ckpt['config'], config)
+        config = ckpt['config'] if config is None else config
         aabb = ckpt['state_dict']['rf.aabb']
         # if 'model.brdf_sampler.angs' in ckpt['state_dict']:
         #     c = ckpt['state_dict']['model.brdf_sampler.angs'].shape[0]
@@ -133,7 +134,6 @@ class TensorNeRF(torch.nn.Module):
             ic(grid_size)
         else:
             grid_size = [300, 300, 300]
-        print(config['rf'].keys())
         config['rf']['grid_size'] = [300, 300, 300]
         rf = hydra.utils.instantiate(config)(aabb=aabb, near_far=near_far, grid_size=grid_size, use_predicted_normals=True)
         # if 'alphaMask.aabb' in ckpt.keys():
