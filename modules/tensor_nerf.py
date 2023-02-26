@@ -381,7 +381,10 @@ class TensorNeRF(torch.nn.Module):
 
             aweight = weight[ray_valid]
             NdotV2 = (-viewdirs[ray_valid].reshape(-1, 3).detach() * world_normal.reshape(-1, 3)).sum(dim=-1)
-            ori_loss = (aweight * (NdotV1.clamp(max=0)**2 + NdotV2.clamp(max=0)**2)).sum()# / B
+            if self.geonorm_iters > 0:
+                ori_loss = (aweight * (NdotV1.clamp(max=0)**2 + NdotV2.clamp(max=0)**2)).sum()# / B
+            else:
+                ori_loss = (aweight * (NdotV2.clamp(max=0)**2)).sum()# / B
 
             # midpoint = torch.cat([
             #     z_vals,
