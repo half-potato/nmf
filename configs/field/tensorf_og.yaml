@@ -1,40 +1,46 @@
 _partial_: True
 _target_: fields.tensoRF.TensorVMSplit
+# distance_scale: 10
 distance_scale: 25
 density_n_comp: 16
-# density_n_comp: 32
-# appearance_n_comp: 48
-appearance_n_comp: 16
-app_dim: 16
-step_ratio: 0.5
+# density_n_comp: 24
+appearance_n_comp: 24
+app_dim: 24
+step_ratio: 2
 density_res_multi: 1
 contract_space: False
 smoothing: 0.5
-activation: 'softplus_shift'
 # activation: 'softplus'
+activation: 'softplus'
 # activation: 'relu_shift'
-dbasis: False
-init_mode: randplane
 interp_mode: bilinear
+init_mode: rand
+d_init_val: 0.1
+app_init_val: 0.1
 # init_mode: trig
 density_shift: -10
+# grid_size: [512, 512, 512]
+# grid_size: [128, 128, 128]
+dbasis: False
 
+# grid_size: [32,32,32]
+# # N_voxel_init: 262144
+# N_voxel_init: 32768
+# # N_voxel_init: 2097156 # 128**3
+# # N_voxel_init: 16777216 # 256**3
+# # N_voxel_init: 134217728 # 512**3
+# # N_voxel_init: 27000000 # 300**3
+# N_voxel_final: 27000000 # 300**3
+# # N_voxel_final: 134217728 # 512**3
+# # N_voxel_final: 1073741824 # 512**3
+# upsamp_list: [500,1000,2000,3000,4000,5500,7000]
+
+grid_size: [128, 128, 128]
 N_voxel_init: 2097156 # 128**3
-# N_voxel_init: 16777216 # 256**3
-# N_voxel_init: 134217728 # 512**3
-# N_voxel_init: 27000000 # 300**3
 N_voxel_final: 27000000 # 300**3
-# N_voxel_final: 134217728 # 512**3
-# N_voxel_final: 1073741824 # 512**3
-# upsamp_list: [2000,3000,4000,5500,7000]
-# upsamp_list: [4000,5500,7000,8000,9000]
-# upsamp_list: [4000,5500,7000,8000,9000]
-# upsamp_list: [7000,8000,9000]
-# upsamp_list: [14000,16000,18000]
 upsamp_list: [2000,3000,4000,5500,7000]
-# upsamp_list: [4000,4000,5500,7000]
-# upsamp_list: [] # 4000,4000,5500,7000]
 lr: 2e-2
 lr_net: 1e-3
+triplanar: False
 num_pretrain: 0
-
+calibrate: True

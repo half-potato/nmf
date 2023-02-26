@@ -88,8 +88,8 @@ class TensoRF(torch.nn.Module):
                     plane_coef_v = scale**(1/2) * (2*torch.rand((1, n_component, grid_size, grid_size))-1)
                     line_coef_v = scale**(1/2) * (2*torch.rand((1, n_component, grid_size, 1))-1)
                 case _:
-                    plane_coef_v = scale**(1/2) * torch.randn((1, n_component, grid_size, grid_size))
-                    line_coef_v = scale**(1/2) * torch.randn((1, n_component, grid_size, 1))
+                    plane_coef_v = scale * torch.randn((1, n_component, grid_size, grid_size))
+                    line_coef_v = scale * torch.randn((1, n_component, grid_size, 1))
             plane_coef.append(torch.nn.Parameter(plane_coef_v))
             line_coef.append(torch.nn.Parameter(line_coef_v))
 
@@ -156,13 +156,14 @@ class Triplanar(TensoRF):
 
 
 class TensorVMSplit(TensorVoxelBase):
-    def __init__(self, aabb, smoothing, interp_mode = 'bilinear', dbasis=True, triplanar=False, init_mode='trig', d_init_val=0.1, app_init_val=0.1, *args, **kwargs):
+    def __init__(self, aabb, smoothing, interp_mode = 'bilinear', calibrate=True, dbasis=True, triplanar=False, init_mode='trig', d_init_val=0.1, app_init_val=0.1, *args, **kwargs):
         super(TensorVMSplit, self).__init__(aabb, *args, **kwargs)
 
         # num_levels x num_outputs
         self.interp_mode = interp_mode
         self.init_mode = init_mode
         self.dbasis = dbasis
+        self.calibrate = calibrate
         # self.interp_mode = 'bicubic'
         self.align_corners = True
 
@@ -178,8 +179,8 @@ class TensorVMSplit(TensorVoxelBase):
     
     def get_optparam_groups(self, lr_scale):
         grad_vars = [
-            {'params': self.basis_mat.parameters(), 'lr': lr_scale * self.lr_net, 'betas': [0.9, 0.999]},
-            {'params': self.dbasis_mat.parameters(), 'lr': lr_scale * self.lr_net, 'betas': [0.9, 0.999]},
+            {'params': self.basis_mat.parameters(), 'lr': lr_scale * self.lr_net, 'betas': [0.9, 0.99]},
+            {'params': self.dbasis_mat.parameters(), 'lr': lr_scale * self.lr_net, 'betas': [0.9, 0.99]},
             *self.density_rf.get_optparam_groups(lr_scale),
             *self.app_rf.get_optparam_groups(lr_scale),
         ]

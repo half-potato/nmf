@@ -82,7 +82,7 @@ class NerfAccSampler(torch.nn.Module):
         def occ_eval_fn(x):
             # x is in aabb, unnormalized
             density = rf.compute_densityfeature(x).reshape(-1)
-            return density * self.stepsize
+            return density * self.stepsize * rf.distance_scale
         self.occupancy_grid.every_n_step(step=0, occ_eval_fn=occ_eval_fn, ema_decay=self.ema_decay, occ_thre=self.occ_thre)
 
     @torch.no_grad()
@@ -128,7 +128,7 @@ class NerfAccSampler(torch.nn.Module):
             # near_plane=None,
             far_plane=None,
             render_step_size=self.stepsize/stepmul,
-            stratified=is_train,
+            stratified=False,
             cone_angle=self.cone_angle,
             alpha_thre=self.alpha_thres if override_alpha_thres is None else override_alpha_thres,
         )

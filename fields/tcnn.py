@@ -14,14 +14,15 @@ def init_weights(m):
         torch.nn.init.constant_(m.bias, 0)
 
 class TCNNRF(TensorBase):
-    def __init__(self, aabb, encoder_conf, enc_dim, max_resolution, lr_density, init_scale, roughness_bias=-1, tint_offset=0, diffuse_offset=-1, enc_mul=1, **kwargs):
+    def __init__(self, aabb, encoder_conf, enc_dim, max_resolution, lr_density, init_scale, calibrate=True, roughness_bias=-1, tint_offset=0, diffuse_offset=-1, enc_mul=1, **kwargs):
         super().__init__(aabb, **kwargs)
 
         # self.nSamples = 1024                                                                                                                                                                                        
         # self.nSamples = 512                                                                                                                                                                                        
-        self.nSamples = 1024                                                                                                                                                                                        
+        self.nSamples = 1024
         diag = (aabb**2).sum().sqrt()
         self.stepSize = diag / self.nSamples
+        self.calibrate = calibrate
         g = self.nSamples
         self.grid_size = torch.tensor([g, g, g])
         self.units = self.stepSize

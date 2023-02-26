@@ -316,10 +316,9 @@ def reconstruction(args):
                 loss.backward()
                 pbar.set_description(f"Mean alpha: {alpha.detach().mean().item():.06f}.")
                 space_optim.step()
-        else:
+        elif tensorf.rf.calibrate:
             # calculate alpha mean
             xyz = (torch.rand(20000, 3, device=device)*2-1) * tensorf.rf.aabb[1].reshape(1, 3)
-            xyz[:, 3] *= 0
             sigma_feat = tensorf.rf.compute_densityfeature(xyz)
 
             # step_size = 0.015
@@ -331,6 +330,8 @@ def reconstruction(args):
             tensorf.rf.density_shift += density_shift
             args.field.density_shift = tensorf.rf.density_shift
     # tensorf.sampler.mark_untrained_grid(train_dataset.poses, train_dataset.intrinsics)
+    xyz = (torch.rand(20000, 3, device=device)*2-1) * tensorf.rf.aabb[1].reshape(1, 3)
+    sigma_feat = tensorf.rf.compute_densityfeature(xyz)
     torch.cuda.empty_cache()
     tensorf.sampler.update(tensorf.rf, init=True)
     torch.cuda.empty_cache()
@@ -342,11 +343,8 @@ def reconstruction(args):
     alpha = 1-torch.exp(-sigma_feat * tensorf.sampler.stepsize * tensorf.rf.distance_scale)
     ic(sigma_feat.mean())
     feat = tensorf.rf.compute_appfeature(xyz)
-    tensorf.model.diffuse_module.calibrate(xyz, normalize(torch.rand_like(xyz[:, :3])), feat)
-    tensorf.model.brdf.calibrate(feat, tensorf.bg_module.mean_color().detach().mean())
-    args.model.arch.model.brdf.bias = tensorf.model.brdf.bias
-    args.model.arch.model.diffuse_module.diffuse_bias = tensorf.model.diffuse_module.diffuse_bias
-    args.model.arch.model.diffuse_module.roughness_bias = tensorf.model.diffuse_module.roughness_bias
+    bg_brightness = tensorf.bg_module.mean_color().detach().mean()
+    args = tensorf.model.calibrate(args, xyz, feat, bg_brightness)
 
     pbar = tqdm(range(params.n_iters), miniters=args.progress_refresh_rate, file=sys.stdout)
     def init_optimizer(grad_vars):
@@ -519,7 +517,7 @@ def reconstruction(args):
                     ori_losses.append(params.ori_lambda * ori_loss.detach().item())
                     pred_losses.append(params.pred_lambda * prediction_loss.detach().item())
                     losses.append(total_loss.detach().item())
-                    roughnesses.append(ims['roughness'].mean().detach().item())
+                    # roughnesses.append(ims['roughness'].mean().detach().item())
                     diffuse_regs.append(params.diffuse_lambda * diffuse_reg.detach().item() / lbatch_size)
                     envmap_regs.append(params.envmap_lambda * envmap_reg.detach().item() / lbatch_size)
                     brdf_regs.append(params.brdf_lambda * brdf_reg.detach().item())
@@ -563,8 +561,8 @@ def reconstruction(args):
                     f' envmap = {float(np.sum(envmap_regs)):.5f}' + \
                     f' diffuse = {float(np.sum(diffuse_regs)):.5f}' + \
                     f' brdf = {float(np.sum(brdf_regs)):.5f}' + \
-                    f' rough = {float(np.mean(roughnesses)):.5f}' + \
                     f' nrays = {[num_rays] + tensorf.model.max_retrace_rays}'
+                    # f' rough = {float(np.mean(roughnesses)):.5f}' + \
                     # f' diffuse = {float(np.sum(diffuse_regs)):.5f}' + \
                     # f' tv = {float(np.mean(TVs)):.5f}' + \
                     # f' ori loss = {float(np.mean(ori_losses) / num_rays):.5f}' + \

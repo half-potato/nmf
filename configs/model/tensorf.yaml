@@ -1,0 +1,114 @@
+arch:
+  _target_: modules.tensor_nerf.TensorNeRF
+  _partial_: True
+
+  recur_alpha_thres: 1e-3
+  lr_scale: 1
+  infinity_border: False
+  eval_batch_size: 10240
+  recur_stepmul: 0.5
+
+  bg_noise: 0.0
+  bg_noise_decay: 0.999
+
+  use_predicted_normals: False
+  orient_world_normals: True
+  align_pred_norms: True
+  detach_inter: False
+  geonorm_iters: 4000
+  geonorm_interp_iters: 1000
+
+  tonemap:
+    # _target_: modules.tonemap.HDRTonemap
+    # _target_: modules.tonemap.LinearTonemap
+    _target_: modules.tonemap.SRGBTonemap
+
+  sampler:
+    _target_: samplers.nerf_acc.NerfAccSampler
+    _partial_: True
+    grid_size: 128
+    update_freq: 16
+    multiplier: 2
+    test_multiplier: 1
+    shrink_iters: [2000, 4000]
+    ema_decay: 0.95
+    occ_thre: 0.01
+    warmup_iters: 256
+    alpha_thres: 1e-4
+    max_samples: -1
+
+  normal_module: NULL
+
+  model:
+    _partial_: True
+    _target_: models.tensorf.TensoRF
+    diffuse_module:
+      _partial_: True
+      _target_: modules.render_modules.MLPRender_Fea
+      featureC: 128
+      viewpe: 2
+      feape: 2
+
+  bg_module:
+    _target_: modules.integral_equirect.IntegralEquirect
+    bg_resolution: 1024
+    mipbias: 1
+    activation: 'exp'
+    lr: 0.02
+    init_val: -0.6
+    # init_val: -0.602
+    mul_lr: 0
+    brightness_lr: 0
+    betas: [0.9, 0.99]
+    mul_betas: [0.9, 0.9]
+    mipbias_lr: 1e-4
+    mipnoise: 0.0
+
+  rf: 'placeholder'
+
+params:
+  L1_weight_initial: 8e-5
+  L1_weight_rest: 4e-5
+  clip_grad: 10
+  weight_decay: 1e-6
+  eps: 1e-15
+  betas: [0.9, 0.99]
+
+  starting_batch_size: 100
+  min_batch_size: 4096
+  max_batch_size: 32000
+  target_num_samples: 400000
+
+  TV_weight_density: 0.0
+  TV_weight_app: 0.0
+  TV_weight_bg: 0
+  envmap_lambda: 0
+  pred_lambda: 0
+  final_pred_lambda: 0
+  diffuse_lambda: 0
+  ori_lambda: 0
+  final_ori_lambda: Null
+  brdf_lambda: 0
+  normal_err_lambda: 0
+  
+  distortion_lambda: 0 # 1e-3
+  visibility_lambda: 0
+  # distortion_lambda: 0.00001
+  charbonier_eps: 1e-3
+  ortho_weight: 0
+  N_visibility_rays: 128
+
+  n_iters: 30000
+  charbonier_loss: false
+  start_density: 5e-3
+  batch_size: 4096
+  lr: Null
+
+  # configure decay
+  lr_init: 1
+  lr_final: 1e-3
+  lr_delay_mult: 0.1
+  lr_delay_steps: 100
+
+  bg_col: 'white'
+
