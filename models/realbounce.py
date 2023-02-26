@@ -18,6 +18,7 @@ class RealBounce(torch.nn.Module):
         self.bright_sampler = bright_sampler
         self.visibility_module = visibility_module
 
+        self.needs_normals = True
         self.conserve_energy = conserve_energy
         self.brdf.init_val = 0.5 if self.conserve_energy else 0.25
         self.no_emitters = no_emitters
@@ -36,6 +37,14 @@ class RealBounce(torch.nn.Module):
         self.outputs = {'diffuse': 3, 'roughness': 1, 'tint': 3, 'spec': 3}
 
         self.mean_ratios = None
+
+    def calibrate(self, args, xyz, feat, bg_brightness):
+        self.diffuse_module.calibrate(xyz, normalize(torch.rand_like(xyz[:, :3])), feat)
+        self.brdf.calibrate(feat, bg_brightness)
+        args.model.arch.model.brdf.bias = self.brdf.bias
+        args.model.arch.model.diffuse_module.diffuse_bias = self.diffuse_module.diffuse_bias
+        args.model.arch.model.diffuse_module.roughness_bias = self.diffuse_module.roughness_bias
+        return args
 
     def get_optparam_groups(self, lr_scale=1):
         grad_vars = []

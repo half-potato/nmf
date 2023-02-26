@@ -254,6 +254,7 @@ class TensorNeRF(torch.nn.Module):
         # weight: [N_rays, N_samples]
         # ic((dists * self.rf.distance_scale).mean())
         weight = raw2alpha(sigma, dists * self.rf.distance_scale)
+        # ic(dists.mean(), sigma.mean(), weight.mean())
 
         # app stands for appearance
         pweight = weight[ray_valid]
@@ -418,8 +419,14 @@ class TensorNeRF(torch.nn.Module):
                 pred_norm_err = (aweight[gt_mask] * (pred_norm_err_a + pred_norm_err_b)).sum()# / B
                 statistics['normal_err'] = pred_norm_err
             # statistics['brdf_reg'] = ((debug['tint'].mean()-1).clip(min=0)**2) if 'tint' in debug else torch.tensor(0.0)
-            statistics['brdf_reg'] = debug['tint'].mean().clip(min=0) if 'tint' in debug else torch.tensor(0.0)
-            statistics['diffuse_reg'] = (aweight.detach().reshape(-1, 1)*debug['diffuse']).sum() / 3
+            if 'tint' in debug:
+                statistics['brdf_reg'] = debug['tint'].mean().clip(min=0) if 'tint' in debug else torch.tensor(0.0)
+            else:
+                statistics['brdf_reg'] = torch.tensor(0.0)
+            if 'diffuse' in debug:
+                statistics['diffuse_reg'] = (aweight.detach().reshape(-1, 1)*debug['diffuse']).sum() / 3
+            else:
+                statistics['diffuse_reg'] = torch.tensor(0.0)
             # debug['roughness'].sum() if 'roughness' in debug else torch.tensor(0.0)
             statistics['prediction_loss'] = prediction_loss
             statistics['ori_loss'] = ori_loss
