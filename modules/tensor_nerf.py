@@ -135,7 +135,7 @@ class TensorNeRF(torch.nn.Module):
         else:
             grid_size = [300, 300, 300]
         config['rf']['grid_size'] = [300, 300, 300]
-        rf = hydra.utils.instantiate(config)(aabb=aabb, near_far=near_far, grid_size=grid_size, use_predicted_normals=True)
+        rf = hydra.utils.instantiate(config)(aabb=aabb, near_far=near_far, grid_size=grid_size)
         # if 'alphaMask.aabb' in ckpt.keys():
         #     #  length = np.prod(ckpt['alphaMask.shape'])
         #     #  alpha_volume = torch.from_numpy(np.unpackbits(ckpt['alphaMask.mask'])[
@@ -323,6 +323,22 @@ class TensorNeRF(torch.nn.Module):
             n_samples=n_samples,
         )
 
+        if self.bg_module is not None and bg_col is None:
+            bg_roughness = -100*torch.ones(B, 1, device=device) if start_mipval is None else start_mipval
+            bg = self.render_just_bg(viewdirs[:, 0, :], bg_roughness).reshape(-1, 3)
+            if tonemap:
+                bg = self.tonemap(bg, noclip=True)
+        else:
+            # if white_bg or (is_train and torch.rand((1,)) < 0.5):
+            #     if output_alpha is not None and self.bg_noise > 0:
+            #         noise = (torch.rand((1, 1), device=device) > 0.5).float()*output_alpha[:, None] + (1-output_alpha[:, None])
+            #         # noise = (torch.rand((*acc_map.shape, 1), device=device) > 0.5).float()*output_alpha[:, None] + (1-output_alpha[:, None])
+            #     else:
+            #         noise = 1-torch.rand((*acc_map.shape, 3), device=device)*self.bg_noise
+            #     # noise = 1-torch.rand((*acc_map.shape, 3), device=device)*self.bg_noise
+            #     rgb_map = rgb_map + (1 - acc_map[..., None]) * noise
+            bg = bg_col.to(device).reshape(1, 3)
+
         if not is_train and draw_debug:
             with torch.no_grad():
                 depth_map = torch.sum(weight * z_vals, 1)
@@ -373,7 +389,8 @@ class TensorNeRF(torch.nn.Module):
             images['termination_xyz'] = termination_xyz
             images['surf_width'] = surface_width
             for k, v in debug.items():
-                images[k] = row_mask_sum(v*eweight, ray_valid)
+                im = row_mask_sum(v*eweight, ray_valid)
+                images[k] = im# + (1 - acc_map[..., None]) * bg
         elif recur == 0:
             # viewdirs point inward. -viewdirs aligns with pred_norms. So we want it below 0
             o_world_normal = world_normal if self.orient_world_normals else pred_norms
@@ -443,21 +460,6 @@ class TensorNeRF(torch.nn.Module):
         # ic(weight.mean(), rgb.mean(), rgb_map.mean(), v_world_normal.mean(), sigma.mean(), dists.mean(), alpha.mean())
 
         # ic(rgb[ray_valid].mean(dim=0), rgb_map[acc_map>0.1].mean(dim=0), weight.shape)
-        if self.bg_module is not None and bg_col is None:
-            bg_roughness = -100*torch.ones(B, 1, device=device) if start_mipval is None else start_mipval
-            bg = self.render_just_bg(viewdirs[:, 0, :], bg_roughness).reshape(-1, 3)
-            if tonemap:
-                bg = self.tonemap(bg, noclip=True)
-        else:
-            # if white_bg or (is_train and torch.rand((1,)) < 0.5):
-            #     if output_alpha is not None and self.bg_noise > 0:
-            #         noise = (torch.rand((1, 1), device=device) > 0.5).float()*output_alpha[:, None] + (1-output_alpha[:, None])
-            #         # noise = (torch.rand((*acc_map.shape, 1), device=device) > 0.5).float()*output_alpha[:, None] + (1-output_alpha[:, None])
-            #     else:
-            #         noise = 1-torch.rand((*acc_map.shape, 3), device=device)*self.bg_noise
-            #     # noise = 1-torch.rand((*acc_map.shape, 3), device=device)*self.bg_noise
-            #     rgb_map = rgb_map + (1 - acc_map[..., None]) * noise
-            bg = bg_col.to(device).reshape(1, 3)
         if tonemap:
             rgb_map = self.tonemap(rgb_map.clip(0, 1))
         rgb_map = rgb_map + (1 - acc_map[..., None]) * bg

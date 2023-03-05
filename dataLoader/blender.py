@@ -108,6 +108,7 @@ class BlenderDataset(Dataset):
         self.all_depth = []
         self.normal_paths = []
         self.tint_paths = []
+        self.acc_maps = []
 
         img_eval_interval = 1 if self.N_vis < 0 else len(self.meta['frames']) // self.N_vis
         idxs = list(range(0, len(self.meta['frames']), img_eval_interval))
@@ -132,6 +133,8 @@ class BlenderDataset(Dataset):
             img = self.transform(img)  # (4, h, w)
             # plt.imshow(img.permute(1, 2, 0))
             # plt.show()
+            if img.shape[0] == 4:
+                self.acc_maps += [img[-1]]
             img = img.view(img.shape[0], -1).permute(1, 0)  # (h*w, 4) RGBA
 
 
@@ -193,7 +196,7 @@ class BlenderDataset(Dataset):
         norms = imageio.imread(self.normal_paths[idx])
         norms = torch.as_tensor(norms)[..., :3].float()
         if norms.max() > 2:
-            norms = (norms/127 - 1)
+            norms = (norms-128)/127
             norms = norms / torch.linalg.norm(norms, dim=-1, keepdim=True).clip(min=torch.finfo(torch.float32).eps)
         else:
             norms = (norms - 0.5)*2

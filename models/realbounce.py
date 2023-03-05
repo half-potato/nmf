@@ -162,7 +162,7 @@ class RealBounce(torch.nn.Module):
             with torch.no_grad():
                 coeffs, conv_coeffs = bg_module.get_spherical_harmonics(100)
             evaled = sh.eval_sh_bases(conv_coeffs.shape[0], normals)
-            E = (conv_coeffs.reshape(1, -1, 3) * evaled.reshape(evaled.shape[0], -1, 1)).sum(dim=1).clip(min=0, max=1).detach()
+            E = (conv_coeffs.reshape(1, -1, 3) * evaled.reshape(evaled.shape[0], -1, 1)).sum(dim=1).detach()
             diffuse = diffuse * E
 
         # pick rays to bounce
@@ -321,11 +321,15 @@ class RealBounce(torch.nn.Module):
                 importance_samp_correction[~pbright_mask] = weight[~pbright_mask]
 
 
+            importance_samp_correction = 1
+            # ray_count = (ray_mask.sum(dim=1)+1e-8)[..., None]
             eray_count = ray_count.reshape(-1, 1).expand(ray_mask.shape)[ray_mask].reshape(-1, 1).clip(min=1)
             brdf_color = row_mask_sum(brdf_weight / eray_count * importance_samp_correction, ray_mask)# / ray_count
             tinted_ref_rgb = row_mask_sum(incoming_light / eray_count * brdf_weight * importance_samp_correction, ray_mask)
+            # spec[bounce_mask] = row_mask_sum(incoming_light / eray_count * importance_samp_correction, ray_mask)
             spec[bounce_mask] = row_mask_sum(incoming_light / eray_count * importance_samp_correction, ray_mask)
-            # ic(incoming_light.mean(), spec[bounce_mask].mean(), brdf_weight.max(), brdf_weight.mean(), importance_samp_correction.max(), tinted_ref_rgb.mean())
+            # ic(incoming_light.mean(), incoming_light.max(), spec[bounce_mask].min(), spec[bounce_mask].mean(), brdf_weight.max(), brdf_weight.mean(), tinted_ref_rgb.mean())
+            # ic(importance_samp_correction.min(), importance_samp_correction.max())
 
             if self.detach_bg:
                 tinted_ref_rgb.detach_()
@@ -334,7 +338,8 @@ class RealBounce(torch.nn.Module):
             brdf_rgb[bounce_mask] = brdf_color
 
         if self.conserve_energy:
-            rgb = (1-diffuse)*reflect_rgb + diffuse
+            lam = tint.mean(dim=-1, keepdim=True)
+            rgb = lam*reflect_rgb + (1-lam)*diffuse
         else:
             rgb = reflect_rgb + diffuse
         # ic(rgb.mean(), diffuse.mean())

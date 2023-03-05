@@ -163,6 +163,7 @@ def evaluate(iterator, test_dataset, tensorf, renderer, savePath=None, prtx='', 
     # os.makedirs(savePath+"/brdf", exist_ok=True)
     os.makedirs(savePath+"/diffuse", exist_ok=True)
     os.makedirs(savePath+"/roughness", exist_ok=True)
+    os.makedirs(savePath+"/acc_map", exist_ok=True)
     # os.makedirs(savePath+"/r0", exist_ok=True)
     # os.makedirs(savePath+"/transmitted", exist_ok=True)
     # os.makedirs(savePath+"/diffuse_light", exist_ok=True)
@@ -278,7 +279,7 @@ def evaluate(iterator, test_dataset, tensorf, renderer, savePath=None, prtx='', 
                 # gt_normal[mask] = 0
                 norm_err = torch.arccos((ims.normal * gt_normal).sum(dim=-1).clip(min=1e-8, max=1-1e-8)) * 180/np.pi
                 norm_err[torch.isnan(norm_err)] = 0
-                norm_err *= ims.acc_map.squeeze(-1)
+                norm_err *= test_dataset.acc_maps[im_idx].squeeze(-1)
                 norm_errs.append(norm_err.mean())
                 if savePath is not None:
                     imageio.imwrite(f'{savePath}/normal_err/{prtx}{idx:03d}.exr', norm_err.numpy())
@@ -315,12 +316,13 @@ def evaluate(iterator, test_dataset, tensorf, renderer, savePath=None, prtx='', 
             rgb_map = np.concatenate((rgb_map, vis_depth_map), axis=1)
             imageio.imwrite(f'{savePath}/rgbd/{prtx}{idx:03d}.exr', ims.depth.numpy())
             imageio.imwrite(f'{savePath}/normal/{prtx}{idx:03d}.png', vis_normal)
+            imageio.imwrite(f'{savePath}/acc_map/{prtx}{idx:03d}.png', (255*ims.acc_map.numpy()).astype(np.uint8))
             if 'spec' in ims:
                 imageio.imwrite(f'{savePath}/spec/{prtx}{idx:03d}.exr', ims.spec.numpy())
             if 'roughness' in ims:
-                imageio.imwrite(f'{savePath}/roughness/{prtx}{idx:03d}.exr', ims.roughness)
+                imageio.imwrite(f'{savePath}/roughness/{prtx}{idx:03d}.png', (255*ims.roughness).numpy().astype(np.uint8))
             if 'tint' in ims:
-                imageio.imwrite(f'{savePath}/tint/{prtx}{idx:03d}.exr', ims.tint.numpy())
+                imageio.imwrite(f'{savePath}/tint/{prtx}{idx:03d}.png', (255*ims.tint.numpy()).astype(np.uint8))
             if 'diffuse' in ims:
                 imageio.imwrite(f'{savePath}/diffuse/{prtx}{idx:03d}.png', (255*ims.diffuse.clamp(0, 1).numpy()).astype(np.uint8))
             imageio.imwrite(f'{savePath}/world_normal/{prtx}{idx:03d}.png', vis_world_normal)

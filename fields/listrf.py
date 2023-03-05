@@ -1,22 +1,18 @@
 import torch
 from .tensor_base import TensorBase
-from models.tensor_nerf import TensorNeRF
+from icecream import ic
 
-class ListRF(TensorBase):
+class ListRF(torch.nn.Module):
     def __init__(self, rfs, offsets):
-        self.rfs = rfs
-        self.offsets = offsets
+        super().__init__()
+        self.rfs = torch.nn.ModuleList(rfs)
+        self.register_buffer('offsets', torch.stack(offsets, dim=0))
         self.separate_appgrid = False
         self.contract_space = False
+        self.nSamples = rfs[0].nSamples
 
-    @staticmethod
-    def load(paths, offsets, **kwargs):
-        rfs = []
-        for path in paths:
-            ckpt = torch.load(path)
-            tensorf = TensorNeRF.load(ckpt, **kwargs)
-            rfs.append(tensorf)
-        return ListRF(paths, offsets)
+    def get_device(self):
+        return self.rfs[0].get_device()
 
     @property
     def distance_scale(self):
@@ -34,36 +30,52 @@ class ListRF(TensorBase):
     def units(self):
         return torch.stack([rf.units for rf in self.rfs], dim=0).min(dim=0)
 
-    def get_rf(self, xyz):
-        # xyz: (-1, 3)
-        # returns: list of points and a list of corresponding mask to reassemble the original list
-        pts = []
-        masks = []
-        for rf, offset in zip(self.rfs, self.offsets):
-            bound = (rf.aabb[0].reshape(1, 3) < (xyz + offset)) & (rf.aabb[1].reshape(1, 3) > (xyz + offset))
-            mask = bound[:, 0] & bound[:, 1] & bound[:, 2]
-            pts.append(xyz[mask], mask)
-        return pts, masks
-
     def normalize_coord(self, xyz):
-        pts, masks = self.get_rf(xyz)
-        nxyz = torch.empty_like(xyz)
-        for rf, offset, mpts, mask in zip(self.rfs, self.offsets, pts, masks):
-            nxyz[mask] = rf.normalize_coord(mpts + offset)
+        nxyz = self.rfs[0].normalize_coord(xyz)
         return nxyz
 
-    def compute_densityfeature(self, xyz):
-        _, masks = self.get_rf(xyz)
-        nxyzs = self.normalize_coord(xyz)
-        sigma = torch.empty_like(xyz[:, 0])
-        for rf, mask, nxyz in zip(self.rfs, masks, nxyzs):
-            sigma[mask] = rf.compute_densityfeature(nxyz)
-        return sigma
+    def compute_densityfeature(self, xyz, *args, **kwargs):
+        # _, masks = self.get_rf(xyz)
+        sigma = torch.zeros((xyz.shape[0],), device=xyz.device)
+        for i, rf in enumerate(self.rfs):
+            sigma = sigma + rf.compute_densityfeature(xyz+self.offsets[i][:, :xyz.shape[-1]], *args, **kwargs)
+        # sigma = self.rfs[0].compute_densityfeature(xyz, *args, **kwargs)
+        return sigma / len(self.rfs)
 
-    def compute_appfeature(self, xyz):
-        _, masks = self.get_rf(xyz)
-        nxyzs = self.normalize_coord(xyz)
-        sigma = torch.empty_like(xyz[:, 0])
-        for rf, mask, nxyz in zip(self.rfs, masks, nxyzs):
-            sigma[mask] = rf.compute_densityfeature(nxyz)
-        return sigma
+    def compute_appfeature(self, xyz, *args, **kwargs):
+        # _, masks = self.get_rf(xyz)
+        sigma = torch.zeros((xyz.shape[0],), device=xyz.device)
+        norm = torch.zeros((xyz.shape[0],1), device=xyz.device)
+        feat = torch.empty((xyz.shape[0], self.app_dim), device=xyz.device)
+
+        for i, rf in enumerate(self.rfs):
+            sigd = rf.compute_densityfeature(xyz+self.offsets[i][:, :xyz.shape[-1]], *args, **kwargs)
+            ifeat = rf.compute_appfeature(xyz+self.offsets[i][:, :xyz.shape[-1]], *args, **kwargs)
+            alpha = sigd.exp().reshape(-1, 1)
+            sigma = sigma + sigd
+            feat  = feat + alpha*ifeat
+            norm = norm + alpha
+        # sigma = self.rfs[0].compute_densityfeature(xyz, *args, **kwargs)
+        return feat / norm.clip(min=1e-8)
+
+    def compute_feature(self, xyz, *args, **kwargs):
+        # _, masks = self.get_rf(xyz)
+        sigma = torch.zeros((xyz.shape[0],), device=xyz.device)
+        norm = torch.zeros((xyz.shape[0],1), device=xyz.device)
+        feat = torch.empty((xyz.shape[0], self.app_dim), device=xyz.device)
+
+        feats = []
+        alphas = []
+        for i, rf in enumerate(self.rfs):
+            sigd = rf.compute_densityfeature(xyz+self.offsets[i][:, :xyz.shape[-1]], *args, **kwargs)
+            ifeat = rf.compute_appfeature(xyz+self.offsets[i][:, :xyz.shape[-1]], *args, **kwargs)
+            alpha = sigd.clip(min=-10, max=10).exp().reshape(-1, 1)
+            sigma = sigma + sigd
+            # feat  = feat + alpha*ifeat
+            feats.append(ifeat)
+            alphas.append(alpha)
+
+        inds = torch.stack(alphas, dim=0).max(dim=0).indices.reshape(-1)
+        feat = torch.stack(feats, dim=1)[range(inds.shape[0]), inds]
+        # sigma = self.rfs[0].compute_densityfeature(xyz, *args, **kwargs)
+        return sigma, feat
