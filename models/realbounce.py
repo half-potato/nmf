@@ -154,16 +154,19 @@ class RealBounce(torch.nn.Module):
         device = xyzs.device
 
         noise_app_features = (app_features + torch.randn_like(app_features) * self.anoise)
-        diffuse, tint, matprop = self.diffuse_module(
+        albedo, tint, matprop = self.diffuse_module(
             xyzs_normed, viewdirs, app_features)
+
 
         # compute spherical harmonic coefficients for the background
         if self.no_emitters:
-            with torch.no_grad():
-                coeffs, conv_coeffs = bg_module.get_spherical_harmonics(100)
+            # with torch.no_grad():
+            coeffs, conv_coeffs = bg_module.get_spherical_harmonics(100)
             evaled = sh.eval_sh_bases(conv_coeffs.shape[0], normals)
-            E = (conv_coeffs.reshape(1, -1, 3) * evaled.reshape(evaled.shape[0], -1, 1)).sum(dim=1).detach()
-            diffuse = diffuse * E
+            E = (conv_coeffs.reshape(1, -1, 3) * evaled.reshape(evaled.shape[0], -1, 1)).sum(dim=1)
+            diffuse = albedo * E
+        else:
+            diffuse = albedo
 
         # pick rays to bounce
         num_brdf_rays = self.max_brdf_rays[recur]  if not is_train else self.max_brdf_rays[recur] # // B
@@ -183,6 +186,8 @@ class RealBounce(torch.nn.Module):
             if self.detach_N:
                 bN.detach_()
             bV = -viewdirs[bounce_mask]
+            # align normals
+            # bN = bN * (bV * bN).sum(dim=-1, keepdim=True).sign()
             # r1 = matprop['r1'][bounce_mask]*0 + 0.0001
             # r2 = matprop['r2'][bounce_mask]*0 + 0.0001
             r1 = matprop['r1'][bounce_mask]
@@ -341,7 +346,7 @@ class RealBounce(torch.nn.Module):
             lam = tint.mean(dim=-1, keepdim=True)
             rgb = lam*reflect_rgb + (1-lam)*diffuse
         else:
-            rgb = reflect_rgb + diffuse
+            rgb = reflect_rgb
         # ic(rgb.mean(), diffuse.mean())
         debug['diffuse'] = diffuse
         debug['roughness'] = matprop['r1']

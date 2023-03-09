@@ -390,7 +390,7 @@ class TensorNeRF(torch.nn.Module):
             images['surf_width'] = surface_width
             for k, v in debug.items():
                 im = row_mask_sum(v*eweight, ray_valid)
-                images[k] = im# + (1 - acc_map[..., None]) * bg
+                images[k] = im + (1 - acc_map[..., None]) * bg
         elif recur == 0:
             # viewdirs point inward. -viewdirs aligns with pred_norms. So we want it below 0
             o_world_normal = world_normal if self.orient_world_normals else pred_norms

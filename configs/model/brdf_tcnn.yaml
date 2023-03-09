@@ -203,7 +203,7 @@ params:
   TV_weight_density: 0.0
   TV_weight_app: 0.0
   TV_weight_bg: 0
-  envmap_lambda: 1e-5
+  envmap_lambda: 0
   pred_lambda: 1e-2
   final_pred_lambda: 3e-2
   diffuse_lambda: 0

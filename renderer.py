@@ -355,10 +355,9 @@ def evaluate(iterator, test_dataset, tensorf, renderer, savePath=None, prtx='', 
         final_stats['tint_psnr'] = float(np.mean(np.asarray(tint_psnrs)))
 
     if tensorf.bg_module is not None:
-        tm = tonemap.HDRTonemap()
         bg_path = Path(savePath) / 'envmaps'
         bg_path.mkdir(exist_ok=True, parents=True)
-        tensorf.bg_module.save(bg_path, prefix=prtx, tonemap=tm)
+        tensorf.bg_module.save(bg_path, prefix=prtx)
 
         if gt_bg is not None:
             bg_psnr = tensorf.bg_module.calc_envmap_psnr(gt_bg)
