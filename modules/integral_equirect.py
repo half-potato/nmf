@@ -126,6 +126,7 @@ class IntegralEquirect(torch.nn.Module):
         self.register_parameter('mipbias', torch.nn.Parameter(torch.tensor(mipbias, dtype=float)))
         self.register_parameter('brightness', torch.nn.Parameter(torch.tensor(0.0, dtype=float)))
         self.register_parameter('mul', torch.nn.Parameter(torch.tensor(1.0, dtype=float)))
+        self.R = None
 
         self.lr = lr
         self.mul_lr = mul_lr
@@ -278,25 +279,6 @@ class IntegralEquirect(torch.nn.Module):
         miplevel_h = miplevel_h + self.mipbias + self.mipnoise * torch.rand_like(saSample)
         return miplevel_w.clip(0, 7), miplevel_h.clip(0, 7)
 
-    # def sa2mip(self, u, saSample, eps=torch.finfo(torch.float32).eps):
-    #     h, w = self.hw()
-    #     # TODO calculate distortion of cube map for saTexel
-    #     # distortion = 4 * math.pi / 6
-    #     # distortion_w = 1/(1-u[:, 2]**2).clip(min=eps)
-    #     distortion_w = (1-u[:, 2]**2).clip(min=eps).sqrt()
-    #     distortion_h = torch.ones_like(distortion_w)
-    #     saSample = saSample.reshape(-1)
-    #
-    #     saTexel_w = distortion_w / h / w
-    #     saTexel_h = distortion_h / h / w
-    #     # saTexel is the ratio to the solid angle subtended by one pixel of the 0th mipmap level
-    #     # num_pixels = self.bg_mat.numel() // 3
-    #     # saTexel = distortion / num_pixels
-    #     miplevel_w = ((saSample - torch.log(saTexel_w.clip(min=eps))) / math.log(2))/2 + self.mipbias + self.mipnoise * torch.rand_like(saSample)
-    #     miplevel_h = ((saSample - torch.log(saTexel_h.clip(min=eps))) / math.log(2))/2 + self.mipbias + self.mipnoise * torch.rand_like(saSample)
-    #     
-    #     return miplevel_w.clip(0), miplevel_h.clip(0)
-
     def tv_loss(self):
         loss = 0
         # img = self.activation_fn(imgs[0, i])
@@ -308,6 +290,10 @@ class IntegralEquirect(torch.nn.Module):
         return loss
 
     def forward(self, viewdirs, saSample, max_level=None):
+
+        # rotate
+        if self.R is not None:
+            viewdirs = torch.matmul(self.R.reshape(1, 3, 3), viewdirs.reshape(-1, 3, 1)).reshape(-1, 3)
         # Compute width and height of sample
         device = viewdirs.device
         eps = torch.finfo(torch.float32).eps

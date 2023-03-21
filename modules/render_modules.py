@@ -389,11 +389,12 @@ class HydraMLPDiffuse(torch.nn.Module):
         self.roughness_mlp = util.create_mlp(self.in_mlpC + get_dim(self.roughness_view_encoder, 3), 2, **roughness_cfg)
 
 
-    def calibrate(self, *args, **kwargs):
+    def calibrate(self, mean_brightness, conserve_energy, *args, **kwargs):
         diffuse, tint, extra = self(*args, **kwargs)
         diffuse_v = inv_sigmoid(diffuse).mean().detach().item()
         # tint_v = (tint / (1-tint)).log()
-        self.diffuse_bias += inv_sigmoid(0.25) - diffuse_v
+        v = 0.25 if not conserve_energy else 0.25/float(mean_brightness)
+        self.diffuse_bias += inv_sigmoid(v) - diffuse_v
         ic(diffuse_v, self.diffuse_bias)
 
         roughness = (extra['r1'] + extra['r2']) / 2 / 2

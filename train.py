@@ -288,8 +288,8 @@ def reconstruction(args):
     #             pbar.set_description(f'psnr={-10.0 * np.log(photo_loss) / np.log(10.0):.04f}')
         # tensorf.bg_module.save('test.png')
 
-    # TODO REMOVE
     tensorf.sampler.update(tensorf.rf, init=True)
+    # TODO REMOVE
     if args.ckpt is None:
         if tensorf.rf.num_pretrain > 0:
             # dparams = tensorf.parameters()
@@ -341,7 +341,6 @@ def reconstruction(args):
     xyz[:, 3] *= 0
     sigma_feat = tensorf.rf.compute_densityfeature(xyz)
     alpha = 1-torch.exp(-sigma_feat * tensorf.sampler.stepsize * tensorf.rf.distance_scale)
-    ic(sigma_feat.mean())
     feat = tensorf.rf.compute_appfeature(xyz)
     bg_brightness = tensorf.bg_module.mean_color().detach().mean()
     args = tensorf.model.calibrate(args, xyz, feat, bg_brightness)

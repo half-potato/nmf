@@ -15,7 +15,7 @@ arch:
   orient_world_normals: True
   align_pred_norms: True
   detach_inter: False
-  geonorm_iters: 4000
+  geonorm_iters: -1
   geonorm_interp_iters: 1000
 
   tonemap:
@@ -60,14 +60,15 @@ arch:
     percent_bright: 0.0
     # max_brdf_rays: [3194304]
     max_brdf_rays: [259430]
-    conserve_energy: False
+    conserve_energy: True
     target_num_samples: [800000]
-    russian_roulette: True
+    russian_roulette: False
     max_retrace_rays: []
     cold_start_bg_iters: 0
     detach_N_iters: 0
     anoise: 0.25
     no_emitters: True
+    freeze: False
 
     brdf_sampler:
       _target_: brdf_samplers.ggx.GGXSampler
@@ -84,7 +85,7 @@ arch:
     brdf:
       _target_: modules.brdf.MLPBRDF
       _partial_: True
-      mul_LdotN: False
+      mul_LdotN: True
       feape: 0
       dotpe: -1
       h_encoder:
@@ -204,8 +205,8 @@ params:
   TV_weight_app: 0.0
   TV_weight_bg: 0
   envmap_lambda: 0
-  pred_lambda: 1e-2
-  final_pred_lambda: 3e-2
+  pred_lambda: 0
+  final_pred_lambda: 0
   diffuse_lambda: 0
   ori_lambda: 0.1
   final_ori_lambda: Null

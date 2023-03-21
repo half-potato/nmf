@@ -10,13 +10,14 @@ class RealBounce(torch.nn.Module):
     def __init__(self, app_dim, diffuse_module, brdf, brdf_sampler, 
                  anoise, max_brdf_rays, target_num_samples, russian_roulette, 
                  percent_bright, cold_start_bg_iters, detach_N_iters, conserve_energy=True, no_emitters=True,
-                 visibility_module=None, max_retrace_rays=[], bright_sampler=None):
+                 visibility_module=None, max_retrace_rays=[], bright_sampler=None, freeze=False):
         super().__init__()
         self.diffuse_module = diffuse_module(in_channels=app_dim)
         self.brdf = brdf(in_channels=app_dim)
         self.brdf_sampler = brdf_sampler(max_samples=1024)
         self.bright_sampler = bright_sampler
         self.visibility_module = visibility_module
+        self.freeze = freeze
 
         self.needs_normals = True
         self.conserve_energy = conserve_energy
@@ -39,7 +40,7 @@ class RealBounce(torch.nn.Module):
         self.mean_ratios = None
 
     def calibrate(self, args, xyz, feat, bg_brightness):
-        self.diffuse_module.calibrate(xyz, normalize(torch.rand_like(xyz[:, :3])), feat)
+        self.diffuse_module.calibrate(bg_brightness, self.conserve_energy, xyz, normalize(torch.rand_like(xyz[:, :3])), feat)
         self.brdf.calibrate(feat, bg_brightness)
         args.model.arch.model.brdf.bias = self.brdf.bias
         args.model.arch.model.diffuse_module.diffuse_bias = self.diffuse_module.diffuse_bias
@@ -48,10 +49,11 @@ class RealBounce(torch.nn.Module):
 
     def get_optparam_groups(self, lr_scale=1):
         grad_vars = []
-        grad_vars += [{'params': self.diffuse_module.parameters(),
-                       'lr': self.diffuse_module.lr*lr_scale}]
-        grad_vars += [{'params': self.brdf.parameters(),
-                       'lr': self.brdf.lr*lr_scale}]
+        if not self.freeze:
+            grad_vars += [{'params': self.diffuse_module.parameters(),
+                           'lr': self.diffuse_module.lr*lr_scale}]
+            grad_vars += [{'params': self.brdf.parameters(),
+                           'lr': self.brdf.lr*lr_scale}]
         return grad_vars
 
     def check_schedule(self, iter, batch_mul, **kwargs):
@@ -160,10 +162,11 @@ class RealBounce(torch.nn.Module):
 
         # compute spherical harmonic coefficients for the background
         if self.no_emitters:
-            # with torch.no_grad():
-            coeffs, conv_coeffs = bg_module.get_spherical_harmonics(100)
+            with torch.no_grad():
+                coeffs, conv_coeffs = bg_module.get_spherical_harmonics(100)
             evaled = sh.eval_sh_bases(conv_coeffs.shape[0], normals)
-            E = (conv_coeffs.reshape(1, -1, 3) * evaled.reshape(evaled.shape[0], -1, 1)).sum(dim=1)
+            E = (conv_coeffs.reshape(1, -1, 3) * evaled.reshape(evaled.shape[0], -1, 1)).sum(dim=1).detach()
+            # ic(E.mean(), bg_module.mean_color())
             diffuse = albedo * E
         else:
             diffuse = albedo

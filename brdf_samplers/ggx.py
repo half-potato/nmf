@@ -95,7 +95,8 @@ class GGXSampler(PseudoRandomSampler):
 
     def compute_prob(self, halfvec, eN, r1, r2, **kwargs):
         eps=torch.finfo(torch.float32).eps
-        r1 = r1.reshape(-1, 1)
+        r2 = r1
+        r1 = (r1+r2).reshape(-1, 1) / 2
         NdotH = halfvec[..., 2].abs().clip(min=eps, max=1).reshape(-1, 1)
         logD = 2*torch.log(r1.clip(min=eps)) - torch.log((math.pi * (NdotH**2*(r1**2-1)+1)**2).clip(min=eps))
         return logD.exp()
@@ -105,6 +106,8 @@ class GGXSampler(PseudoRandomSampler):
         NdotH = ((H * N).sum(dim=-1)).abs().clip(min=eps, max=1)
         HdotV = (H * V).sum(dim=-1).abs().clip(min=eps, max=1)
         NdotV = (N * V).sum(dim=-1).abs().clip(min=eps, max=1)
+        r2 = r1
+        r1 = (r1+r2) / 2
         logD = 2*torch.log(r1.clip(min=eps)) - 2*torch.log((NdotH**2*(r1**2-1)+1).clip(min=eps))
         # ic(NdotH.shape, NdotH, D, D.mean())
         # px.scatter(x=NdotH[0].detach().cpu().flatten(), y=D[0].detach().cpu().flatten()).show()
