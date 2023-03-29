@@ -181,8 +181,8 @@ class MLPBRDF(torch.nn.Module):
         ref_weight = mlp_out[..., :3]
 
         if self.mul_LdotN:
-            weight = ref_weight * LdotN.abs().detach()
-            # weight = ref_weight * LdotN.clip(min=0).detach()
+            # weight = ref_weight * LdotN.abs().detach()
+            weight = ref_weight * LdotN.clip(min=0).detach()
         else:
             weight = ref_weight
 

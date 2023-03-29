@@ -15,6 +15,7 @@ import traceback
 from pathlib import Path
 import yaml
 from sklearn import linear_model
+from modules.denoiser import BilateralDenoiser
 
 class dotdict(dict):
     """dot.notation access to dictionary attributes"""
@@ -35,8 +36,8 @@ def stack_tensors(data):
                 data[key] = torch.tensor(data[key])
         except:
             pass
-        #     traceback.print_exc()
-        #     ic(key, data[key][0])
+            # traceback.print_exc()
+            # ic(key, [d.shape for d in data[key]])
     return data
 
 def chunk_renderer(rays, tensorf, focal, keys=['rgb_map'], chunk=4096, render2completion=False, **kwargs):
@@ -122,7 +123,7 @@ class BundleRender:
             return val_map
 
         return dotdict(
-            **{k: reshape(ims[k].detach()).cpu() for k in ims.keys()},
+            **{k: reshape(ims[k]).cpu() for k in ims.keys()},
             **vals,
         ), stats
 
@@ -227,6 +228,7 @@ def evaluate(iterator, test_dataset, tensorf, renderer, savePath=None, prtx='', 
         [0.0, 0.0, 1.0],
     ])
 
+    denoiser = BilateralDenoiser()
     tensorf.eval()
     tint_psnrs = []
     ic(tensorf.eval_batch_size)

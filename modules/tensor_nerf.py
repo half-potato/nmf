@@ -127,14 +127,15 @@ class TensorNeRF(torch.nn.Module):
         del ckpt['state_dict']['model.brdf_sampler.angs']
         # del ckpt['state_dict']['sampler.occupancy_grid._binary']
         # del ckpt['state_dict']['sampler.occupancy_grid.occs']
-        # ic(ckpt['state_dict'].keys())
+        ic(ckpt['state_dict'].keys())
         near_far = near_far if near_far is not None else [1, 6]
         if 'rf.grid_size' in ckpt['state_dict']:
-            grid_size = list(ckpt['state_dict']['rf.grid_size'])
+            grid_size = ckpt['state_dict']['rf.grid_size'].tolist()
             ic(grid_size)
         else:
             grid_size = [300, 300, 300]
-        config['rf']['grid_size'] = [300, 300, 300]
+        # config['rf']['grid_size'] = [300, 300, 300]
+        config['rf']['grid_size'] = grid_size
         rf = hydra.utils.instantiate(config)(aabb=aabb, near_far=near_far, grid_size=grid_size)
         # if 'alphaMask.aabb' in ckpt.keys():
         #     #  length = np.prod(ckpt['alphaMask.shape'])
@@ -192,7 +193,7 @@ class TensorNeRF(torch.nn.Module):
 
     def forward(self, rays, focal, start_mipval=None, bg_col=torch.tensor([1, 1, 1]), stepmul=1,
                 recur=0, override_near=None, output_alpha=None, dynamic_batch_size=True, gt_normals=None, override_alpha_thres=None,
-                is_train=False, ndc_ray=False, N_samples=-1, tonemap=True, draw_debug=True):
+                is_train=False, ndc_ray=False, N_samples=-1, tonemap=True, draw_debug=True, max_weight_N=-1):
         # rays: (N, (origin, viewdir, ray_up))
         output = {}
         eps = torch.finfo(torch.float32).eps
@@ -343,7 +344,7 @@ class TensorNeRF(torch.nn.Module):
             with torch.no_grad():
                 depth_map = torch.sum(weight * z_vals, 1)
                 # depth_map = depth_map + (1. - acc_map) * rays[whole_valid, -1]
-                depth_map = depth_map + (1. - acc_map) * 0
+                depth_map = depth_map# + (1. - acc_map) * 0
 
                 # view dependent normal map
                 # N, 3, 3
@@ -386,6 +387,12 @@ class TensorNeRF(torch.nn.Module):
             images['depth'] = depth_map.detach().cpu()
             images['world_normal'] = world_normal_map.detach().cpu()
             images['normal'] = pred_norm_map.detach().cpu()
+            if max_weight_N > 0:
+                dweight = torch.cat([weight, torch.zeros((weight.shape[0], max_weight_N-weight.shape[1]), device=device)], dim=1)
+                dz_vals = torch.cat([z_vals, torch.zeros((z_vals.shape[0], max_weight_N-z_vals.shape[1]), device=device)], dim=1)
+                images['weights'] = dweight.detach()
+                images['z_vals'] = dz_vals.detach()
+
             images['termination_xyz'] = termination_xyz
             images['surf_width'] = surface_width
             for k, v in debug.items():
