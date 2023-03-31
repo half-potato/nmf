@@ -115,16 +115,22 @@ class MLPBRDF(torch.nn.Module):
         def rand_vecs():
             v = normalize(2*torch.rand((N, 3), device=device) - 1)
             return v
-        weight = self(rand_vecs(), rand_vecs(), rand_vecs(), rand_vecs(), rand_vecs(), rand_vecs(), efeatures, torch.rand((N), device=device), torch.rand((N), device=device))
+        L = rand_vecs()
+        norms = rand_vecs()
+        # ensure L dot H is positive
+        LdotN = (L * norms).sum(dim=-1, keepdim=True)
+        norms = LdotN * norms
+
+        weight = self(rand_vecs(), L, norms, rand_vecs(), rand_vecs(), rand_vecs(), rand_vecs(), efeatures, torch.rand((N), device=device), torch.rand((N), device=device))
         # ic(self(rand_vecs(), rand_vecs(), rand_vecs(), rand_vecs(), rand_vecs(), efeatures, torch.rand((N), device=device)).mean())
         target_val = self.init_val / bg_brightness.item()
-        ic(bg_brightness, target_val)
         self.bias += inv_activation(target_val, self.activation_name) - inv_activation(weight, self.activation_name).mean().detach().item()
+        ic(bg_brightness, target_val, self.bias)
         # ic(self.bias, -(weight / (1-weight)).log().mean().detach().item())
         # ic(self(rand_vecs(), rand_vecs(), rand_vecs(), rand_vecs(), rand_vecs(), efeatures, torch.rand((N), device=device)).mean())
 
 
-    def forward(self, V, L, N, local_v, half_vec, diff_vec, efeatures, eax, eay):
+    def forward(self, V, L, N, H, local_v, half_vec, diff_vec, efeatures, eax, eay):
         # V: (n, 3)-viewdirs, the outgoing light direction
         # L: (n, m, 3) incoming light direction. bounce_rays
         # N: (n, 1, 3) outward normal
@@ -133,7 +139,8 @@ class MLPBRDF(torch.nn.Module):
         # mask: mask for matprop
 
         LdotN = (L * N).sum(dim=-1, keepdim=True)
-        LdotH = (diff_vec * half_vec).sum(dim=-1, keepdim=True)
+        LdotH = (L * H).sum(dim=-1, keepdim=True)
+        # LdotH = (diff_vec * half_vec).sum(dim=-1, keepdim=True)
         if self.dotpe >= 0:
 
             VdotN = (V * N).sum(dim=-1, keepdim=True)
@@ -185,6 +192,7 @@ class MLPBRDF(torch.nn.Module):
             weight = ref_weight * LdotN.clip(min=0).detach()
         else:
             weight = ref_weight
+        # ic(ref_weight, LdotN, weight)
 
         # plot it
         # splat_weight = torch.zeros((*ray_mask.shape, 3), dtype=weight.dtype, device=weight.device)

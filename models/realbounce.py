@@ -106,6 +106,7 @@ class RealBounce(torch.nn.Module):
             eV.reshape(-1, 3),
             L.reshape(-1, 3),
             eN.reshape(-1, 3),
+            halfvec.reshape(-1, 3),
             L.reshape(-1, 3),
             halfvec.reshape(-1, 3),
             diffvec.reshape(-1, 3),
@@ -190,7 +191,7 @@ class RealBounce(torch.nn.Module):
                 bN.detach_()
             bV = -viewdirs[bounce_mask]
             # align normals
-            # bN = bN * (bV * bN).sum(dim=-1, keepdim=True).sign()
+            bN = bN * (bV * bN).sum(dim=-1, keepdim=True).sign()
             # r1 = matprop['r1'][bounce_mask]*0 + 0.0001
             # r2 = matprop['r2'][bounce_mask]*0 + 0.0001
             r1 = matprop['r1'][bounce_mask]
@@ -221,7 +222,21 @@ class RealBounce(torch.nn.Module):
 
 
             H = normalize((eV+L)/2)
-            diffvec = torch.matmul(row_world_basis.permute(0, 2, 1), L.unsqueeze(-1)).squeeze(-1)
+
+            z_up = torch.tensor([0.0, 0.0, 1.0], device=device).reshape(1, 3).expand(H.shape[0], 3)
+            x_up = torch.tensor([-1.0, 0.0, 0.0], device=device).reshape(1, 3).expand(H.shape[0], 3)
+            up = torch.where(H[:, 2:3] < 0.999, z_up, x_up)
+            tangent = normalize(torch.linalg.cross(up, H))
+            bitangent = normalize(torch.linalg.cross(H, tangent))
+            # B, 3, 3
+            # col_world_basis = torch.stack([tangent, bitangent, H], dim=1).reshape(-1, 3, 3).permute(0, 2, 1)
+
+            # diffvec = torch.matmul(row_world_basis.permute(0, 2, 1), L.unsqueeze(-1)).squeeze(-1)
+            diffvec = torch.stack([
+                tangent[:, 0] * L[:, 0] + bitangent[:, 0] * L[:, 1] + H[:, 0] * L[:, 2],
+                tangent[:, 1] * L[:, 0] + bitangent[:, 1] * L[:, 1] + H[:, 1] * L[:, 2],
+                tangent[:, 2] * L[:, 0] + bitangent[:, 2] * L[:, 1] + H[:, 2] * L[:, 2],
+            ], dim=-1)
             local_v = torch.matmul(row_world_basis.permute(0, 2, 1), eV.unsqueeze(-1)).squeeze(-1)
             halfvec = torch.matmul(row_world_basis.permute(0, 2, 1), H.unsqueeze(-1)).squeeze(-1)
             # samp_prob = self.brdf_sampler.compute_prob(halfvec, eN, ea1.reshape(-1, 1), ea2.reshape(-1, 1), proportion=proportion)
@@ -268,7 +283,7 @@ class RealBounce(torch.nn.Module):
             # calculate second part of BRDF
             n, m = ray_mask.shape
             # brdf_weight = self.brdf(eV, L, eN, local_v, halfvec, diffvec, efeatures, ea1, ea2)
-            brdf_weight = self.brdf(eV, L.detach(), eN.detach(), local_v.detach(), halfvec.detach(), diffvec.detach(), efeatures, ea1.detach(), ea2.detach())
+            brdf_weight = self.brdf(eV, L.detach(), eN.detach(), H.detach(), local_v.detach(), halfvec.detach(), diffvec.detach(), efeatures, ea1.detach(), ea2.detach())
             ray_count = (ray_mask.sum(dim=1)+1e-8)[..., None]
 
             if len(self.max_retrace_rays) > recur:
@@ -348,9 +363,9 @@ class RealBounce(torch.nn.Module):
         if self.conserve_energy:
             lam = tint.mean(dim=-1, keepdim=True)
             rgb = lam*reflect_rgb + (1-lam)*diffuse
+            # ic(rgb.mean(), diffuse.mean(), lam.mean())
         else:
             rgb = reflect_rgb
-        # ic(rgb.mean(), diffuse.mean())
         debug['diffuse'] = diffuse
         debug['roughness'] = matprop['r1']
         debug['tint'] = brdf_rgb

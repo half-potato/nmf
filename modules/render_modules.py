@@ -393,9 +393,9 @@ class HydraMLPDiffuse(torch.nn.Module):
         diffuse, tint, extra = self(*args, **kwargs)
         diffuse_v = inv_sigmoid(diffuse).mean().detach().item()
         # tint_v = (tint / (1-tint)).log()
-        v = 0.25 if not conserve_energy else 0.25/float(mean_brightness)
+        v = (0.25 if not conserve_energy else 0.5)/float(mean_brightness)
         self.diffuse_bias += inv_sigmoid(v) - diffuse_v
-        ic(diffuse_v, self.diffuse_bias)
+        ic(self.diffuse_bias, mean_brightness, v)
 
         roughness = (extra['r1'] + extra['r2']) / 2 / 2
         roughness_v = inv_sigmoid(roughness).mean().detach().item()

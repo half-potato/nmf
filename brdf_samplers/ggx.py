@@ -69,8 +69,8 @@ class GGXSampler(PseudoRandomSampler):
         # ic((1-a).min(), a.min(), a.max(), phi.min(), phi.max(), (1-a).max())
         N_stretch = P1*T1_mask + P2*T2_mask + (1 - P1*P1 - P2*P2).clip(min=eps).sqrt() * V_stretch_mask
 
-        # H_l = normalize(torch.stack([r_mask1*N_stretch[..., 0], r_mask2*N_stretch[..., 1], N_stretch[..., 2].clip(min=0)], dim=-1))
-        H_l = normalize(torch.stack([r_mask1*N_stretch[..., 0], r_mask2*N_stretch[..., 1], N_stretch[..., 2]], dim=-1))
+        H_l = normalize(torch.stack([r_mask1*N_stretch[..., 0], r_mask2*N_stretch[..., 1], N_stretch[..., 2].clip(min=0)], dim=-1))
+        # H_l = normalize(torch.stack([r_mask1*N_stretch[..., 0], r_mask2*N_stretch[..., 1], N_stretch[..., 2]], dim=-1))
 
         first = torch.zeros_like(ray_mask)
         first[:, 0] = True
