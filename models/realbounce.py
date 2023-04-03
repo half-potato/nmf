@@ -195,7 +195,7 @@ class RealBounce(torch.nn.Module):
             # r1 = matprop['r1'][bounce_mask]*0 + 0.0001
             # r2 = matprop['r2'][bounce_mask]*0 + 0.0001
             r1 = matprop['r1'][bounce_mask]
-            r2 = matprop['r2'][bounce_mask]
+            r2 = matprop['r1'][bounce_mask]
 
             L, row_world_basis, lpdf = self.brdf_sampler.sample(
                     bV, bN,
@@ -295,10 +295,12 @@ class RealBounce(torch.nn.Module):
                     per_ray_factor = brdf_weight.max(dim=-1, keepdim=True).values * ((eV * eN).sum(dim=-1, keepdim=True) > 0) * samp_prob
 
                     color_contribution = per_ray_factor.reshape(-1) * per_sample_factor.expand(ray_mask.shape)[ri, rj]
+                    # normalize color contribution
+                    color_contribution = color_contribution / color_contribution.sum() * num_retrace_rays
                     if self.visibility_module is not None:
                         ray_xyzs_normed = xyzs_normed[bounce_mask][..., :3].reshape(-1, 1, 3).expand(-1, ray_mask.shape[1], 3)[ri, rj]
                         color_contribution *= 1-self.visibility_module(ray_xyzs_normed, L)
-                    color_contribution += 0.2*torch.rand_like(color_contribution)
+                    color_contribution += torch.rand_like(color_contribution)
                     cc_as = color_contribution.argsort()
                     retrace_ray_inds = cc_as[cc_as.shape[0]-num_retrace_rays:]
 
@@ -360,14 +362,10 @@ class RealBounce(torch.nn.Module):
             reflect_rgb[bounce_mask] = tinted_ref_rgb
             brdf_rgb[bounce_mask] = brdf_color
 
-        if self.conserve_energy:
-            lam = tint.mean(dim=-1, keepdim=True)
-            rgb = lam*reflect_rgb + (1-lam)*diffuse
-            # ic(rgb.mean(), diffuse.mean(), lam.mean())
-        else:
-            rgb = reflect_rgb
-        debug['diffuse'] = diffuse
+        lam = tint.mean(dim=-1, keepdim=True)
+        rgb = lam*reflect_rgb + (1-lam)*diffuse
+        debug['diffuse'] = diffuse*(1-lam)
         debug['roughness'] = matprop['r1']
-        debug['tint'] = brdf_rgb
+        debug['tint'] = brdf_rgb*lam
         debug['spec'] = spec
         return rgb, debug
