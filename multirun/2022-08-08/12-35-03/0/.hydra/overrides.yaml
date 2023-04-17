@@ -1,6 +1,0 @@
-- expname=ball_refnerf_grid_searchdensity
-- model=grid_mlp
-- dataset=ball
-- vis_every=10000
-- model.params.start_density=0.01
-- render_test=False

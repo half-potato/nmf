@@ -1,5 +1,0 @@
-- expname=ball_refnerf_gs_floater
-- model=refnerf
-- dataset=ball
-- vis_every=5000
-- model.arch.max_floater_loss=1
