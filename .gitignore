@@ -64,7 +64,6 @@ log/*
 log_old/*
 outputs/*
 multirun/*
-backgrounds/*
 p.trace
 final_log/*
 log_old/*
