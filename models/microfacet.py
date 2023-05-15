@@ -23,8 +23,12 @@ class Microfacet(torch.nn.Module):
         percent_bright,
         cold_start_bg_iters,
         detach_N_iters,
+        start_std=0,
+        std_decay=1,
+        std_decay_interval=10,
         conserve_energy=True,
         no_emitters=True,
+        no_diffuse=False,
         visibility_module=None,
         max_retrace_rays=[],
         bright_sampler=None,
@@ -43,6 +47,10 @@ class Microfacet(torch.nn.Module):
         self.brdf.init_val = 0.5 if self.conserve_energy else 0.25
         self.no_emitters = no_emitters
 
+        self.std = start_std
+        self.std_decay = std_decay
+        self.std_decay_interval = std_decay_interval
+
         self.anoise = anoise
         self.russian_roulette = russian_roulette
         self.target_num_samples = target_num_samples
@@ -51,6 +59,7 @@ class Microfacet(torch.nn.Module):
         self.percent_bright = percent_bright
         self.cold_start_bg_iters = cold_start_bg_iters
         self.conserve_energy = conserve_energy
+        self.no_diffuse = no_diffuse
         self.detach_bg = True
         self.detach_N_iters = detach_N_iters
         self.detach_N = True
@@ -58,7 +67,7 @@ class Microfacet(torch.nn.Module):
 
         self.mean_ratios = None
 
-    def calibrate(self, args, xyz, feat, bg_brightness):
+    def calibrate(self, args, xyz, feat, bg_brightness, save_config=True):
         self.diffuse_module.calibrate(
             bg_brightness,
             self.conserve_energy,
@@ -67,13 +76,14 @@ class Microfacet(torch.nn.Module):
             feat,
         )
         self.brdf.calibrate(feat, bg_brightness)
-        args.model.arch.model.brdf.bias = self.brdf.bias
-        args.model.arch.model.diffuse_module.diffuse_bias = (
-            self.diffuse_module.diffuse_bias
-        )
-        args.model.arch.model.diffuse_module.roughness_bias = (
-            self.diffuse_module.roughness_bias
-        )
+        if save_config:
+            args.model.arch.model.brdf.bias = self.brdf.bias
+            args.model.arch.model.diffuse_module.diffuse_bias = (
+                self.diffuse_module.diffuse_bias
+            )
+            args.model.arch.model.diffuse_module.roughness_bias = (
+                self.diffuse_module.roughness_bias
+            )
         return args
 
     def get_optparam_groups(self, lr_scale=1):
@@ -97,6 +107,8 @@ class Microfacet(torch.nn.Module):
             self.detach_bg = False
         if iter > batch_mul * self.detach_N_iters:
             self.detach_N = False
+        if iter % self.std_decay_interval == 0:
+            self.std *= self.std_decay
         return False
 
     @torch.no_grad()
@@ -125,7 +137,9 @@ class Microfacet(torch.nn.Module):
         assert xyzs.shape[0] == viewdirs.shape[0]
         assert xyzs.shape[0] == app_features.shape[0]
 
-        diffuse, tint, matprop = self.diffuse_module(xyzs, viewdirs, app_features)
+        diffuse, tint, matprop = self.diffuse_module(
+            xyzs, viewdirs, app_features, std=0
+        )
 
         n_angs = ang_vecs.shape[-2]
         n_views = viewdirs.shape[0]
@@ -250,10 +264,10 @@ class Microfacet(torch.nn.Module):
         weights,
         app_mask,
         B,
-        recur,
         render_reflection,
         bg_module,
         is_train,
+        recur,
         eps=torch.finfo(torch.float32).eps,
     ):
         # xyzs: (M, 4)
@@ -267,18 +281,24 @@ class Microfacet(torch.nn.Module):
         device = xyzs.device
 
         noise_app_features = app_features + torch.randn_like(app_features) * self.anoise
-        albedo, tint, matprop = self.diffuse_module(xyzs_normed, viewdirs, app_features)
+        std = self.std if is_train else 0
+        albedo, tint, matprop = self.diffuse_module(
+            xyzs_normed, viewdirs, app_features, std=std
+        )
 
         # compute spherical harmonic coefficients for the background
         if self.no_emitters:
             with torch.no_grad():
                 coeffs, conv_coeffs = bg_module.get_spherical_harmonics(100)
-            evaled = sh.eval_sh_bases(conv_coeffs.shape[0], normals)
-            E = (
-                (conv_coeffs.reshape(1, -1, 3) * evaled.reshape(evaled.shape[0], -1, 1))
-                .sum(dim=1)
-                .detach()
-            )
+                evaled = sh.eval_sh_bases(conv_coeffs.shape[0], normals)
+                E = (
+                    (
+                        conv_coeffs.reshape(1, -1, 3)
+                        * evaled.reshape(evaled.shape[0], -1, 1)
+                    )
+                    .sum(dim=1)
+                    .detach()
+                )
             # ic(E.mean(), bg_module.mean_color())
             diffuse = albedo * E
         else:
@@ -513,8 +533,15 @@ class Microfacet(torch.nn.Module):
 
                         (notrace_ray_inds,) = torch.where(notrace_mask)
                     else:
-                        notrace_ray_inds = cc_as[:-num_retrace_rays]
+                        notrace_ray_inds = cc_as[: cc_as.shape[0] - num_retrace_rays]
 
+                # ic(
+                #     notrace_ray_inds,
+                #     retrace_ray_inds,
+                #     ray_mask.sum(),
+                #     cc_as.shape,
+                #     num_retrace_rays,
+                # )
                 # retrace some of the rays
                 incoming_light = torch.zeros((bounce_rays.shape[0], 3), device=device)
                 if len(retrace_ray_inds) > 0:
@@ -573,7 +600,19 @@ class Microfacet(torch.nn.Module):
             spec[bounce_mask] = row_mask_sum(
                 incoming_light / eray_count * importance_samp_correction, ray_mask
             )
-            # ic(incoming_light.mean(), incoming_light.max(), spec[bounce_mask].min(), spec[bounce_mask].mean(), brdf_weight.max(), brdf_weight.mean(), tinted_ref_rgb.mean())
+            # ic(
+            #     incoming_light.shape,
+            #     incoming_light.mean(),
+            #     incoming_light.max(),
+            #     spec[bounce_mask].min(),
+            #     spec[bounce_mask].mean(),
+            #     brdf_weight.max(),
+            #     brdf_weight.mean(),
+            #     tinted_ref_rgb.mean(),
+            #     diffuse.min(),
+            #     diffuse.max(),
+            #     bg_module.mean_color(),
+            # )
             # ic(importance_samp_correction.min(), importance_samp_correction.max())
 
             if self.detach_bg:
@@ -582,10 +621,15 @@ class Microfacet(torch.nn.Module):
             reflect_rgb[bounce_mask] = tinted_ref_rgb
             brdf_rgb[bounce_mask] = brdf_color
 
-        lam = tint.mean(dim=-1, keepdim=True)
-        rgb = lam * reflect_rgb + (1 - lam) * diffuse
-        debug["diffuse"] = diffuse * (1 - lam)
+        if self.no_diffuse:
+            rgb = reflect_rgb
+            debug["diffuse"] = diffuse
+            debug["tint"] = brdf_rgb
+        else:
+            lam = tint.mean(dim=-1, keepdim=True)
+            rgb = lam * reflect_rgb + (1 - lam) * diffuse
+            debug["diffuse"] = diffuse * (1 - lam)
+            debug["tint"] = brdf_rgb * lam
         debug["roughness"] = matprop["r1"]
-        debug["tint"] = brdf_rgb * lam
         debug["spec"] = spec
         return rgb, debug

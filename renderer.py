@@ -385,7 +385,9 @@ def evaluate(
             imageio.imwrite(f"{savePath}/normal/{prtx}{idx:03d}.png", vis_normal)
             imageio.imwrite(
                 f"{savePath}/acc_map/{prtx}{idx:03d}.png",
-                (255 * ims.acc_map.numpy()).astype(np.uint8),
+                (255 * ims.acc_map.reshape(ims.acc_map.shape[:2]).numpy()).astype(
+                    np.uint8
+                ),
             )
             if "spec" in ims:
                 imageio.imwrite(
@@ -412,7 +414,9 @@ def evaluate(
             imageio.imwrite(f"{savePath}/err/{prtx}{idx:03d}.png", err_map)
             imageio.imwrite(
                 f"{savePath}/surf_width/{prtx}{idx:03d}.png",
-                ims.surf_width.numpy().astype(np.uint8),
+                ims.surf_width.reshape(ims.surf_width.shape[:2])
+                .numpy()
+                .astype(np.uint8),
             )
 
             cross_section = (ims.cross_section.clamp(0, 1).numpy() * 255).astype(

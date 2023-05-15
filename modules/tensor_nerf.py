@@ -60,6 +60,7 @@ class TensorNeRF(torch.nn.Module):
         geonorm_iters=-1,
         geonorm_interp_iters=1,
         lr_scale=1,
+        contraction="AABB",
         **kwargs,
     ):
         super(TensorNeRF, self).__init__()
@@ -199,28 +200,6 @@ class TensorNeRF(torch.nn.Module):
         )
         return at_infinity
 
-    def calculate_normals(self, xyz):
-        with torch.enable_grad():
-            xyz_g = xyz.detach().clone()
-            xyz_g.requires_grad = True
-
-            # compute sigma
-            validsigma = self.rf.compute_densityfeature(xyz_g, activate=False)
-
-            # compute normal
-            grad_outputs = torch.ones_like(validsigma)
-            g = grad(
-                validsigma,
-                xyz_g,
-                grad_outputs=grad_outputs,
-                create_graph=True,
-                allow_unused=True,
-            )
-            # n = torch.linalg.norm(g[0][:, :3], dim=-1)
-            # ic(g[0][:, :3].abs().max())
-            norms = normalize(-g[0][:, :3])
-            return norms
-
     def render_just_bg(self, viewdirs, roughness):
         if viewdirs.shape[0] == 0:
             return torch.empty((0, 3), device=viewdirs.device)
@@ -338,9 +317,7 @@ class TensorNeRF(torch.nn.Module):
                 return incoming_light, None
 
         # weight: [N_rays, N_samples]
-        # ic((dists * self.rf.distance_scale).mean())
         weight = raw2alpha(sigma, dists * self.rf.distance_scale)
-        # ic(dists.mean(), sigma.mean(), weight.mean())
 
         # app stands for appearance
         pweight = weight[ray_valid]
@@ -359,7 +336,7 @@ class TensorNeRF(torch.nn.Module):
             #  Compute normals for app mask
             app_xyz = xyz_sampled
 
-            world_normal = self.calculate_normals(app_xyz)
+            world_normal = self.rf.compute_normals(app_xyz)
 
             if all_app_features is None:
                 app_features = self.rf.compute_appfeature(app_xyz)
@@ -369,7 +346,7 @@ class TensorNeRF(torch.nn.Module):
 
             # interpolate between the predicted and world normals
             if self.normal_module is not None:
-                pred_norms = torch.zeros_like(pred_norms)
+                # pred_norms = torch.zeros_like(pred_norms)
                 pred_norms = self.normal_module(xyz_normed, app_features, world_normal)
                 # v_world_normal = pred_norms if self.use_predicted_normals else world_normal
                 if self.predicted_normal_lambda == 0:
@@ -393,10 +370,10 @@ class TensorNeRF(torch.nn.Module):
                 weight,
                 ray_valid,
                 weight.shape[0],
-                recur,
                 render_reflection,
                 is_train=is_train,
                 bg_module=self.bg_module,
+                recur=recur,
             )
 
         else:
@@ -407,18 +384,14 @@ class TensorNeRF(torch.nn.Module):
             rgb = torch.empty((0, 3), device=device, dtype=weight.dtype)
             v_world_normal = world_normal
 
-        # calculate depth
-
-        # shadow_map = torch.sum(weight * shadows, 1)
         # (N, bundle_size, bundle_size)
         if recur > 0 and self.detach_inter:
             weight = weight.detach()
 
         acc_map = torch.sum(weight, 1)
-        # rgb_map = torch.sum(weight[..., None] * rgb.clip(min=0, max=1), -2)
         eweight = weight[ray_valid][..., None]
-        # tmap_rgb = self.tonemap(rgb.clip(min=0, max=1))
-        tmap_rgb = rgb.clip(min=0, max=1)
+        tmap_rgb = self.tonemap(rgb.clip(min=0, max=1))
+        # tmap_rgb = rgb.clip(min=0, max=1)
         rgb_map = row_mask_sum(eweight * tmap_rgb, ray_valid)
         images = {}
         statistics = dict(

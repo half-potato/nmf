@@ -17,6 +17,7 @@ arch:
   detach_inter: False
   geonorm_iters: -1
   geonorm_interp_iters: 1000
+  contraction: "AABB"
 
   tonemap:
     # _target_: modules.tonemap.HDRTonemap
@@ -37,22 +38,22 @@ arch:
     alpha_thres: 1e-4
     max_samples: 250000
 
-  # normal_module:
-  #   _partial_: True
-  #   _target_: modules.render_modules.MLPNormal
-  #   lr: 1e-3
-  #   # pospe: -1
-  #   # feape: 2
-  #   # pospe: 0
-  #   pospe: -1
-  #   feape: 0
-  #
-  #   hidden_w: 64
-  #   num_layers: 3
-  #   initializer: 'kaiming'
-  #   size_multi: 2.5e-3
-  #   # allocation: 3
-  #   offset_geometry: False
+  normal_module:
+    _partial_: True
+    _target_: modules.render_modules.MLPNormal
+    lr: 1e-3
+    # pospe: -1
+    # feape: 2
+    # pospe: 0
+    pospe: -1
+    feape: 0
+
+    hidden_w: 64
+    num_layers: 3
+    initializer: 'kaiming'
+    size_multi: 2.5e-3
+    # allocation: 3
+    offset_geometry: False
 
   model:
     _partial_: True
@@ -62,11 +63,14 @@ arch:
     conserve_energy: True
     target_num_samples: [800000]
     russian_roulette: False
-    max_retrace_rays: [10000]
+    max_retrace_rays: [1000]
+    start_std: 0.0
+    std_decay: 1.0
     cold_start_bg_iters: 0
     detach_N_iters: 0
     anoise: 0.25
     no_emitters: True
+    no_diffuse: False
     freeze: False
 
     brdf_sampler:
@@ -103,7 +107,7 @@ arch:
 
     diffuse_module:
       _partial_: True
-      _target_: modules.render_modules.HydraMLPDiffuse
+      _target_: modules.render_modules.RandHydraMLPDiffuse
       pospe: -1
       feape: 0
       # pospe: 12
@@ -190,9 +194,9 @@ arch:
 params:
   L1_weight_initial: 8e-5
   L1_weight_rest: 4e-5
-  clip_grad: 10
-  weight_decay: 1e-6
-  eps: 1e-15
+  clip_grad: Null
+  weight_decay: 0
+  eps: 1e-8
   betas: [0.9, 0.99]
 
   starting_batch_size: 100
@@ -204,8 +208,8 @@ params:
   TV_weight_app: 0.0
   TV_weight_bg: 0
   envmap_lambda: 0
-  pred_lambda: 0
-  final_pred_lambda: 0
+  pred_lambda: 3e-4
+  final_pred_lambda: 3e-4
   diffuse_lambda: 0
   ori_lambda: 0.1
   final_ori_lambda: Null
