@@ -22,8 +22,6 @@ class DualModel(torch.nn.Module):
         ) + self.model2.get_optparam_groups(lr_scale)
 
     def get_model(self, recur, is_train=True):
-        if is_train:
-            return self.model2
         return (
             self.model1 if self.select1 else (self.model1 if recur > 0 else self.model2)
         )
@@ -45,6 +43,10 @@ class DualModel(torch.nn.Module):
     @property
     def max_retrace_rays(self):
         return self.get_model(0).max_retrace_rays
+
+    def needs_normals(self, recur):
+        # ic(self.get_model(recur), self.get_model(recur).needs_normals(recur), recur)
+        return self.get_model(recur).needs_normals(recur)
 
     @property
     def outputs(self):

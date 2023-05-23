@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 import hydra
+import torch
 from icecream import ic
 from loguru import logger
 from omegaconf import DictConfig, OmegaConf
@@ -22,7 +23,7 @@ from utils import *
 
 os.environ["OPENCV_IO_ENABLE_OPENEXR"] = "1"
 
-torch.autograd.set_detect_anomaly(True)
+# torch.autograd.set_detect_anomaly(True)
 
 # from torch.profiler import profile, record_function, ProfilerActivity
 
@@ -43,7 +44,8 @@ class SimpleSampler:
         batch = self.batch if batch is None else batch
         self.curr += batch
         if self.curr + batch > self.total:
-            self.ids = torch.LongTensor(np.random.permutation(self.total))
+            # self.ids = torch.LongTensor(np.random.permutation(self.total))
+            self.ids = torch.randperm(self.total, dtype=torch.long, device=device)
             self.curr = 0
         ids = self.ids[self.curr : self.curr + batch]
         return ids, ids
@@ -319,8 +321,8 @@ def reconstruction(args):
         f"initial TV_weight density: {TV_weight_density} appearance: {TV_weight_app}"
     )
 
-    # allrgbs = allrgbs.to(device)
-    # allrays = allrays.to(device)
+    allrgbs = allrgbs.to(device)
+    allrays = allrays.to(device)
     # ratio of meters to pixels at a distance of 1 meter
     focal = train_dataset.focal[0] if ndc_ray else train_dataset.fx
     # / train_dataset.img_wh[0]
@@ -684,6 +686,8 @@ def reconstruction(args):
                     total_loss = total_loss + loss_tv
 
                     total_loss = total_loss / lbatch_size
+                    if torch.isnan(total_loss).any():
+                        continue
                     total_loss.backward()
 
                     photo_loss = photo_loss.detach().item()

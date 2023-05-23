@@ -42,7 +42,7 @@ class Microfacet(torch.nn.Module):
         self.visibility_module = visibility_module
         self.freeze = freeze
 
-        self.needs_normals = True
+        self.needs_normals = lambda x: True
         self.conserve_energy = conserve_energy
         self.brdf.init_val = 0.5 if self.conserve_energy else 0.25
         self.no_emitters = no_emitters

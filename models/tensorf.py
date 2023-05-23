@@ -13,7 +13,7 @@ class TensoRF(torch.nn.Module):
     def __init__(self, app_dim, diffuse_module):
         super().__init__()
         self.diffuse_module = diffuse_module(in_channels=app_dim)
-        self.needs_normals = False
+        self.needs_normals = lambda x: False
         self.outputs = {}
 
         self.mean_ratios = None

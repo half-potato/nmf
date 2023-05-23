@@ -36,6 +36,7 @@ arch:
     occ_thre: 0.01
     warmup_iters: 256
     alpha_thres: 0
+    levels: 1
     max_samples: 250000
 
   normal_module:
@@ -222,8 +223,8 @@ arch:
         # midpoint: 128
         # jump: 4
 
-      bright_sampler:
-        _target_: brdf_samplers.equirect_bright_sampler.ERBrightSampler
+      # bright_sampler:
+      #   _target_: brdf_samplers.equirect_bright_sampler.ERBrightSampler
 
   bg_module:
     _target_: modules.integral_equirect.IntegralEquirect

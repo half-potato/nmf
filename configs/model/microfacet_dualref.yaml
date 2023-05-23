@@ -73,7 +73,7 @@ arch:
       _partial_: True
       _target_: models.refnerf.RefNeRF
       anoise: 0.1
-      detach_N_iters: 500
+      detach_N_iters: 0
 
       ref_module:
         _partial_: True
@@ -139,7 +139,7 @@ arch:
       _target_: models.microfacet.Microfacet
       percent_bright: 0.0
       max_brdf_rays: [450000, 450000]
-      target_num_samples: [800000]
+      target_num_samples: [600000]
       max_retrace_rays: [10000]
       # max_brdf_rays: [450000]
       # target_num_samples: [0]

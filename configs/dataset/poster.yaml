@@ -1,0 +1,9 @@
+scenedir: nerf_synthetic/poster
+dataset_name: blender
+downsample_train: 2
+downsample_test: 2
+ndc_ray: false
+near_far: [1.5, 6]
+aabb_scale: 8
+gt_bg: forest.exr
+

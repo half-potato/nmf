@@ -336,37 +336,47 @@ class TensorNeRF(torch.nn.Module):
             #  Compute normals for app mask
             app_xyz = xyz_sampled
 
-            world_normal = self.rf.compute_normals(app_xyz)
-
             if all_app_features is None:
                 app_features = self.rf.compute_appfeature(app_xyz)
             else:
                 app_features = all_app_features
                 # _, app_features = self.rf.compute_feature(xyz_normed)
 
-            # interpolate between the predicted and world normals
-            if self.normal_module is not None:
-                # pred_norms = torch.zeros_like(pred_norms)
-                pred_norms = self.normal_module(xyz_normed, app_features, world_normal)
-                # v_world_normal = pred_norms if self.use_predicted_normals else world_normal
-                if self.predicted_normal_lambda == 0:
-                    v_world_normal = world_normal
-                elif self.predicted_normal_lambda == 1:
-                    v_world_normal = pred_norms
-                else:
-                    v_world_normal = normalize(
-                        self.predicted_normal_lambda * pred_norms
-                        + (1 - self.predicted_normal_lambda) * world_normal
+            v_world_normal = world_normal
+            if self.model.needs_normals(recur) or not is_train:
+                world_normal = self.rf.compute_normals(app_xyz)
+
+                # interpolate between the predicted and world normals
+                if self.normal_module is not None:
+                    # pred_norms = torch.zeros_like(pred_norms)
+                    pred_norms = self.normal_module(
+                        xyz_normed, app_features, world_normal
                     )
-            else:
-                v_world_normal = world_normal
+                    # v_world_normal = pred_norms if self.use_predicted_normals else world_normal
+                    if self.predicted_normal_lambda == 0:
+                        v_world_normal = world_normal
+                    elif self.predicted_normal_lambda == 1:
+                        v_world_normal = pred_norms
+                    else:
+                        v_world_normal = normalize(
+                            self.predicted_normal_lambda * pred_norms
+                            + (1 - self.predicted_normal_lambda) * world_normal
+                        )
+
+                # r_world_normal = normalize(
+                #     v_world_normal
+                #     + 0.1
+                #     * (1 - pweight.reshape(-1, 1)) ** 2
+                #     * normalize(2 * torch.rand_like(v_world_normal) - 1)
+                # )
+            r_world_normal = v_world_normal
 
             rgb, debug = self.model(
                 app_xyz,
                 xyz_normed,
                 app_features,
                 viewdirs[ray_valid],
-                v_world_normal,
+                r_world_normal,
                 weight,
                 ray_valid,
                 weight.shape[0],
@@ -508,8 +518,6 @@ class TensorNeRF(torch.nn.Module):
                 im = row_mask_sum(v * eweight, ray_valid)
                 images[k] = im + (1 - acc_map[..., None]) * bg
         elif recur == 0:
-            # viewdirs point inward. -viewdirs aligns with pred_norms. So we want it below 0
-            o_world_normal = world_normal if self.orient_world_normals else pred_norms
             aweight = weight[ray_valid]
             NdotV1 = (
                 -viewdirs[ray_valid].reshape(-1, 3).detach() * pred_norms.reshape(-1, 3)

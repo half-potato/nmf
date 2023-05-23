@@ -14,6 +14,7 @@ class RefNeRF(torch.nn.Module):
         self.detach_N_iters = detach_N_iters
         self.detach_N = True
         self.outputs = {"diffuse": 3, "roughness": 1, "tint": 3, "spec": 3}
+        self.needs_normals = lambda x: True
 
         self.mean_ratios = None
         self.max_retrace_rays = []
