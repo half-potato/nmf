@@ -1,5 +1,5 @@
 # Neural Microfacet Fields for Inverse Rendering
-More details can be found at the project page [here](https://gitlab.com/half-potato/half-potato.gitlab.io).
+More details can be found at the project page [here](https://half-potato.gitlab.io/posts/nmf/).
 # Installation
 A conda virtual environment is recommended.
 ```
