@@ -60,7 +60,6 @@ class Microfacet(torch.nn.Module):
         self.cold_start_bg_iters = cold_start_bg_iters
         self.conserve_energy = conserve_energy
         self.no_diffuse = no_diffuse
-        self.detach_bg = True
         self.detach_N_iters = detach_N_iters
         self.detach_N = True
         self.outputs = {"diffuse": 3, "roughness": 1, "tint": 3, "spec": 3}
@@ -103,8 +102,6 @@ class Microfacet(torch.nn.Module):
     def check_schedule(self, iter, batch_mul, **kwargs):
         # if self.bright_sampler is not None:
         #     self.bright_sampler.check_schedule(iter, batch_mul, bg_module)
-        if iter > batch_mul * self.cold_start_bg_iters:
-            self.detach_bg = False
         if iter > batch_mul * self.detach_N_iters:
             self.detach_N = False
         if iter % self.std_decay_interval == 0:
@@ -614,9 +611,6 @@ class Microfacet(torch.nn.Module):
             #     bg_module.mean_color(),
             # )
             # ic(importance_samp_correction.min(), importance_samp_correction.max())
-
-            if self.detach_bg:
-                tinted_ref_rgb.detach_()
 
             reflect_rgb[bounce_mask] = tinted_ref_rgb
             brdf_rgb[bounce_mask] = brdf_color

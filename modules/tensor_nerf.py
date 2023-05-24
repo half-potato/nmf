@@ -51,6 +51,7 @@ class TensorNeRF(torch.nn.Module):
         recur_stepmul=1,
         recur_alpha_thres=1e-3,
         detach_inter=False,
+        hdr=False,
         bg_noise=0,
         bg_noise_decay=0.999,
         use_predicted_normals=True,
@@ -77,6 +78,7 @@ class TensorNeRF(torch.nn.Module):
             self.tonemap = tonemap
 
         self.lr_scale = lr_scale
+        self.hdr = hdr
         self.bg_noise = bg_noise
         self.bg_noise_decay = bg_noise_decay
         self.alphaMask = alphaMask
@@ -86,7 +88,6 @@ class TensorNeRF(torch.nn.Module):
         self.geonorm_iters = geonorm_iters
         self.geonorm_interp_iters = geonorm_interp_iters
         self.recur_stepmul = recur_stepmul
-        self.detach_bg = False
 
         self.detach_inter = detach_inter
 
@@ -204,8 +205,6 @@ class TensorNeRF(torch.nn.Module):
         if viewdirs.shape[0] == 0:
             return torch.empty((0, 3), device=viewdirs.device)
         bg = self.bg_module(viewdirs, roughness)
-        if self.detach_bg:
-            bg.detach_()
         return bg.reshape(-1, 3)
 
     def forward(
@@ -343,8 +342,9 @@ class TensorNeRF(torch.nn.Module):
                 # _, app_features = self.rf.compute_feature(xyz_normed)
 
             v_world_normal = world_normal
-            if self.model.needs_normals(recur) or not is_train:
+            if self.model.needs_normals(recur):
                 world_normal = self.rf.compute_normals(app_xyz)
+                v_world_normal = world_normal
 
                 # interpolate between the predicted and world normals
                 if self.normal_module is not None:
@@ -400,7 +400,7 @@ class TensorNeRF(torch.nn.Module):
 
         acc_map = torch.sum(weight, 1)
         eweight = weight[ray_valid][..., None]
-        tmap_rgb = self.tonemap(rgb.clip(min=0, max=1))
+        tmap_rgb = rgb
         # tmap_rgb = rgb.clip(min=0, max=1)
         rgb_map = row_mask_sum(eweight * tmap_rgb, ray_valid)
         images = {}
@@ -608,7 +608,7 @@ class TensorNeRF(torch.nn.Module):
 
         # ic(rgb[ray_valid].mean(dim=0), rgb_map[acc_map>0.1].mean(dim=0), weight.shape)
         if tonemap:
-            rgb_map = self.tonemap(rgb_map.clip(0, 1))
+            rgb_map = self.tonemap(rgb_map, noclip=self.hdr)
         rgb_map = rgb_map + (1 - acc_map[..., None]) * bg
         # if white_bg:
         #     if True:

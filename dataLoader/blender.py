@@ -13,6 +13,8 @@ from torch.utils.data import Dataset
 from torchvision import transforms as T
 from tqdm import tqdm
 
+from modules.tonemap import SRGBTonemap
+
 from .ray_utils import *
 
 
@@ -132,6 +134,7 @@ class BlenderDataset(Dataset):
         self.tint_paths = []
         self.acc_maps = []
 
+        tonemap = SRGBTonemap()
         img_eval_interval = (
             1 if self.N_vis < 0 else len(self.meta["frames"]) // self.N_vis
         )
@@ -152,8 +155,8 @@ class BlenderDataset(Dataset):
             self.image_paths += [image_path]
             self.normal_paths += [normal_path]
             self.tint_paths += [tint_path]
-            img = Image.open(image_path)
-            # img = imageio.imread(image_path)
+            # img = Image.open(image_path)
+            img = imageio.imread(image_path)
 
             if self.downsample != 1.0:
                 img = img.resize(self.img_wh, Image.LANCZOS)
@@ -174,7 +177,9 @@ class BlenderDataset(Dataset):
                 img[:, :3] = img[:, :3] * img[:, -1:] + (
                     1 - img[:, -1:]
                 )  # blend A to RGB
+                # this is automatic during training
             if img.max() > 1:
+                img[:, :3] = tonemap(img[:, :3])
                 self.hdr = True
             else:
                 self.hdr = False

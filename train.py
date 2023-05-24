@@ -572,18 +572,29 @@ def reconstruction(args):
                         ).sum()
                     else:
                         # loss = ((rgb_map - rgb_train[whole_valid]) ** 2).mean()
-                        # loss = F.huber_loss(rgb_map.clip(0, 1), rgb_train[whole_valid], delta=1, reduction='mean')
-                        loss = (
-                            (rgb_map.clip(0, 1) - rgb_train[whole_valid].clip(0, 1))
-                            ** 2
-                        ).sum()
+                        if tensorf.hdr:
+                            loss = (
+                                F.huber_loss(
+                                    rgb_map,
+                                    rgb_train[whole_valid],
+                                    delta=1,
+                                    reduction="none",
+                                )
+                                # .clip(min=torch.finfo(rgb_map.dtype).eps)
+                                # .sqrt()
+                                .sum()
+                            )
+                        else:
+                            loss = (
+                                (rgb_map.clip(0, 1) - rgb_train[whole_valid].clip(0, 1))
+                                ** 2
+                            ).sum()
                         # loss = ((rgb_map.clip(0, 1) - rgb_train[whole_valid].clip(0, 1)).abs()).sum()
                     norm_err = (
                         sum(stats["normal_err"])
                         if type(stats["normal_err"]) == list
                         else stats["normal_err"].sum()
                     )
-                    # loss = torch.sqrt(F.huber_loss(rgb_map, rgb_train, delta=1, reduction='none') + params.charbonier_eps**2).mean()
                     # photo_loss = ((rgb_map.clip(0, 1) - rgb_train[whole_valid].clip(0, 1)) ** 2).mean().detach()
                     photo_loss = (
                         ((rgb_map.clip(0, 1) - rgb_train[whole_valid].clip(0, 1)) ** 2)

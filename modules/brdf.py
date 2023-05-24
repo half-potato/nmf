@@ -1,38 +1,50 @@
 import math
+
+import matplotlib.pyplot as plt
+import numpy as np
+import plotly.express as px
+import plotly.graph_objects as go
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
-from .render_modules import positional_encoding, str2fn
 from icecream import ic
-import matplotlib.pyplot as plt
-from . import safemath
-from mutils import normalize, signed_clip, inv_activation
 
 from modules import util
+from mutils import inv_activation, normalize, signed_clip
 
-import plotly.express as px
-import plotly.graph_objects as go
+from . import safemath
+from .render_modules import positional_encoding, str2fn
+
 
 def schlick(f0, n, l):
-    return f0 + (1-f0)*(1-(n*l).sum(dim=-1, keepdim=True).clip(min=1e-20))**5
+    return f0 + (1 - f0) * (1 - (n * l).sum(dim=-1, keepdim=True).clip(min=1e-20)) ** 5
+
 
 def ggx_dist(NdotH, roughness):
     # takes the cos of the zenith angle between the micro surface and the macro surface
     # and returns the probability of that micro surface existing
     a2 = roughness**2
     # return a2 / np.pi / ((NdotH**2*(a2-1)+1)**2).clip(min=1e-8)
-    return ((a2 / (NdotH.clip(min=0, max=1)**2*(a2-1)+1))**2).clip(min=0, max=1)
+    return ((a2 / (NdotH.clip(min=0, max=1) ** 2 * (a2 - 1) + 1)) ** 2).clip(
+        min=0, max=1
+    )
+
 
 def aniso_smith_masking_gtr2(v_local, ax, ay, eps=torch.finfo(torch.float32).eps):
     v2 = v_local * v_local
-    Lambda = (-1 + (1+(v2[..., 0] * ax*ax + v2[..., 1] * ay*ay) / signed_clip(v2[..., 2])).clip(min=eps).sqrt()) / 2
-    return 1 / (1+Lambda)
+    Lambda = (
+        -1
+        + (1 + (v2[..., 0] * ax * ax + v2[..., 1] * ay * ay) / signed_clip(v2[..., 2]))
+        .clip(min=eps)
+        .sqrt()
+    ) / 2
+    return 1 / (1 + Lambda)
+
 
 class Specular(torch.nn.Module):
     def __init__(self, in_channels, lr, bias, **kwargs):
         super().__init__()
-        self.lr=lr
+        self.lr = lr
         self.in_channels = in_channels
         self.in_mlpC = in_channels
         self.bias = bias
@@ -45,27 +57,44 @@ class Specular(torch.nn.Module):
         LdotH = (diff_vec * half_vec).sum(dim=-1, keepdim=True)
         VdotH = (local_v * half_vec).sum(dim=-1, keepdim=True)
 
-        C_0 = torch.sigmoid(self.C0_mlp(efeatures)+self.bias)
-        Fm = C_0 + (1-C_0) * VdotH**5
-        Gm = aniso_smith_masking_gtr2(diff_vec, ax, ay) * aniso_smith_masking_gtr2(local_v, ax, ay)
+        C_0 = torch.sigmoid(self.C0_mlp(efeatures) + self.bias)
+        Fm = C_0 + (1 - C_0) * VdotH**5
+        Gm = aniso_smith_masking_gtr2(diff_vec, ax, ay) * aniso_smith_masking_gtr2(
+            local_v, ax, ay
+        )
         # spec = (Fm * Gm.reshape(-1, 1)) / (4 * LdotH.abs()).clip(min=1e-8)
         # spec = (Fm) / 4
         spec = (Fm * Gm.reshape(-1, 1)) / 4
         # ic(C_0, spec.max(dim=0), spec)
-        return spec#.clip(max=1)
+        return spec  # .clip(max=1)
 
 
 class MLPBRDF(torch.nn.Module):
-    def __init__(self, in_channels, h_encoder=None, d_encoder=None, v_encoder=None, n_encoder=None, l_encoder=None, feape=6, dotpe=0,
-                 activation='sigmoid', mul_LdotN=True, bias=0, lr=1e-4, shift=0, **kwargs):
+    def __init__(
+        self,
+        in_channels,
+        h_encoder=None,
+        d_encoder=None,
+        v_encoder=None,
+        n_encoder=None,
+        l_encoder=None,
+        feape=6,
+        dotpe=0,
+        activation="sigmoid",
+        mul_LdotN=True,
+        bias=0,
+        lr=1e-4,
+        shift=0,
+        **kwargs
+    ):
         super().__init__()
 
         self.in_channels = in_channels
         self.dotpe = dotpe
         self.bias = bias
-        self.in_mlpC = 2*feape*in_channels + in_channels
+        self.in_mlpC = 2 * feape * in_channels + in_channels
         if dotpe >= 0:
-            self.in_mlpC += 6 + 2*dotpe*6
+            self.in_mlpC += 6 + 2 * dotpe * 6
         self.v_encoder = v_encoder
         self.n_encoder = n_encoder
         self.l_encoder = l_encoder
@@ -99,12 +128,12 @@ class MLPBRDF(torch.nn.Module):
             torch.nn.init.xavier_uniform_(m.weight, gain=np.sqrt(2))
 
     def activation(self, x):
-        if self.activation_name == 'sigexp':
+        if self.activation_name == "sigexp":
             col = torch.sigmoid(x[..., :3])
-            brightness = torch.exp(x[..., 3:4].clip(min=-10, max=10)-1)
+            brightness = torch.exp(x[..., 3:4].clip(min=-10, max=10) - 1)
             return col * brightness
         else:
-            return str2fn(self.activation_name)(x[..., :3]+self.bias)
+            return str2fn(self.activation_name)(x[..., :3] + self.bias)
             # raise Exception(f"{self.activation} not implemented in BRDF")
         # return torch.sigmoid(x)
         # return F.softplus(x+1.0)/2
@@ -112,23 +141,38 @@ class MLPBRDF(torch.nn.Module):
     def calibrate(self, efeatures, bg_brightness):
         N = efeatures.shape[0]
         device = efeatures.device
+
         def rand_vecs():
-            v = normalize(2*torch.rand((N, 3), device=device) - 1)
+            v = normalize(2 * torch.rand((N, 3), device=device) - 1)
             return v
+
         L = rand_vecs()
         norms = rand_vecs()
         # ensure L dot H is positive
         LdotN = (L * norms).sum(dim=-1, keepdim=True)
         norms = LdotN * norms
 
-        weight = self(rand_vecs(), L, norms, rand_vecs(), rand_vecs(), rand_vecs(), rand_vecs(), efeatures, torch.rand((N), device=device), torch.rand((N), device=device))
+        weight = self(
+            rand_vecs(),
+            L,
+            norms,
+            rand_vecs(),
+            rand_vecs(),
+            rand_vecs(),
+            rand_vecs(),
+            efeatures,
+            torch.rand((N), device=device),
+            torch.rand((N), device=device),
+        )
         # ic(self(rand_vecs(), rand_vecs(), rand_vecs(), rand_vecs(), rand_vecs(), efeatures, torch.rand((N), device=device)).mean())
         target_val = self.init_val / bg_brightness.item()
-        self.bias += inv_activation(target_val, self.activation_name) - inv_activation(weight, self.activation_name).mean().detach().item()
+        self.bias += (
+            inv_activation(target_val, self.activation_name)
+            - inv_activation(weight, self.activation_name).mean().detach().item()
+        )
         ic(bg_brightness, target_val, self.bias)
         # ic(self.bias, -(weight / (1-weight)).log().mean().detach().item())
         # ic(self(rand_vecs(), rand_vecs(), rand_vecs(), rand_vecs(), rand_vecs(), efeatures, torch.rand((N), device=device)).mean())
-
 
     def forward(self, V, L, N, H, local_v, half_vec, diff_vec, efeatures, eax, eay):
         # V: (n, 3)-viewdirs, the outgoing light direction
@@ -142,20 +186,30 @@ class MLPBRDF(torch.nn.Module):
         LdotH = (L * H).sum(dim=-1, keepdim=True)
         # LdotH = (diff_vec * half_vec).sum(dim=-1, keepdim=True)
         if self.dotpe >= 0:
-
             VdotN = (V * N).sum(dim=-1, keepdim=True)
             NdotH = half_vec[..., 2]
             # indata = [LdotN, torch.sqrt((1-LdotN**2).clip(min=1e-8, max=1)),
             #           VdotN, torch.sqrt((1-LdotN**2).clip(min=1e-8, max=1)),
             #           NdotH, torch.sqrt((1-NdotH**2).clip(min=1e-8, max=1))]
-            indata = [LdotH, torch.sqrt((1-LdotN**2).clip(min=1e-8, max=1)),
-                      # LdotN, torch.sqrt((1-LdotN**2).clip(min=1e-8, max=1)),
-                      VdotN, torch.sqrt((1-LdotN**2).clip(min=1e-8, max=1)),
-                      NdotH, torch.sqrt((1-NdotH**2).clip(min=1e-8, max=1))]
+            indata = [
+                LdotH,
+                torch.sqrt((1 - LdotN**2).clip(min=1e-8, max=1)),
+                # LdotN, torch.sqrt((1-LdotN**2).clip(min=1e-8, max=1)),
+                VdotN,
+                torch.sqrt((1 - LdotN**2).clip(min=1e-8, max=1)),
+                NdotH,
+                torch.sqrt((1 - NdotH**2).clip(min=1e-8, max=1)),
+            ]
             indata = [d.reshape(-1, 1) for d in indata]
             if self.dotpe > 0:
                 dotvals = torch.cat(indata, dim=-1)
-                indata += [safemath.integrated_pos_enc((dotvals * torch.pi, 0.20*torch.ones_like(dotvals)), 0, self.dotpe)]
+                indata += [
+                    safemath.integrated_pos_enc(
+                        (dotvals * torch.pi, 0.20 * torch.ones_like(dotvals)),
+                        0,
+                        self.dotpe,
+                    )
+                ]
         else:
             indata = []
         # indata = [safemath.arccos(LdotN.reshape(-1, 1)), safemath.arccos(VdotN.reshape(-1, 1)), safemath.arccos(NdotH.reshape(-1, 1))]
@@ -192,7 +246,7 @@ class MLPBRDF(torch.nn.Module):
             weight = ref_weight * LdotN.clip(min=0).detach()
         else:
             weight = ref_weight
-        # ic(ref_weight, LdotN, weight)
+        # ic(ref_weight.mean(), LdotN.mean(), weight.mean())
 
         # plot it
         # splat_weight = torch.zeros((*ray_mask.shape, 3), dtype=weight.dtype, device=weight.device)
