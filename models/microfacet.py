@@ -23,6 +23,8 @@ class Microfacet(torch.nn.Module):
         percent_bright,
         cold_start_bg_iters,
         detach_N_iters,
+        min_rough_start=0,
+        min_rough_decay=1,
         start_std=0,
         std_decay=1,
         std_decay_interval=10,
@@ -46,6 +48,8 @@ class Microfacet(torch.nn.Module):
         self.conserve_energy = conserve_energy
         self.brdf.init_val = 0.5 if self.conserve_energy else 0.25
         self.no_emitters = no_emitters
+        self.min_rough = min_rough_start
+        self.min_rough_decay = min_rough_decay
 
         self.std = start_std
         self.std_decay = std_decay
@@ -102,6 +106,8 @@ class Microfacet(torch.nn.Module):
     def check_schedule(self, iter, batch_mul, **kwargs):
         # if self.bright_sampler is not None:
         #     self.bright_sampler.check_schedule(iter, batch_mul, bg_module)
+        if iter % 10 == 0:
+            self.min_rough *= self.min_rough_decay
         if iter > batch_mul * self.detach_N_iters:
             self.detach_N = False
         if iter % self.std_decay_interval == 0:
@@ -336,6 +342,9 @@ class Microfacet(torch.nn.Module):
             # r2 = matprop['r2'][bounce_mask]*0 + 0.0001
             r1 = matprop["r1"][bounce_mask]
             r2 = matprop["r1"][bounce_mask]
+            if is_train:
+                r1 = r1.clip(min=self.min_rough)
+                r2 = r2.clip(min=self.min_rough)
 
             L, row_world_basis, lpdf = self.brdf_sampler.sample(
                 bV, bN, r1, r2, ray_mask
@@ -384,21 +393,23 @@ class Microfacet(torch.nn.Module):
             # B, 3, 3
             # col_world_basis = torch.stack([tangent, bitangent, H], dim=1).reshape(-1, 3, 3).permute(0, 2, 1)
 
-            # diffvec = torch.matmul(row_world_basis.permute(0, 2, 1), L.unsqueeze(-1)).squeeze(-1)
-            diffvec = torch.stack(
-                [
-                    tangent[:, 0] * L[:, 0]
-                    + bitangent[:, 0] * L[:, 1]
-                    + H[:, 0] * L[:, 2],
-                    tangent[:, 1] * L[:, 0]
-                    + bitangent[:, 1] * L[:, 1]
-                    + H[:, 1] * L[:, 2],
-                    tangent[:, 2] * L[:, 0]
-                    + bitangent[:, 2] * L[:, 1]
-                    + H[:, 2] * L[:, 2],
-                ],
-                dim=-1,
-            )
+            diffvec = torch.matmul(
+                row_world_basis.permute(0, 2, 1), L.unsqueeze(-1)
+            ).squeeze(-1)
+            # diffvec = torch.stack(
+            #     [
+            #         tangent[:, 0] * L[:, 0]
+            #         + bitangent[:, 0] * L[:, 1]
+            #         + H[:, 0] * L[:, 2],
+            #         tangent[:, 1] * L[:, 0]
+            #         + bitangent[:, 1] * L[:, 1]
+            #         + H[:, 1] * L[:, 2],
+            #         tangent[:, 2] * L[:, 0]
+            #         + bitangent[:, 2] * L[:, 1]
+            #         + H[:, 2] * L[:, 2],
+            #     ],
+            #     dim=-1,
+            # )
             local_v = torch.matmul(
                 row_world_basis.permute(0, 2, 1), eV.unsqueeze(-1)
             ).squeeze(-1)

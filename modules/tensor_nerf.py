@@ -298,7 +298,7 @@ class TensorNeRF(torch.nn.Module):
                     dynamic_batch_size=False,
                     stepmul=self.recur_stepmul,
                     start_mipval=start_mipval.reshape(-1),
-                    override_near=1 * self.sampler.stepsize,
+                    override_near=3 * self.sampler.stepsize,
                     is_train=is_train,
                     override_alpha_thres=self.recur_alpha_thres,
                     ndc_ray=False,

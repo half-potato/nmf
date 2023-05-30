@@ -228,9 +228,9 @@ class TensoRF(torch.nn.Module):
     def forward(self, xyz_normed, enable_xyz_grad=False):
         if not enable_xyz_grad:
             xyz_normed.detach_()
+        gs = grid_sample2 if enable_xyz_grad else grid_sample
         coordinate_plane, coordinate_line = self.coords(xyz_normed)
         feature = []
-        gs = grid_sample2 if enable_xyz_grad else grid_sample
         for idx_plane in range(len(self.app_plane)):
             pc = gs(
                 self.app_plane[idx_plane],
@@ -294,11 +294,14 @@ class Triplanar(TensoRF):
     def dim(self):
         return self._dim
 
-    def forward(self, xyz_normed):
+    def forward(self, xyz_normed, enable_xyz_grad=False):
         coordinate_plane, coordinate_line = self.coords(xyz_normed)
         coefs = 1
+        if not enable_xyz_grad:
+            xyz_normed.detach_()
+        gs = grid_sample2 if enable_xyz_grad else grid_sample
         for idx_plane in range(len(self.app_plane)):
-            pc = grid_sample(
+            pc = gs(
                 self.app_plane[idx_plane],
                 coordinate_plane[[idx_plane]],
                 mode=self.interp_mode,

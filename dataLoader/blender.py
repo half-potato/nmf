@@ -178,7 +178,8 @@ class BlenderDataset(Dataset):
                     1 - img[:, -1:]
                 )  # blend A to RGB
                 # this is automatic during training
-            if img.max() > 1:
+            # this is really stupid
+            if "exr" in str(image_path):
                 img[:, :3] = tonemap(img[:, :3])
                 self.hdr = True
             else:

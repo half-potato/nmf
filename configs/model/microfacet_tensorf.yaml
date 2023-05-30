@@ -5,7 +5,7 @@ arch:
   recur_alpha_thres: 1e-3
   lr_scale: 1
   infinity_border: False
-  eval_batch_size: 10240
+  eval_batch_size: 4096
   recur_stepmul: 0.5
   hdr: False
 
@@ -60,6 +60,8 @@ arch:
     _partial_: True
     _target_: models.microfacet.Microfacet
     percent_bright: 0.0
+    min_rough_start: 0.0
+    min_rough_decay: 0.999
     max_brdf_rays: [650000, 450000]
     conserve_energy: True
     target_num_samples: [1000000]

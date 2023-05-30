@@ -283,6 +283,17 @@ def evaluate(
         ]
     )
 
+    final_stats = {}
+    if tensorf.bg_module is not None:
+        bg_path = Path(savePath) / "envmaps"
+        bg_path.mkdir(exist_ok=True, parents=True)
+        tensorf.bg_module.save(bg_path, prefix=prtx)
+
+        if gt_bg is not None:
+            bg_psnr = tensorf.bg_module.calc_envmap_psnr(gt_bg)
+            logger.info(f"bg_psnr={float(bg_psnr):.3f}")
+            final_stats["bg_psnr"] = float(bg_psnr)
+
     tensorf.eval()
     tint_psnrs = []
     ic(tensorf.eval_batch_size)
@@ -379,7 +390,14 @@ def evaluate(
         depth_maps.append(vis_depth_map)
 
         if savePath is not None:
-            imageio.imwrite(f"{savePath}/{prtx}{idx:03d}.png", rgb_map)
+            if tensorf.hdr:
+                imageio.imwrite(
+                    f"{savePath}/{prtx}{idx:03d}.exr",
+                    tensorf.tonemap.inverse(ims.rgb_map),
+                )
+            else:
+                imageio.imwrite(f"{savePath}/{prtx}{idx:03d}.png", rgb_map)
+
             rgb_map = np.concatenate((rgb_map, vis_depth_map), axis=1)
             imageio.imwrite(f"{savePath}/rgbd/{prtx}{idx:03d}.exr", ims.depth.numpy())
             imageio.imwrite(f"{savePath}/normal/{prtx}{idx:03d}.png", vis_normal)
@@ -449,19 +467,8 @@ def evaluate(
     #     col_map = (col_map.cpu().numpy() * 255).astype('uint8')
     #     imageio.imwrite(f'{savePath}/{prtx}col_map{i}.png', col_map)
     #     imageio.imwrite(f'{savePath}/{prtx}env_map{i}.png', env_map)
-    final_stats = {}
     if tint_psnrs:
         final_stats["tint_psnr"] = float(np.mean(np.asarray(tint_psnrs)))
-
-    if tensorf.bg_module is not None:
-        bg_path = Path(savePath) / "envmaps"
-        bg_path.mkdir(exist_ok=True, parents=True)
-        tensorf.bg_module.save(bg_path, prefix=prtx)
-
-        if gt_bg is not None:
-            bg_psnr = tensorf.bg_module.calc_envmap_psnr(gt_bg)
-            logger.info(f"bg_psnr={float(bg_psnr):.3f}")
-            final_stats["bg_psnr"] = float(bg_psnr)
 
     if PSNRs:
         psnr = np.mean(np.asarray(PSNRs))

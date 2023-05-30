@@ -1,0 +1,7 @@
+scenedir: nerf_synthetic/relighting/coffee_exr
+dataset_name: blender
+downsample_train: 1
+downsample_test: 1
+ndc_ray: false
+near_far: [3, 5]
+aabb_scale: 1

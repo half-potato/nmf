@@ -71,6 +71,7 @@ def render_test(args):
         is_stack=True,
         white_bg=white_bg,
     )
+    test_dataset.near_far = args.dataset.near_far
     white_bg = test_dataset.white_bg
     ndc_ray = args.dataset.ndc_ray
 
@@ -97,25 +98,25 @@ def render_test(args):
             mipbias_lr=1e-4,
             mipnoise=0.0,
         )
-        bg_module.load_state_dict(bg_sd, strict=False)
+        bg_module.load_state_dict(bg_sd)
         bg_module.lr = 0
         bg_module.mul_lr = 0
         bg_module.brightness_lr = 0
-        # a = bg_module.bg_mats[0].reshape(-1, 3).mean(dim=-1)
-        # b = tensorf.bg_module.bg_mats[0].reshape(-1, 3).mean(dim=-1)
-        # a.sort()
-        # b.sort()
-        # a0 = a[500]
-        # a1 = a[-500]
-        # b0 = b[500]
-        # b1 = b[-500]
-        # # a0 = torch.quantile(a, 0.05)
-        # # a1 = torch.quantile(a, 0.95)
-        # # b0 = torch.quantile(b, 0.05)
-        # # b1 = torch.quantile(b, 0.95)
-        # new_mul = (tensorf.bg_module.mul*(b1-b0)) / (bg_module.mul*(a1-a0))
-        # new_mul = 3
-        # bg_module.mul *= new_mul
+        a = bg_module.bg_mat.reshape(-1, 3).mean(dim=-1)
+        b = tensorf.bg_module.bg_mat.reshape(-1, 3).mean(dim=-1)
+        a.sort()
+        b.sort()
+        a0 = a[500]
+        a1 = a[-500]
+        b0 = b[500]
+        b1 = b[-500]
+        # a0 = torch.quantile(a, 0.05)
+        # a1 = torch.quantile(a, 0.95)
+        # b0 = torch.quantile(b, 0.05)
+        # b1 = torch.quantile(b, 0.95)
+        new_mul = (tensorf.bg_module.mul * (b1 - b0)) / (bg_module.mul * (a1 - a0))
+        new_mul = 1
+        bg_module.mul *= new_mul
         # offset = tensorf.bg_module.mean_color().mean() / bg_module.mean_color().mean()
         # ic(new_mul, offset, torch.log(offset))
         # bg_module.brightness += torch.log(offset)
@@ -124,7 +125,10 @@ def render_test(args):
         tensorf.bg_module = bg_module
     tensorf = tensorf.to(device)
     tensorf.train()
-    # tensorf.sampler.update(tensorf.rf, init=True)
+    tensorf.sampler.update(tensorf.rf, init=True)
+    for i in range(1000):
+        tensorf.sampler.check_schedule(i, 1, tensorf.rf)
+
     # if tensorf.bright_sampler is not None:
     #     tensorf.bright_sampler.update(tensorf.bg_module)
 

@@ -1,0 +1,8 @@
+scenedir: nerf_synthetic/relighting/teapot_exr
+dataset_name: blender
+downsample_train: 1
+downsample_test: 1
+ndc_ray: false
+near_far: [3, 5]
+gt_bg: sunset_jhbcentral_4k.exr
+aabb_scale: 1

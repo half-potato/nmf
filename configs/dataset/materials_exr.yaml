@@ -1,4 +1,4 @@
-scenedir: nerf_synthetic/materials_exr
+scenedir: nerf_synthetic/relighting/materials_exr
 dataset_name: blender
 downsample_train: 1
 downsample_test: 1

@@ -1,0 +1,7 @@
+scenedir: nerf_synthetic/relighting/toaster_exr
+dataset_name: blender
+downsample_train: 1
+downsample_test: 1
+ndc_ray: false
+near_far: [2.5, 5]
+gt_bg: interior.exr
