@@ -260,7 +260,7 @@ def reconstruction(args):
         # if tensorf.bright_sampler is not None:
         #     tensorf.bright_sampler.update(tensorf.bg_module)
         bg_module = IntegralEquirect(
-            bg_resolution=1024,
+            bg_resolution=512,
             mipbias=0,
             activation="exp",
             lr=0.001,

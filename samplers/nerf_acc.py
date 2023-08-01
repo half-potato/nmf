@@ -57,7 +57,7 @@ class NerfAccSampler(torch.nn.Module):
         def occ_eval_fn(x):
             # x is in aabb, unnormalized
             density = rf.compute_densityfeature(x).reshape(-1)
-            return density * self.stepsize
+            return density * self.stepsize * rf.distance_scale
 
         self.occupancy_grid.update_every_n_steps(
             step=iteration + 1,

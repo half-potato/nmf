@@ -556,7 +556,7 @@ class RandHydraMLPDiffuse(torch.nn.Module):
         r = torch.sigmoid(self.roughness_mlp(rough_mlp_in) + self.roughness_bias) / 2
         r = (r + torch.randn_like(r) * std / 2).clip(min=1e-2, max=1)
         tint = torch.sigmoid(self.tint_mlp(mlp_in) + self.tint_bias)
-        tint = (tint + torch.randn_like(tint) * std).clip(min=0, max=1)
+        # tint = (tint + torch.randn_like(tint) * std).clip(min=0, max=1)
 
         # ic(f0)
         return (
@@ -681,7 +681,6 @@ class HydraMLPDiffuse(torch.nn.Module):
         r = torch.sigmoid(self.roughness_mlp(rough_mlp_in) + self.roughness_bias) / 2
         tint = torch.sigmoid(self.tint_mlp(mlp_in) + self.tint_bias)
 
-        # ic(f0)
         return (
             diffuse,
             tint,
@@ -689,7 +688,6 @@ class HydraMLPDiffuse(torch.nn.Module):
                 diffuse=diffuse,
                 r1=r[:, 0:1],
                 r2=r[:, 1:2],
-                f0=tint,
                 tint=tint,
             ),
         )

@@ -30,7 +30,7 @@ class Microfacet(torch.nn.Module):
         std_decay_interval=10,
         conserve_energy=True,
         no_emitters=True,
-        no_diffuse=False,
+        diffuse_mixing_mode="lambda",
         visibility_module=None,
         max_retrace_rays=[],
         bright_sampler=None,
@@ -63,7 +63,7 @@ class Microfacet(torch.nn.Module):
         self.percent_bright = percent_bright
         self.cold_start_bg_iters = cold_start_bg_iters
         self.conserve_energy = conserve_energy
-        self.no_diffuse = no_diffuse
+        self.diffuse_mixing_mode = diffuse_mixing_mode
         self.detach_N_iters = detach_N_iters
         self.detach_N = True
         self.outputs = {"diffuse": 3, "roughness": 1, "tint": 3, "spec": 3}
@@ -198,8 +198,9 @@ class Microfacet(torch.nn.Module):
         # next, compute GGX distribution because it's not represented here
         brdf_colors = (
             self.brdf_sampler.compute_prob(
+                L.reshape(-1, 3),
+                eV.reshape(-1, 3),
                 halfvec.reshape(-1, 3),
-                eN.reshape(-1, 3),
                 r1.reshape(-1, 1),
                 r2.reshape(-1, 1),
             ).reshape(-1, 1)
@@ -346,8 +347,13 @@ class Microfacet(torch.nn.Module):
                 r1 = r1.clip(min=self.min_rough)
                 r2 = r2.clip(min=self.min_rough)
 
+            n = ray_xyz.shape[0]
+            m = ray_mask.shape[1]
+            angs = self.brdf_sampler.draw(n, m).to(device)
+            u1 = angs[..., 0]
+            u2 = angs[..., 1]
             L, row_world_basis, lpdf = self.brdf_sampler.sample(
-                bV, bN, r1, r2, ray_mask
+                u1, u2, bV, bN, r1, r2, ray_mask
             )
 
             n = ray_xyz.shape[0]
@@ -416,7 +422,6 @@ class Microfacet(torch.nn.Module):
             halfvec = torch.matmul(
                 row_world_basis.permute(0, 2, 1), H.unsqueeze(-1)
             ).squeeze(-1)
-            # samp_prob = self.brdf_sampler.compute_prob(halfvec, eN, ea1.reshape(-1, 1), ea2.reshape(-1, 1), proportion=proportion)
             samp_prob = (lpdf).exp().reshape(-1, 1)
 
             if self.bright_sampler is not None:
@@ -452,7 +457,6 @@ class Microfacet(torch.nn.Module):
                 ray_mask.shape
             )[ray_mask]
             mipval = -torch.log(indiv_num_samples.clip(min=1)) - lpdf
-            # mipval = self.brdf_sampler.calculate_mipval(H.detach(), eV, eN.detach(), ray_mask, ea1, ea2, proportion=eproportion)
 
             bounce_rays = torch.cat(
                 [
@@ -608,6 +612,24 @@ class Microfacet(torch.nn.Module):
             spec[bounce_mask] = row_mask_sum(
                 incoming_light / eray_count * importance_samp_correction, ray_mask
             )
+
+            if self.diffuse_mixing_mode == "fresnel_ind":
+                R0 = tint.reshape(-1, 1, 3).expand(-1, m, 3)[ri, rj]
+                ediffuse = diffuse.reshape(-1, 1, 3).expand(-1, m, 3)[ri, rj]
+                costheta = (-eV * H).sum(dim=-1, keepdim=True).abs()
+                spec_reflectance = (
+                    R0 + (1 - R0) * (1 - costheta).clip(min=0, max=1) ** 5
+                )
+                # rgb = spec_reflectance * reflect_rgb + (1 - spec_reflectance) * diffuse
+                comb_rgb = (
+                    spec_reflectance
+                    * incoming_light
+                    * brdf_weight
+                    * importance_samp_correction
+                    + (1 - spec_reflectance) * ediffuse
+                )
+                reflect_rgb[bounce_mask] = row_mask_sum(comb_rgb / eray_count, ray_mask)
+
             # ic(
             #     incoming_light.shape,
             #     incoming_light.mean(),
@@ -626,11 +648,29 @@ class Microfacet(torch.nn.Module):
             reflect_rgb[bounce_mask] = tinted_ref_rgb
             brdf_rgb[bounce_mask] = brdf_color
 
-        if self.no_diffuse:
+        if self.diffuse_mixing_mode == "no_diffuse":
             rgb = reflect_rgb
             debug["diffuse"] = diffuse
             debug["tint"] = brdf_rgb
-        else:
+        elif self.diffuse_mixing_mode == "fresnel":
+            R0 = tint  # .mean(dim=-1, keepdim=True)
+            # R0 = R0 * 0 + 0.04
+            costheta = (-viewdirs * normals).sum(dim=-1, keepdim=True).abs()
+            spec_reflectance = R0 + (1 - R0) * (1 - costheta).clip(min=0, max=1) ** 5
+            # rgb = spec_reflectance * reflect_rgb + (1 - spec_reflectance) * diffuse
+            rgb = spec_reflectance * spec + (1 - spec_reflectance) * diffuse
+            debug["diffuse"] = (1 - spec_reflectance) * diffuse
+            debug["tint"] = spec_reflectance * brdf_rgb
+        elif self.diffuse_mixing_mode == "fresnel_ind":
+            R0 = tint  # .mean(dim=-1, keepdim=True)
+            # R0 = R0 * 0 + 0.04
+            costheta = (-viewdirs * normals).sum(dim=-1, keepdim=True).abs()
+            spec_reflectance = R0 + (1 - R0) * (1 - costheta).clip(min=0, max=1) ** 5
+            # rgb = spec_reflectance * reflect_rgb + (1 - spec_reflectance) * diffuse
+            rgb = reflect_rgb
+            debug["diffuse"] = (1 - spec_reflectance) * diffuse
+            debug["tint"] = spec_reflectance * brdf_rgb
+        elif self.diffuse_mixing_mode == "lambda":
             lam = tint.mean(dim=-1, keepdim=True)
             rgb = lam * reflect_rgb + (1 - lam) * diffuse
             debug["diffuse"] = diffuse * (1 - lam)
