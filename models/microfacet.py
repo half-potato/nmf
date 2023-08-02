@@ -35,6 +35,8 @@ class Microfacet(torch.nn.Module):
         max_retrace_rays=[],
         bright_sampler=None,
         freeze=False,
+        rays_per_ray=512,
+        test_rays_per_ray=512,
     ):
         super().__init__()
         self.diffuse_module = diffuse_module(in_channels=app_dim)
@@ -66,6 +68,8 @@ class Microfacet(torch.nn.Module):
         self.diffuse_mixing_mode = diffuse_mixing_mode
         self.detach_N_iters = detach_N_iters
         self.detach_N = True
+        self.rays_per_ray = rays_per_ray
+        self.test_rays_per_ray = test_rays_per_ray
         self.outputs = {"diffuse": 3, "roughness": 1, "tint": 3, "spec": 3}
 
         self.mean_ratios = None
@@ -312,6 +316,7 @@ class Microfacet(torch.nn.Module):
         num_brdf_rays = (
             self.max_brdf_rays[recur] if not is_train else self.max_brdf_rays[recur]
         )  # // B
+        num_brdf_rays = B * (self.rays_per_ray if is_train else self.test_rays_per_ray)
 
         bounce_mask, ray_mask, bright_mask = select_bounces(
             weights, app_mask, num_brdf_rays, self.percent_bright

@@ -226,9 +226,9 @@ class TensorVoxelBase(TensorBase):
             "units", self.aabbSize.to(self.grid_size.device) / (self.grid_size - 1)
         )
         # min is more accurate than mean
-        self.set_register("stepSize", torch.min(self.units) * self.step_ratio)
-        self.nSamples = int((self.aabbDiag / self.stepSize).item()) + 1
-        print("sampling step size: ", self.stepSize)
+        self.set_register("stepsize", torch.min(self.units) * self.step_ratio)
+        self.nSamples = int((self.aabbDiag / self.stepsize).item()) + 1
+        print("sampling step size: ", self.stepsize)
         print("sampling number: ", self.nSamples)
 
     def check_schedule(self, iter, batch_mul):

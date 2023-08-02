@@ -63,9 +63,10 @@ class NerfAccSampler(torch.nn.Module):
             step=iteration + 1,
             occ_eval_fn=occ_eval_fn,
             ema_decay=self.ema_decay,
-            occ_thre=self.occ_thre,
+            occ_thre=self.occ_thre if iteration > 1000 else 0,
             warmup_steps=self.warmup_iters,
         )
+        self.alpha_thres = 1e-4 if iteration > 1000 else 1e-5
 
         # if iteration in [i * batch_mul for i in self.shrink_iters]:
         #     x = (
