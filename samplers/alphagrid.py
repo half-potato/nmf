@@ -71,7 +71,7 @@ class AlphaGridSampler:
         nEnvSamples=0,
         alphaMask_thres=0.001,
         update_list=[],
-        max_samples=250000,
+        max_samples=-1,
     ):
         self.aabb = aabb
         self.enable_alpha_mask = enable_alpha_mask
@@ -103,7 +103,7 @@ class AlphaGridSampler:
             apply_correction = not torch.all(
                 torch.tensor(self.grid_size).to(rf.grid_size.device) == rf.grid_size
             )
-            # rf.shrink(new_aabb, apply_correction)
+            rf.shrink(new_aabb, apply_correction)
             self.grid_size = rf.grid_size
         self.nSamples = rf.nSamples * self.multiplier
         self.stepsize = rf.stepsize / self.multiplier
@@ -322,17 +322,14 @@ class AlphaGridSampler:
             dists = dists * rays_norm
             viewdirs = viewdirs / rays_norm
         else:
-            for i in range(5):
-                xyz_sampled, z_vals, ray_valid, env_mask = self.sample_ray(
-                    rays_chunk[:, :3],
-                    viewdirs,
-                    focal,
-                    is_train=is_train,
-                    N_samples=N_samples,
-                    override_near=override_near,
-                )
-                if ray_valid.sum() < self.max_samples:
-                    break
+            xyz_sampled, z_vals, ray_valid, env_mask = self.sample_ray(
+                rays_chunk[:, :3],
+                viewdirs,
+                focal,
+                is_train=is_train,
+                N_samples=N_samples,
+                override_near=override_near,
+            )
             dists = torch.cat(
                 (z_vals[:, 1:] - z_vals[:, :-1], torch.zeros_like(z_vals[:, :1])),
                 dim=-1,
@@ -351,8 +348,25 @@ class AlphaGridSampler:
         dists = torch.cat(
             (z_vals[:, 1:] - z_vals[:, :-1], torch.zeros_like(z_vals[:, :1])), dim=-1
         )
+
+        if (
+            self.max_samples > 0
+            and is_train
+            and dynamic_batch_size
+            and ray_valid.sum() > self.max_samples
+        ):
+            whole_valid = torch.cumsum(ray_valid.sum(dim=1), dim=0) < self.max_samples
+            ray_valid = ray_valid[whole_valid, :]
+            xyz_sampled = xyz_sampled[whole_valid, :]
+            z_vals = z_vals[whole_valid, :]
+            dists = dists[whole_valid, :]
+            xyzs = xyz_sampled[ray_valid]
+        else:
+            whole_valid = torch.ones((N), dtype=bool, device=device)
+            xyzs = xyz_sampled[ray_valid]
+
         return (
-            xyz_sampled[ray_valid],
+            xyzs,
             ray_valid,
             M,
             z_vals,
