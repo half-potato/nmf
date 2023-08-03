@@ -30,6 +30,7 @@ arch:
     _partial_: True
     enable_alpha_mask: True
     update_list: [2000,3000,4000,5500,7000]
+    max_samples: 200000
 
   # normal_module:
   #   _partial_: True
@@ -68,7 +69,7 @@ arch:
     diffuse_mixing_mode: "lambda"
     freeze: False
     rays_per_ray: 128
-    test_rays_per_ray: 512
+    test_rays_per_ray: 256
 
     brdf_sampler:
       _target_: brdf_samplers.ggx.GGXSampler

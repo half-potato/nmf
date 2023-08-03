@@ -801,6 +801,9 @@ def reconstruction(args):
                 grad_vars = tensorf.get_optparam_groups()
                 print("reinit optimizer")
                 optimizer, scheduler = init_optimizer(grad_vars)
+                num_rays = params.starting_batch_size
+                prev_n_samples = None
+                hist_n_samples = None
                 # new_grad_vars = tensorf.get_optparam_groups()
                 # for param_group, new_param_group in zip(optimizer.param_groups, new_grad_vars):
                 #     param_group['params'] = new_param_group['params']

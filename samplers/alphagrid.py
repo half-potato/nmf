@@ -71,6 +71,7 @@ class AlphaGridSampler:
         nEnvSamples=0,
         alphaMask_thres=0.001,
         update_list=[],
+        max_samples=250000,
     ):
         self.aabb = aabb
         self.enable_alpha_mask = enable_alpha_mask
@@ -84,6 +85,7 @@ class AlphaGridSampler:
         self.cumrand = True
         self.single_jitter = False
         self.alphaMask_thres = alphaMask_thres
+        self.max_samples = max_samples
 
     def check_schedule(self, iteration, batch_mul, rf):
         if iteration in self.update_list:
@@ -101,7 +103,7 @@ class AlphaGridSampler:
             apply_correction = not torch.all(
                 torch.tensor(self.grid_size).to(rf.grid_size.device) == rf.grid_size
             )
-            rf.shrink(new_aabb, apply_correction)
+            # rf.shrink(new_aabb, apply_correction)
             self.grid_size = rf.grid_size
         self.nSamples = rf.nSamples * self.multiplier
         self.stepsize = rf.stepsize / self.multiplier
@@ -320,14 +322,17 @@ class AlphaGridSampler:
             dists = dists * rays_norm
             viewdirs = viewdirs / rays_norm
         else:
-            xyz_sampled, z_vals, ray_valid, env_mask = self.sample_ray(
-                rays_chunk[:, :3],
-                viewdirs,
-                focal,
-                is_train=is_train,
-                N_samples=N_samples,
-                override_near=override_near,
-            )
+            for i in range(5):
+                xyz_sampled, z_vals, ray_valid, env_mask = self.sample_ray(
+                    rays_chunk[:, :3],
+                    viewdirs,
+                    focal,
+                    is_train=is_train,
+                    N_samples=N_samples,
+                    override_near=override_near,
+                )
+                if ray_valid.sum() < self.max_samples:
+                    break
             dists = torch.cat(
                 (z_vals[:, 1:] - z_vals[:, :-1], torch.zeros_like(z_vals[:, :1])),
                 dim=-1,

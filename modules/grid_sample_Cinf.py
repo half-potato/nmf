@@ -209,7 +209,7 @@ class GridSampler2D(torch.autograd.Function):
 
                 sm_dx_filter = ((gaussian_partial(dist_x_pos, ctx.smoothing) - gaussian_partial(dist_x_neg, ctx.smoothing))/2).reshape(1, 1, *adj_size)
                 sm_dy_filter = ((gaussian_partial(dist_y_pos, ctx.smoothing) - gaussian_partial(dist_y_neg, ctx.smoothing))/2).reshape(1, 1, *adj_size)
-                """
+                #"""
                 # """
                 # ic(adj_size, fadj_size, (fx + adj_size[0]/3)**2)
                 # ic(dist_x_pos)
@@ -219,8 +219,11 @@ class GridSampler2D(torch.autograd.Function):
                 dx_filter = dy_filter.permute(0, 1, 3, 2)
                 sm_dx_filter = dx_filter
                 sm_dy_filter = dy_filter
+                # """
                 """
 
+                dy_filter = (f_blur[None, :] * f_edge[:, None]).reshape(1, 1, l, l)
+                dx_filter = dy_filter.permute(0, 1, 3, 2)
                 smooth_kern = gkern(
                     # 2 * int(ctx.smoothing + 0.5) + 1,
                     1,
@@ -243,7 +246,7 @@ class GridSampler2D(torch.autograd.Function):
                     mode="bilinear",
                     align_corners=True,
                 )
-                """
+                # """
 
                 padding = (sm_dx_filter.shape[-2] // 2, sm_dx_filter.shape[-1] // 2)
                 dx_input = F.conv2d(
