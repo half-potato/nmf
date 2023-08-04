@@ -316,10 +316,15 @@ class Microfacet(torch.nn.Module):
         num_brdf_rays = (
             self.max_brdf_rays[recur] if not is_train else self.max_brdf_rays[recur]
         )  # // B
-        num_brdf_rays = B * (self.rays_per_ray if is_train else self.test_rays_per_ray)
+        rays_per_ray = self.rays_per_ray if is_train else self.test_rays_per_ray
+        num_brdf_rays = B * rays_per_ray
 
-        bounce_mask, ray_mask, bright_mask = select_bounces(
-            weights, app_mask, num_brdf_rays, self.percent_bright
+        bounce_mask, ray_mask = select_bounces(
+            weights,
+            app_mask,
+            num_brdf_rays,
+            self.percent_bright,
+            rays_per_ray if recur == 0 else 32,
         )
 
         reflect_rgb = torch.zeros_like(diffuse)
@@ -375,32 +380,21 @@ class Microfacet(torch.nn.Module):
             )
             exyz = ray_xyz[ri, rj]
 
-            importance_samp_correction = torch.ones((L.shape[0], 1), device=device)
-            # Sample bright spots
-            # ic(ray_mask.sum(), bright_mask.sum(), num_brdf_rays)
-            if self.bright_sampler is not None:
-                bL, bsamp_prob, brightsum = self.bright_sampler.sample(
-                    bg_module, bright_mask.sum()
-                )
-                bsamp_prob = bsamp_prob * self.percent_bright
-                pbright_mask = bright_mask[ri, rj]
-                L[pbright_mask] = bL
-
             H = normalize((eV + L) / 2)
 
-            z_up = (
-                torch.tensor([0.0, 0.0, 1.0], device=device)
-                .reshape(1, 3)
-                .expand(H.shape[0], 3)
-            )
-            x_up = (
-                torch.tensor([-1.0, 0.0, 0.0], device=device)
-                .reshape(1, 3)
-                .expand(H.shape[0], 3)
-            )
-            up = torch.where(H[:, 2:3] < 0.999, z_up, x_up)
-            tangent = normalize(torch.linalg.cross(up, H))
-            bitangent = normalize(torch.linalg.cross(H, tangent))
+            # z_up = (
+            #     torch.tensor([0.0, 0.0, 1.0], device=device)
+            #     .reshape(1, 3)
+            #     .expand(H.shape[0], 3)
+            # )
+            # x_up = (
+            #     torch.tensor([-1.0, 0.0, 0.0], device=device)
+            #     .reshape(1, 3)
+            #     .expand(H.shape[0], 3)
+            # )
+            # up = torch.where(H[:, 2:3] < 0.999, z_up, x_up)
+            # tangent = normalize(torch.linalg.cross(up, H))
+            # bitangent = normalize(torch.linalg.cross(H, tangent))
             # B, 3, 3
             # col_world_basis = torch.stack([tangent, bitangent, H], dim=1).reshape(-1, 3, 3).permute(0, 2, 1)
 
@@ -429,21 +423,6 @@ class Microfacet(torch.nn.Module):
             ).squeeze(-1)
             samp_prob = (lpdf).exp().reshape(-1, 1)
 
-            if self.bright_sampler is not None:
-                samp_prob = samp_prob * (1 - self.percent_bright)
-                p1 = bsamp_prob.reshape(-1, 1)
-                p2 = samp_prob[pbright_mask].reshape(-1, 1)
-                # the first step is to convert everything to probabilities in the area measure (area on the surface of the sphere)
-                # bsamp_prob is in the area measure
-                # samp_prob is in the solid angle measure
-                # turns out, envmaps are in solid angle measure as well, so no need
-
-                weight = p1 * p1 / (p1 * p1 + p2 * p2).clip(min=eps)
-                importance_samp_correction[pbright_mask] = (
-                    p2 / p1.clip(min=eps) * weight
-                )
-                # ic(importance_samp_correction[pbright_mask])
-
             # stacked = torch.cat([
             #     bV.reshape(-1, 1, 3).expand(-1, m, 3),
             #     bN.reshape(-1, 1, 3).expand(-1, m, 3),
@@ -471,11 +450,9 @@ class Microfacet(torch.nn.Module):
                 dim=-1,
             )
             n = bounce_rays.shape[0]
-            D = bounce_rays.shape[-1]
 
             # calculate second part of BRDF
             n, m = ray_mask.shape
-            # brdf_weight = self.brdf(eV, L, eN, local_v, halfvec, diffvec, efeatures, ea1, ea2)
             brdf_weight = self.brdf(
                 eV,
                 L.detach(),
@@ -567,14 +544,6 @@ class Microfacet(torch.nn.Module):
                         mipval[retrace_ray_inds],
                         retrace=True,
                     )
-                    # bg vis is high when bg is visible
-                    if self.visibility_module is not None:
-                        self.visibility_module.fit(
-                            ray_xyzs_normed[retrace_ray_inds],
-                            L[retrace_ray_inds],
-                            bg_vis > 0.9,
-                        )
-                    # ic((bg_vis).float().mean())
                 if len(notrace_ray_inds) > 0:
                     incoming_light[notrace_ray_inds], _ = render_reflection(
                         bounce_rays[notrace_ray_inds],
@@ -586,37 +555,18 @@ class Microfacet(torch.nn.Module):
                     bounce_rays, mipval, retrace=False
                 )
 
-            # ic(incoming_light[pbright_mask].mean(), incoming_light[~pbright_mask].mean())
-
-            if self.bright_sampler is not None:
-                p1 = (
-                    incoming_light.mean(dim=-1, keepdim=True)
-                    / (2 * math.pi * math.pi)
-                    / brightsum
-                )
-                p2 = samp_prob
-                weight = p2 * p2 / (p1 * p1 + p2 * p2).clip(min=eps)
-                importance_samp_correction[~pbright_mask] = weight[~pbright_mask]
-
-            importance_samp_correction = 1
-            # ray_count = (ray_mask.sum(dim=1)+1e-8)[..., None]
             eray_count = (
                 ray_count.reshape(-1, 1)
                 .expand(ray_mask.shape)[ray_mask]
                 .reshape(-1, 1)
                 .clip(min=1)
             )
-            brdf_color = row_mask_sum(
-                brdf_weight / eray_count * importance_samp_correction, ray_mask
-            )  # / ray_count
+            brdf_color = row_mask_sum(brdf_weight / eray_count, ray_mask)  # / ray_count
             tinted_ref_rgb = row_mask_sum(
-                incoming_light / eray_count * brdf_weight * importance_samp_correction,
+                incoming_light / eray_count * brdf_weight,
                 ray_mask,
             )
-            # spec[bounce_mask] = row_mask_sum(incoming_light / eray_count * importance_samp_correction, ray_mask)
-            spec[bounce_mask] = row_mask_sum(
-                incoming_light / eray_count * importance_samp_correction, ray_mask
-            )
+            spec[bounce_mask] = row_mask_sum(incoming_light / eray_count, ray_mask)
 
             if self.diffuse_mixing_mode == "fresnel_ind":
                 R0 = tint.reshape(-1, 1, 3).expand(-1, m, 3)[ri, rj]
@@ -625,12 +575,8 @@ class Microfacet(torch.nn.Module):
                 spec_reflectance = (
                     R0 + (1 - R0) * (1 - costheta).clip(min=0, max=1) ** 5
                 )
-                # rgb = spec_reflectance * reflect_rgb + (1 - spec_reflectance) * diffuse
                 comb_rgb = (
-                    spec_reflectance
-                    * incoming_light
-                    * brdf_weight
-                    * importance_samp_correction
+                    spec_reflectance * incoming_light * brdf_weight
                     + (1 - spec_reflectance) * ediffuse
                 )
                 reflect_rgb[bounce_mask] = row_mask_sum(comb_rgb / eray_count, ray_mask)
@@ -648,7 +594,6 @@ class Microfacet(torch.nn.Module):
             #     diffuse.max(),
             #     bg_module.mean_color(),
             # )
-            # ic(importance_samp_correction.min(), importance_samp_correction.max())
 
             reflect_rgb[bounce_mask] = tinted_ref_rgb
             brdf_rgb[bounce_mask] = brdf_color

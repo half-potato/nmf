@@ -1,46 +1,51 @@
 import torch
 from icecream import ic
 
+
 @torch.no_grad()
-def select_bounces(weights, app_mask, num_roughness_rays, percent_bright):
+def select_bounces(weights, app_mask, num_roughness_rays, percent_bright, rays_per_ray):
     device = weights.device
 
     # pt_limit = weights * num_roughness_rays + 0.5
     # assert((num_roughness_rays - app_mask.sum()) > 0)
-    weights = weights + 1e-3*torch.rand_like(weights)
-    N = (num_roughness_rays - app_mask.sum())
-    if N > 0:
-        pt_limit = weights / (weights.sum().clip(min=1e-3)) * N + 1
-        # ic(pt_limit.floor().min())
-    else:
-        pt_limit = weights / (weights.sum().clip(min=1e-3)) * num_roughness_rays + 0.5
+    # weights = weights + 1e-3 * torch.rand_like(weights)
+    # N = num_roughness_rays - app_mask.sum()
+    # if N > 0:
+    #     pt_limit = weights / (weights.sum().clip(min=1e-3)) * N + 1
+    #     # ic(pt_limit.floor().min())
+    # else:
+    #     pt_limit = weights / (weights.sum().clip(min=1e-3)) * num_roughness_rays + 0.5
     # pt_limit = weights / (weights.sum().clip(min=1e-3)) * num_roughness_rays + 0.5
-    
+    pt_limit = weights * rays_per_ray + torch.rand_like(weights)
+
     # nopt_mask = pt_limit.max(dim=1).values < 1
     # pt_limit[nopt_mask] = pt_limit[nopt_mask] / pt_limit.max(dim=1, keepdim=True).values.clamp(min=0.9, max=1)[nopt_mask]# + 0.01
     pt_limit = pt_limit[app_mask]
 
-    num_samples = pt_limit.floor().quantile(0.999).clip(max=400).int()
+    num_samples = (
+        pt_limit.floor().max().clip(max=400).int()
+    )  # .quantile(0.999).clip(max=400).int()
     # if num_samples == 0:
     #     print("fallback")
     #     num_samples = 1
     #     pt_limit = torch.where(torch.rand_like(pt_limit) < num_roughness_rays / pt_limit.shape[0], 1.1, 0)
 
     # create ray_mask
-    ray_mask = torch.arange(num_samples, device=device).reshape(1, -1) < pt_limit.reshape(-1, 1).floor()
+    ray_mask = (
+        torch.arange(num_samples, device=device).reshape(1, -1)
+        < pt_limit.reshape(-1, 1).floor()
+    )
 
     # bright_limit = pt_limit.reshape(-1, 1)*(1-percent_bright)
     # main_ray_mask = torch.arange(num_samples, device=device).reshape(1, -1) < bright_limit.floor()
     # bright_mask = ray_mask & ~main_ray_mask
 
-    bright_mask = ray_mask & (torch.rand(ray_mask.shape, device=device) < percent_bright)
-
     bounce_mask = ray_mask.sum(dim=-1) > 0
     ray_mask = ray_mask[bounce_mask]
-    bright_mask = bright_mask[bounce_mask]
     # ic(pt_limit.floor().max(), num_samples, ray_mask.sum(), ray_mask.shape, num_roughness_rays)
 
-    return bounce_mask, ray_mask, bright_mask
+    return bounce_mask, ray_mask
+
 
 """
 @torch.no_grad()

@@ -103,7 +103,7 @@ class AlphaGridSampler:
             apply_correction = not torch.all(
                 torch.tensor(self.grid_size).to(rf.grid_size.device) == rf.grid_size
             )
-            rf.shrink(new_aabb, apply_correction)
+            # rf.shrink(new_aabb, apply_correction)
             self.grid_size = rf.grid_size
         self.nSamples = rf.nSamples * self.multiplier
         self.stepsize = rf.stepsize / self.multiplier
@@ -336,7 +336,6 @@ class AlphaGridSampler:
             )
 
         device = rays_chunk.device
-        N, M = xyz_sampled.shape[:2]
         # sample alphas and cull samples from the ray
         if self.alphaMask is not None and self.enable_alpha_mask:
             alphas = self.alphaMask.sample_alpha(xyz_sampled[ray_valid])
@@ -348,6 +347,7 @@ class AlphaGridSampler:
         dists = torch.cat(
             (z_vals[:, 1:] - z_vals[:, :-1], torch.zeros_like(z_vals[:, :1])), dim=-1
         )
+        N, M = xyz_sampled.shape[:2]
 
         if (
             self.max_samples > 0
@@ -358,6 +358,7 @@ class AlphaGridSampler:
             whole_valid = torch.cumsum(ray_valid.sum(dim=1), dim=0) < self.max_samples
             ray_valid = ray_valid[whole_valid, :]
             xyz_sampled = xyz_sampled[whole_valid, :]
+            N, M = xyz_sampled.shape[:2]
             z_vals = z_vals[whole_valid, :]
             dists = dists[whole_valid, :]
             xyzs = xyz_sampled[ray_valid]
@@ -365,11 +366,4 @@ class AlphaGridSampler:
             whole_valid = torch.ones((N), dtype=bool, device=device)
             xyzs = xyz_sampled[ray_valid]
 
-        return (
-            xyzs,
-            ray_valid,
-            M,
-            z_vals,
-            dists,
-            torch.ones((N), dtype=bool, device=device),
-        )
+        return (xyzs, ray_valid, M, z_vals, dists, whole_valid)
