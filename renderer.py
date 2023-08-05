@@ -449,6 +449,7 @@ def evaluate(
                     f"{savePath}/envmaps/{prtx}ref_map_{idx:03d}.png", ims.env_map
                 )
                 # imageio.imwrite(f'{savePath}/envmaps/{prtx}view_map_{idx:03d}.png', data.col_map)
+        torch.cuda.empty_cache()
 
     tensorf.train()
     imageio.mimwrite(

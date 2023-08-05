@@ -5,3 +5,4 @@ downsample_test: 1
 ndc_ray: false
 near_far: [3, 5]
 gt_bg: abandoned_factory_canteen_01_4k.exr
+aabb_scale: 2

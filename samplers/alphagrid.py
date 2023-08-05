@@ -312,7 +312,7 @@ class AlphaGridSampler:
                 viewdirs,
                 focal,
                 is_train=is_train,
-                N_samples=N_samples,
+                N_samples=int(N_samples * stepmul),
             )
             dists = torch.cat(
                 (z_vals[:, 1:] - z_vals[:, :-1], torch.zeros_like(z_vals[:, :1])),
@@ -327,7 +327,7 @@ class AlphaGridSampler:
                 viewdirs,
                 focal,
                 is_train=is_train,
-                N_samples=N_samples,
+                N_samples=int(N_samples * stepmul),
                 override_near=override_near,
             )
             dists = torch.cat(
