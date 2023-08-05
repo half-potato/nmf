@@ -321,7 +321,7 @@ class TensorNeRF(torch.nn.Module):
                 N = rays.shape[0]
                 incoming_light = torch.zeros((N, 3), device=device)
                 visibility = torch.zeros((N), device=device)
-                b = 150000
+                b = 2000000
                 for i in range(0, N, b):
                     brays = rays[i : i + b]
                     bstart_mipval = start_mipval[i : i + b]
