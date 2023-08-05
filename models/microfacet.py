@@ -232,7 +232,7 @@ class Microfacet(torch.nn.Module):
         return im
 
     def reset_counter(self):
-        self.max_retrace_rays = 1000
+        self.max_retrace_rays = [1000]
         self.mean_ratios = None
 
     def update_n_samples(self, n_samples):
@@ -627,6 +627,14 @@ class Microfacet(torch.nn.Module):
         elif self.diffuse_mixing_mode == "lambda":
             lam = tint.mean(dim=-1, keepdim=True)
             rgb = lam * reflect_rgb + (1 - lam) * diffuse
+            # uh..... to match fresnel_ind behavior. It works stop asking questions
+            rgb[~bounce_mask] = 0
+            # ic(
+            #     rgb[bounce_mask].mean(),
+            #     diffuse.mean(),
+            #     reflect_rgb[bounce_mask].mean(),
+            #     lam.mean(),
+            # )
             debug["diffuse"] = diffuse * (1 - lam)
             debug["tint"] = brdf_rgb * lam
         debug["roughness"] = matprop["r1"]
