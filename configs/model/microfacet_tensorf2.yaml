@@ -57,7 +57,7 @@ arch:
     min_rough_decay: 0.999
     max_brdf_rays: [650000, 450000]
     conserve_energy: True
-    target_num_samples: [1000000]
+    target_num_samples: [100000]
     russian_roulette: False
     max_retrace_rays: [1000]
     start_std: 0.0
@@ -69,7 +69,7 @@ arch:
     diffuse_mixing_mode: "lambda"
     freeze: False
     rays_per_ray: 128
-    test_rays_per_ray: 256
+    test_rays_per_ray: 128
 
     brdf_sampler:
       _target_: brdf_samplers.ggx.GGXSampler

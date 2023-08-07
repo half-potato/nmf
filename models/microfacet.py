@@ -328,7 +328,7 @@ class Microfacet(torch.nn.Module):
             app_mask,
             num_brdf_rays,
             self.percent_bright,
-            rays_per_ray if recur == 0 else 32,
+            rays_per_ray if recur == 0 else 4,
         )
 
         reflect_rgb = torch.zeros_like(diffuse)

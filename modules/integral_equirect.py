@@ -455,6 +455,24 @@ class IntegralEquirect(torch.nn.Module):
         )
         x = coords.reshape(1, 1, -1, 2)
 
+        # bg_vals = (
+        #     F.grid_sample(
+        #         activated,
+        #         x,
+        #         mode="nearest",
+        #         align_corners=self.align_corners,
+        #         padding_mode="zeros",
+        #     )
+        #     .reshape(3, -1)
+        #     .T
+        # )
+        #
+        # # row = ((x[..., 1] + 1) / 2 * h).long().reshape(-1).clip(min=0, max=h - 1)
+        # # col = ((x[..., 0] + 1) / 2 * w).long().reshape(-1).clip(min=0, max=w - 1)
+        # # bg_vals = activated[0, :, row, col].T.reshape(-1, 3)
+        # # ic(bg_vals, bg_vals2)
+        # return bg_vals
+
         # bottom left is top left of image because image space = (-1, -1)
         bl = x - offset / 2
         tr = x + offset / 2
@@ -482,6 +500,7 @@ class IntegralEquirect(torch.nn.Module):
         bot_row = activated[..., -1, :].mean(dim=-1)
         bg_vals[coords[:, 1] > cutoff] = bot_row
         bg_vals[coords[:, 1] < -cutoff] = top_row
+
         return bg_vals
 
 
