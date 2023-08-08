@@ -324,7 +324,7 @@ class Microfacet(torch.nn.Module):
             app_mask,
             num_brdf_rays,
             self.percent_bright,
-            rays_per_ray if recur == 0 else 32,
+            rays_per_ray if recur == 0 else None,
         )
 
         reflect_rgb = torch.zeros_like(diffuse)
@@ -500,7 +500,8 @@ class Microfacet(torch.nn.Module):
                         )
                     color_contribution += torch.rand_like(color_contribution)
                     cc_as = color_contribution.argsort()
-                    retrace_ray_inds = cc_as[cc_as.shape[0] - num_retrace_rays :]
+                    M = max(cc_as.shape[0] - num_retrace_rays, 0)
+                    retrace_ray_inds = cc_as[M:]
 
                     if self.russian_roulette:
                         num_retrace = torch.zeros((ray_mask.shape[0]), device=device)
@@ -527,7 +528,7 @@ class Microfacet(torch.nn.Module):
 
                         (notrace_ray_inds,) = torch.where(notrace_mask)
                     else:
-                        notrace_ray_inds = cc_as[: cc_as.shape[0] - num_retrace_rays]
+                        notrace_ray_inds = cc_as[:M]
 
                 # ic(
                 #     notrace_ray_inds,
@@ -576,7 +577,7 @@ class Microfacet(torch.nn.Module):
                     R0 + (1 - R0) * (1 - costheta).clip(min=0, max=1) ** 5
                 )
                 comb_rgb = (
-                    spec_reflectance * incoming_light * brdf_weight
+                    spec_reflectance * incoming_light
                     + (1 - spec_reflectance) * ediffuse
                 )
                 reflect_rgb[bounce_mask] = row_mask_sum(comb_rgb / eray_count, ray_mask)

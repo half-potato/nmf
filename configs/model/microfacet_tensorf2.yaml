@@ -57,7 +57,7 @@ arch:
     min_rough_decay: 0.999
     max_brdf_rays: [650000, 450000]
     conserve_energy: True
-    target_num_samples: [800000]
+    target_num_samples: [1000000]
     russian_roulette: False
     max_retrace_rays: [1000]
     start_std: 0.0
