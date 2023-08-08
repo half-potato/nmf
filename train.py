@@ -438,6 +438,7 @@ def reconstruction(args):
     def init_optimizer(grad_vars):
         # optimizer = torch.optim.RMSProp(grad_vars, eps=params.eps)
         optimizer = torch.optim.Adam(grad_vars, betas=params.betas, eps=params.eps)
+        # optimizer = torch.optim.RMSprop(grad_vars, eps=params.eps)
         if params.lr is not None:
             optimizer = torch.optim.Adam(
                 tensorf.parameters(), lr=params.lr, betas=params.betas, eps=params.eps

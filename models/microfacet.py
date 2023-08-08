@@ -328,7 +328,11 @@ class Microfacet(torch.nn.Module):
             app_mask,
             num_brdf_rays,
             self.percent_bright,
+<<<<<<< HEAD
             rays_per_ray if recur == 0 else 4,
+=======
+            rays_per_ray if recur == 0 else None,
+>>>>>>> 290a2aa909e3033ba9672a2d4c50a5c0254a28f7
         )
 
         reflect_rgb = torch.zeros_like(diffuse)
@@ -504,7 +508,8 @@ class Microfacet(torch.nn.Module):
                         )
                     color_contribution += torch.rand_like(color_contribution)
                     cc_as = color_contribution.argsort()
-                    retrace_ray_inds = cc_as[cc_as.shape[0] - num_retrace_rays :]
+                    M = max(cc_as.shape[0] - num_retrace_rays, 0)
+                    retrace_ray_inds = cc_as[M:]
 
                     if self.russian_roulette:
                         num_retrace = torch.zeros((ray_mask.shape[0]), device=device)
@@ -531,7 +536,7 @@ class Microfacet(torch.nn.Module):
 
                         (notrace_ray_inds,) = torch.where(notrace_mask)
                     else:
-                        notrace_ray_inds = cc_as[: cc_as.shape[0] - num_retrace_rays]
+                        notrace_ray_inds = cc_as[:M]
 
                 # ic(
                 #     notrace_ray_inds,
@@ -569,6 +574,7 @@ class Microfacet(torch.nn.Module):
             spec[bounce_mask] = row_mask_sum(incoming_light / eray_count, ray_mask)
             brdf_rgb[bounce_mask] = brdf_color
 
+            brdf_rgb[bounce_mask] = brdf_color
             if self.diffuse_mixing_mode == "fresnel_ind":
                 R0 = tint.reshape(-1, 1, 3).expand(-1, m, 3)[ri, rj]
                 ediffuse = diffuse.reshape(-1, 1, 3).expand(-1, m, 3)[ri, rj]
@@ -577,7 +583,7 @@ class Microfacet(torch.nn.Module):
                     R0 + (1 - R0) * (1 - costheta).clip(min=0, max=1) ** 5
                 )
                 comb_rgb = (
-                    spec_reflectance * incoming_light * brdf_weight
+                    spec_reflectance * incoming_light
                     + (1 - spec_reflectance) * ediffuse
                 )
                 reflect_rgb[bounce_mask] = row_mask_sum(comb_rgb / eray_count, ray_mask)
@@ -623,10 +629,11 @@ class Microfacet(torch.nn.Module):
             # rgb = spec_reflectance * reflect_rgb + (1 - spec_reflectance) * diffuse
             rgb = reflect_rgb
             debug["diffuse"] = (1 - spec_reflectance) * diffuse
-            debug["tint"] = spec_reflectance * brdf_rgb
+            debug["tint"] = spec_reflectance
         elif self.diffuse_mixing_mode == "lambda":
             lam = tint.mean(dim=-1, keepdim=True)
             rgb = lam * reflect_rgb + (1 - lam) * diffuse
+<<<<<<< HEAD
             # uh..... to match fresnel_ind behavior. It works stop asking questions
             rgb[~bounce_mask] = 0
             # ic(
@@ -635,6 +642,9 @@ class Microfacet(torch.nn.Module):
             #     reflect_rgb[bounce_mask].mean(),
             #     lam.mean(),
             # )
+=======
+            rgb[~bounce_mask] = 0
+>>>>>>> 290a2aa909e3033ba9672a2d4c50a5c0254a28f7
             debug["diffuse"] = diffuse * (1 - lam)
             debug["tint"] = brdf_rgb * lam
         debug["roughness"] = matprop["r1"]
