@@ -563,12 +563,9 @@ class Microfacet(torch.nn.Module):
                 .clip(min=1)
             )
             brdf_color = row_mask_sum(brdf_weight / eray_count, ray_mask)  # / ray_count
-            tinted_ref_rgb = row_mask_sum(
-                incoming_light / eray_count * brdf_weight,
-                ray_mask,
-            )
             spec[bounce_mask] = row_mask_sum(incoming_light / eray_count, ray_mask)
 
+            brdf_rgb[bounce_mask] = brdf_color
             if self.diffuse_mixing_mode == "fresnel_ind":
                 R0 = tint.reshape(-1, 1, 3).expand(-1, m, 3)[ri, rj]
                 ediffuse = diffuse.reshape(-1, 1, 3).expand(-1, m, 3)[ri, rj]
@@ -581,6 +578,12 @@ class Microfacet(torch.nn.Module):
                     + (1 - spec_reflectance) * ediffuse
                 )
                 reflect_rgb[bounce_mask] = row_mask_sum(comb_rgb / eray_count, ray_mask)
+            else:
+                tinted_ref_rgb = row_mask_sum(
+                    incoming_light / eray_count * brdf_weight,
+                    ray_mask,
+                )
+                reflect_rgb[bounce_mask] = tinted_ref_rgb
 
             # ic(
             #     incoming_light.shape,
@@ -595,9 +598,6 @@ class Microfacet(torch.nn.Module):
             #     diffuse.max(),
             #     bg_module.mean_color(),
             # )
-
-            reflect_rgb[bounce_mask] = tinted_ref_rgb
-            brdf_rgb[bounce_mask] = brdf_color
 
         if self.diffuse_mixing_mode == "no_diffuse":
             rgb = reflect_rgb
@@ -620,10 +620,11 @@ class Microfacet(torch.nn.Module):
             # rgb = spec_reflectance * reflect_rgb + (1 - spec_reflectance) * diffuse
             rgb = reflect_rgb
             debug["diffuse"] = (1 - spec_reflectance) * diffuse
-            debug["tint"] = spec_reflectance * brdf_rgb
+            debug["tint"] = spec_reflectance
         elif self.diffuse_mixing_mode == "lambda":
             lam = tint.mean(dim=-1, keepdim=True)
             rgb = lam * reflect_rgb + (1 - lam) * diffuse
+            rgb[~bounce_mask] = 0
             debug["diffuse"] = diffuse * (1 - lam)
             debug["tint"] = brdf_rgb * lam
         debug["roughness"] = matprop["r1"]
