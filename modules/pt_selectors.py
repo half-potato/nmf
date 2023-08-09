@@ -18,7 +18,8 @@ def select_bounces(weights, app_mask, num_roughness_rays, percent_bright, rays_p
     # pt_limit = weights / (weights.sum().clip(min=1e-3)) * num_roughness_rays + 0.5
     # pt_limit = weights * rays_per_ray + torch.rand_like(weights)
     if rays_per_ray is not None:
-        pt_limit = weights * rays_per_ray  # + torch.rand_like(weights)
+        pt_limit = weights[app_mask]
+        pt_limit = pt_limit * rays_per_ray + torch.rand_like(pt_limit) - 0.5
     else:
         weights = weights + 1e-3 * torch.rand_like(weights)
         N = num_roughness_rays - app_mask.sum()
@@ -29,12 +30,10 @@ def select_bounces(weights, app_mask, num_roughness_rays, percent_bright, rays_p
             pt_limit = (
                 weights / (weights.sum().clip(min=1e-3)) * num_roughness_rays + 0.5
             )
-        pt_limit = weights / (weights.sum().clip(min=1e-3)) * num_roughness_rays + 0.5
+        pt_limit = pt_limit[app_mask]
 
     # nopt_mask = pt_limit.max(dim=1).values < 1
     # pt_limit[nopt_mask] = pt_limit[nopt_mask] / pt_limit.max(dim=1, keepdim=True).values.clamp(min=0.9, max=1)[nopt_mask]# + 0.01
-    pt_limit = weights[app_mask]
-    pt_limit = pt_limit * rays_per_ray + torch.rand_like(pt_limit)
 
     num_samples = (
         pt_limit.floor().max().clip(max=400).int()

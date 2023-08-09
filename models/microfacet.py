@@ -73,6 +73,7 @@ class Microfacet(torch.nn.Module):
         self.outputs = {"diffuse": 3, "roughness": 1, "tint": 3, "spec": 3}
 
         self.mean_ratios = None
+        self.ratio_list = None
 
     def calibrate(self, args, xyz, feat, bg_brightness, save_config=True):
         self.diffuse_module.calibrate(
@@ -234,27 +235,27 @@ class Microfacet(torch.nn.Module):
     def reset_counter(self):
         self.max_retrace_rays = [1000]
         self.mean_ratios = None
+        self.ratio_list = None
 
     def update_n_samples(self, n_samples):
         # assert(len(self.target_num_samples) == len(self.max_retrace_rays))
         if len(n_samples) == len(self.max_retrace_rays):
             ratios = [
-                n_rays / n_sample if n_sample > 0 else None
+                n_rays / n_sample if n_sample > 0 else 1e-3
                 for n_rays, n_sample in zip(self.max_retrace_rays, n_samples)
             ]
-            if self.mean_ratios is None:
-                self.mean_ratios = ratios
+            if self.ratio_list is None:
+                self.ratio_list = [[r] if r is not None else [] for r in ratios]
             else:
-                self.mean_ratios = [
-                    (
-                        min(0.1 * ratio + 0.9 * mean_ratio, 1, ratio)
-                        if ratio is not None
-                        else mean_ratio
-                    )
-                    if mean_ratio is not None
-                    else ratio
-                    for ratio, mean_ratio in zip(ratios, self.mean_ratios)
+                self.ratio_list = [
+                    [r for r in ([ratio] + rlist) if r is not None][:5]
+                    for ratio, rlist in zip(ratios, self.ratio_list)
                 ]
+            self.mean_ratios = [
+                min(rlist) if len(rlist) > 0 else None for rlist in self.ratio_list
+            ]
+            # ic(self.mean_ratios, self.ratio_list)
+            # ic(n_samples, self.max_retrace_rays)
             self.max_retrace_rays = [
                 min(int(target * ratio + 1), maxv) if ratio is not None else prev
                 for target, ratio, maxv, prev in zip(
@@ -311,7 +312,6 @@ class Microfacet(torch.nn.Module):
                     .sum(dim=1)
                     .detach()
                 )
-            # ic(E.mean(), bg_module.mean_color())
             diffuse = albedo * E
         else:
             diffuse = albedo
@@ -328,11 +328,7 @@ class Microfacet(torch.nn.Module):
             app_mask,
             num_brdf_rays,
             self.percent_bright,
-<<<<<<< HEAD
-            rays_per_ray if recur == 0 else 4,
-=======
             rays_per_ray if recur == 0 else None,
->>>>>>> 290a2aa909e3033ba9672a2d4c50a5c0254a28f7
         )
 
         reflect_rgb = torch.zeros_like(diffuse)
@@ -344,7 +340,6 @@ class Microfacet(torch.nn.Module):
             .reshape(-1, 1, 3)
             .expand(-1, ray_mask.shape[1], 3)
         )
-        # ic(ray_mask.shape, ray_mask.sum(), diffuse.shape)
         if (
             bounce_mask.any()
             and ray_mask.any()
@@ -633,7 +628,6 @@ class Microfacet(torch.nn.Module):
         elif self.diffuse_mixing_mode == "lambda":
             lam = tint.mean(dim=-1, keepdim=True)
             rgb = lam * reflect_rgb + (1 - lam) * diffuse
-<<<<<<< HEAD
             # uh..... to match fresnel_ind behavior. It works stop asking questions
             rgb[~bounce_mask] = 0
             # ic(
@@ -642,9 +636,6 @@ class Microfacet(torch.nn.Module):
             #     reflect_rgb[bounce_mask].mean(),
             #     lam.mean(),
             # )
-=======
-            rgb[~bounce_mask] = 0
->>>>>>> 290a2aa909e3033ba9672a2d4c50a5c0254a28f7
             debug["diffuse"] = diffuse * (1 - lam)
             debug["tint"] = brdf_rgb * lam
         debug["roughness"] = matprop["r1"]
