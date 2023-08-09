@@ -470,6 +470,7 @@ class RandHydraMLPDiffuse(torch.nn.Module):
         diffuse_mul=1,
         roughness_bias=1,
         start_roughness=0.35,
+        f0_bias=0,
         **kwargs,
     ):
         super().__init__()
@@ -488,6 +489,7 @@ class RandHydraMLPDiffuse(torch.nn.Module):
         self.allocation = allocation
         self.diffuse_mul = diffuse_mul
         self.start_roughness = start_roughness
+        self.f0_bias = f0_bias
 
         self.view_encoder = view_encoder
         self.roughness_view_encoder = roughness_view_encoder
