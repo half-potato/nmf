@@ -36,7 +36,7 @@ def select_bounces(weights, app_mask, num_roughness_rays, percent_bright, rays_p
     # pt_limit[nopt_mask] = pt_limit[nopt_mask] / pt_limit.max(dim=1, keepdim=True).values.clamp(min=0.9, max=1)[nopt_mask]# + 0.01
 
     num_samples = (
-        pt_limit.floor().max().clip(max=400).int()
+        pt_limit.floor().max().clip(min=0, max=400).int()
     )  # .quantile(0.999).clip(max=400).int()
     # if num_samples == 0:
     #     print("fallback")

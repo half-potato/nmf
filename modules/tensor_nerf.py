@@ -286,7 +286,6 @@ class TensorNeRF(torch.nn.Module):
             else:
                 psigma, all_app_features = self.rf.compute_feature(xyz_sampled)
             sigma[ray_valid] = psigma
-        ic(ray_valid.sum())
 
         def render_reflection(rays, start_mipval, retrace=False):
             nonlocal n_samples

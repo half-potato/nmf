@@ -571,14 +571,15 @@ class Microfacet(torch.nn.Module):
 
             brdf_rgb[bounce_mask] = brdf_color
             if self.diffuse_mixing_mode == "fresnel_ind":
-                R0 = tint.reshape(-1, 1, 3).expand(-1, m, 3)[ri, rj]
+                R0 = matprop["f0"].reshape(-1, 1, 3).expand(-1, m, 3)[ri, rj]
+                itint = tint.reshape(-1, 1, 3).expand(-1, m, 3)[ri, rj]
                 ediffuse = diffuse.reshape(-1, 1, 3).expand(-1, m, 3)[ri, rj]
                 costheta = (-eV * H).sum(dim=-1, keepdim=True).abs()
                 spec_reflectance = (
                     R0 + (1 - R0) * (1 - costheta).clip(min=0, max=1) ** 5
                 )
                 comb_rgb = (
-                    spec_reflectance * incoming_light
+                    spec_reflectance * itint * incoming_light
                     + (1 - spec_reflectance) * ediffuse
                 )
                 reflect_rgb[bounce_mask] = row_mask_sum(comb_rgb / eray_count, ray_mask)
@@ -617,14 +618,14 @@ class Microfacet(torch.nn.Module):
             debug["diffuse"] = (1 - spec_reflectance) * diffuse
             debug["tint"] = spec_reflectance * brdf_rgb
         elif self.diffuse_mixing_mode == "fresnel_ind":
-            R0 = tint  # .mean(dim=-1, keepdim=True)
+            R0 = matprop["f0"]  # .mean(dim=-1, keepdim=True)
             # R0 = R0 * 0 + 0.04
             costheta = (-viewdirs * normals).sum(dim=-1, keepdim=True).abs()
             spec_reflectance = R0 + (1 - R0) * (1 - costheta).clip(min=0, max=1) ** 5
             # rgb = spec_reflectance * reflect_rgb + (1 - spec_reflectance) * diffuse
             rgb = reflect_rgb
             debug["diffuse"] = (1 - spec_reflectance) * diffuse
-            debug["tint"] = spec_reflectance
+            debug["tint"] = spec_reflectance * tint
         elif self.diffuse_mixing_mode == "lambda":
             lam = tint.mean(dim=-1, keepdim=True)
             rgb = lam * reflect_rgb + (1 - lam) * diffuse

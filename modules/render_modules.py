@@ -496,6 +496,7 @@ class RandHydraMLPDiffuse(torch.nn.Module):
         self.pospe = pospe
         self.diffuse_mlp = util.create_mlp(self.in_mlpC, 3, **kwargs)
         self.tint_mlp = util.create_mlp(self.in_mlpC, 3, **kwargs)
+        self.f0_mlp = util.create_mlp(self.in_mlpC, 3, **kwargs)
         roughness_cfg = roughness_cfg if roughness_cfg is not None else kwargs
         self.roughness_mlp = util.create_mlp(
             self.in_mlpC + get_dim(self.roughness_view_encoder, 3), 2, **roughness_cfg
@@ -556,6 +557,7 @@ class RandHydraMLPDiffuse(torch.nn.Module):
         r = torch.sigmoid(self.roughness_mlp(rough_mlp_in) + self.roughness_bias) / 2
         r = (r + torch.randn_like(r) * std / 2).clip(min=1e-2, max=1)
         tint = torch.sigmoid(self.tint_mlp(mlp_in) + self.tint_bias)
+        f0 = torch.sigmoid(self.f0_mlp(mlp_in) + self.f0_bias)
         # tint = (tint + torch.randn_like(tint) * std).clip(min=0, max=1)
 
         # ic(f0)
@@ -566,7 +568,7 @@ class RandHydraMLPDiffuse(torch.nn.Module):
                 diffuse=diffuse,
                 r1=r[:, 0:1],
                 r2=r[:, 1:2],
-                f0=tint,
+                f0=f0,
                 tint=tint,
             ),
         )
