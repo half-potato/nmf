@@ -241,14 +241,14 @@ class Microfacet(torch.nn.Module):
         # assert(len(self.target_num_samples) == len(self.max_retrace_rays))
         if len(n_samples) == len(self.max_retrace_rays):
             ratios = [
-                n_rays / n_sample if n_sample > 0 else 1e-3
+                (n_rays / n_sample) if n_sample > 0 else 1e-3
                 for n_rays, n_sample in zip(self.max_retrace_rays, n_samples)
             ]
             if self.ratio_list is None:
-                self.ratio_list = [[r] if r is not None else [] for r in ratios]
+                self.ratio_list = [[r, 1e-3] if r is not None else [] for r in ratios]
             else:
                 self.ratio_list = [
-                    [r for r in ([ratio] + rlist) if r is not None][:5]
+                    [r for r in ([ratio] + rlist) if r is not None][:20]
                     for ratio, rlist in zip(ratios, self.ratio_list)
                 ]
             self.mean_ratios = [
@@ -321,7 +321,7 @@ class Microfacet(torch.nn.Module):
             self.max_brdf_rays[recur] if not is_train else self.max_brdf_rays[recur]
         )  # // B
         rays_per_ray = self.rays_per_ray if is_train else self.test_rays_per_ray
-        num_brdf_rays = B * rays_per_ray
+        # num_brdf_rays = B * rays_per_ray
 
         bounce_mask, ray_mask = select_bounces(
             weights,
@@ -330,6 +330,7 @@ class Microfacet(torch.nn.Module):
             self.percent_bright,
             rays_per_ray if recur == 0 else None,
         )
+        # ic(ray_mask.sum(), recur, num_brdf_rays)
 
         reflect_rgb = torch.zeros_like(diffuse)
         brdf_rgb = torch.zeros_like(diffuse)

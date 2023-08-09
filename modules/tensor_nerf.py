@@ -280,6 +280,7 @@ class TensorNeRF(torch.nn.Module):
 
         all_app_features = None
         pred_norms = torch.zeros((M, 3), device=device)
+        # ic(ray_valid.sum())
         if ray_valid.any():
             if self.rf.separate_appgrid:
                 psigma = self.rf.compute_densityfeature(xyz_sampled)
@@ -315,51 +316,51 @@ class TensorNeRF(torch.nn.Module):
                 )
                 return incoming_light, None
 
-        def render_reflection(rays, start_mipval, retrace=False):
-            nonlocal n_samples
-            if retrace:
-                N = rays.shape[0]
-                incoming_light = torch.zeros((N, 3), device=device)
-                visibility = torch.zeros((N), device=device)
-                b = 100000
-                for i in range(0, N, b):
-                    brays = rays[i : i + b]
-                    bstart_mipval = start_mipval[i : i + b]
-                    with torch.no_grad():
-                        incoming_data, incoming_stats = self(
-                            brays,
-                            focal,
-                            recur=recur + 1,
-                            bg_col=torch.zeros((3)),
-                            dynamic_batch_size=False,
-                            stepmul=self.recur_stepmul,
-                            start_mipval=bstart_mipval.reshape(-1),
-                            override_near=3 * self.sampler.stepsize,
-                            is_train=is_train,
-                            override_alpha_thres=self.recur_alpha_thres,
-                            ndc_ray=False,
-                            N_samples=N_samples,
-                            tonemap=False,
-                            draw_debug=False,
-                        )
-                    rgb_map = incoming_data["rgb_map"]
-
-                    # add bg so it has gradient
-                    acc_map = incoming_data["acc_map"]
-                    bg = self.render_just_bg(brays[:, 3:6], bstart_mipval).reshape(
-                        -1, 3
-                    )
-                    bincoming_light = rgb_map + (1 - acc_map[..., None]) * bg
-
-                    n_samples += incoming_stats["n_samples"]
-                    visibility[i : i + b] = 1 - incoming_data["acc_map"]
-                    incoming_light[i : i + b] = bincoming_light
-                return incoming_light, visibility
-            else:
-                incoming_light = self.render_just_bg(
-                    rays[..., 3:6], start_mipval.reshape(-1)
-                )
-                return incoming_light, None
+        # def render_reflection(rays, start_mipval, retrace=False):
+        #     nonlocal n_samples
+        #     if retrace:
+        #         N = rays.shape[0]
+        #         incoming_light = torch.zeros((N, 3), device=device)
+        #         visibility = torch.zeros((N), device=device)
+        #         b = 100000
+        #         for i in range(0, N, b):
+        #             brays = rays[i : i + b]
+        #             bstart_mipval = start_mipval[i : i + b]
+        #             with torch.no_grad():
+        #                 incoming_data, incoming_stats = self(
+        #                     brays,
+        #                     focal,
+        #                     recur=recur + 1,
+        #                     bg_col=torch.zeros((3)),
+        #                     dynamic_batch_size=False,
+        #                     stepmul=self.recur_stepmul,
+        #                     start_mipval=bstart_mipval.reshape(-1),
+        #                     override_near=3 * self.sampler.stepsize,
+        #                     is_train=is_train,
+        #                     override_alpha_thres=self.recur_alpha_thres,
+        #                     ndc_ray=False,
+        #                     N_samples=N_samples,
+        #                     tonemap=False,
+        #                     draw_debug=False,
+        #                 )
+        #             rgb_map = incoming_data["rgb_map"]
+        #
+        #             # add bg so it has gradient
+        #             acc_map = incoming_data["acc_map"]
+        #             bg = self.render_just_bg(brays[:, 3:6], bstart_mipval).reshape(
+        #                 -1, 3
+        #             )
+        #             bincoming_light = rgb_map + (1 - acc_map[..., None]) * bg
+        #
+        #             n_samples += incoming_stats["n_samples"]
+        #             visibility[i : i + b] = 1 - incoming_data["acc_map"]
+        #             incoming_light[i : i + b] = bincoming_light
+        #         return incoming_light, visibility
+        #     else:
+        #         incoming_light = self.render_just_bg(
+        #             rays[..., 3:6], start_mipval.reshape(-1)
+        #         )
+        #         return incoming_light, None
 
         # weight: [N_rays, N_samples]
         weight = raw2alpha(sigma, dists * self.rf.distance_scale)

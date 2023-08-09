@@ -5,7 +5,7 @@ arch:
   recur_alpha_thres: 1e-3
   lr_scale: 1
   infinity_border: False
-  eval_batch_size: 1024
+  eval_batch_size: 2048
   recur_stepmul: 0.5
   hdr: False
 
