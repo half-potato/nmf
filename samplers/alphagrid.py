@@ -60,7 +60,7 @@ class AlphaGridMask(torch.nn.Module):
             return normed
 
 
-class AlphaGridSampler:
+class AlphaGridSampler(torch.nn.Module):
     def __init__(
         self,
         aabb,
@@ -73,6 +73,7 @@ class AlphaGridSampler:
         update_list=[],
         max_samples=-1,
     ):
+        super().__init__()
         self.aabb = aabb
         self.enable_alpha_mask = enable_alpha_mask
         self.alphaMask = None

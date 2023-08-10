@@ -112,9 +112,13 @@ class BundleRender:
         fW = width
         device = rays.device
 
+        inds = torch.randperm(rays.shape[0])
+        permrays = torch.zeros_like(rays)
+        permrays[inds] = rays
+
         LOGGER.reset()
         ims, stats = self.base_renderer(
-            rays,
+            permrays,
             tensorf,
             keys=None,
             focal=self.focal,
@@ -140,7 +144,7 @@ class BundleRender:
             vals = {}
 
         def reshape(val_map):
-            val_map = val_map.reshape((height, width, -1))
+            val_map = val_map[inds].reshape((height, width, -1))
             # val_map = val_map.reshape((fH, fW, -1))[:self.H, :self.W, :]
             return val_map
 

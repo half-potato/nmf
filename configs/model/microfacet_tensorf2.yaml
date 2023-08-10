@@ -5,7 +5,7 @@ arch:
   recur_alpha_thres: 1e-3
   lr_scale: 1
   infinity_border: False
-  eval_batch_size: 2048
+  eval_batch_size: 4096
   recur_stepmul: 0.5
   hdr: False
 
@@ -29,7 +29,7 @@ arch:
     _target_: samplers.alphagrid.AlphaGridSampler
     _partial_: True
     enable_alpha_mask: True
-    update_list: [2000,3000,4000,5500,7000]
+    update_list: [500, 2000,3000,4000,5500,7000]
     max_samples: 200000
 
   # normal_module:
