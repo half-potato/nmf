@@ -46,6 +46,13 @@ def stack_tensors(data):
     return data
 
 
+def to_device(x, device):
+    if torch.is_tensor(x):
+        return x.to(device)
+    else:
+        return x
+
+
 def chunk_renderer(
     rays,
     tensorf,
@@ -61,6 +68,7 @@ def chunk_renderer(
     rng = range(N_rays_all // chunk + int(N_rays_all % chunk > 0))
     # if render2completion:
     #     rng = tqdm(rng)
+    device = tensorf.get_device() if not render2completion else torch.device("cpu")
     for chunk_idx in rng:
         rays_chunk = rays[chunk_idx * chunk : (chunk_idx + 1) * chunk]  # .to(device)
         if rays_chunk.numel() == 0:
@@ -77,20 +85,22 @@ def chunk_renderer(
             if keys is not None:
                 for key in keys:
                     if key in cims:
-                        ims[key].append(cims[key])
+                        ims[key].append(to_device(cims[key], device))
                     if key in cstats:
-                        stats[key].append(cstats[key])
+                        stats[key].append(to_device(cstats[key], device))
             else:
                 for key in cims.keys():
                     if key in cims:
-                        ims[key].append(cims[key])
+                        ims[key].append(to_device(cims[key], device))
                 for key in cstats.keys():
                     if key in cstats:
-                        stats[key].append(cstats[key])
+                        stats[key].append(to_device(cstats[key], device))
 
             whole_valid = cstats["whole_valid"]
             if not render2completion:
                 break
+            else:
+                torch.cuda.empty_cache()
             need_rendering[need_rendering.clone()] = ~whole_valid
 
     return stack_tensors(ims), stack_tensors(stats)
@@ -117,6 +127,9 @@ class BundleRender:
         permrays[inds] = rays
 
         LOGGER.reset()
+        inds = torch.randperm(rays.shape[0])
+        permrays = torch.zeros_like(rays)
+        permrays[inds] = rays
         ims, stats = self.base_renderer(
             permrays,
             tensorf,
@@ -301,8 +314,8 @@ def evaluate(
     tensorf.eval()
     tint_psnrs = []
     ic(tensorf.eval_batch_size)
-    torch.cuda.empty_cache()
     for idx, im_idx, rays, gt_rgb in iterator():
+        torch.cuda.empty_cache()
         ims, stats = brender(
             rays, tensorf, N_samples=N_samples, ndc_ray=ndc_ray, is_train=False
         )

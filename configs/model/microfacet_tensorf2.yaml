@@ -29,7 +29,7 @@ arch:
     _target_: samplers.alphagrid.AlphaGridSampler
     _partial_: True
     enable_alpha_mask: True
-    update_list: [500, 2000,3000,4000,5500,7000]
+    update_list: [2000,3000,4000,5500,7000]
     max_samples: 200000
 
   # normal_module:
@@ -213,7 +213,7 @@ params:
   final_ori_lambda: Null
   brdf_lambda: 0
   normal_err_lambda: 0
-  
+
   distortion_lambda: 0 # 1e-3
   visibility_lambda: 0
   # distortion_lambda: 0.00001

@@ -71,6 +71,7 @@ def render_test(args):
         is_stack=True,
         white_bg=white_bg,
     )
+    ic(test_dataset.near_far)
     test_dataset.near_far = args.dataset.near_far
     white_bg = test_dataset.white_bg
     ndc_ray = args.dataset.ndc_ray
@@ -126,8 +127,11 @@ def render_test(args):
     tensorf = tensorf.to(device)
     tensorf.train()
     tensorf.sampler.update(tensorf.rf, init=True)
-    for i in range(1000):
-        tensorf.sampler.check_schedule(i, 1, tensorf.rf)
+    tensorf.sampler.updateAlphaMask(tensorf.rf, grid_size=[266] * 3)
+    tensorf.load_state_dict(ckpt["state_dict"], strict=False)
+    ic(tensorf.sampler.near_far)
+    # for i in range(1000):
+    #     tensorf.sampler.check_schedule(i, 1, tensorf.rf)
 
     # if tensorf.bright_sampler is not None:
     #     tensorf.bright_sampler.update(tensorf.bg_module)

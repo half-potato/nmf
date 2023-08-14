@@ -99,15 +99,15 @@ class AlphaGridSampler(torch.nn.Module):
         self.units = rf.units
         self.contract_space = rf.contract_space
         # reso_mask = reso_cur
-        if not init and self.enable_alpha_mask:
+        self.nSamples = rf.nSamples * self.multiplier
+        self.stepsize = rf.stepsize / self.multiplier
+        if not init:
             new_aabb = self.updateAlphaMask(rf, rf.grid_size)
             apply_correction = not torch.all(
                 torch.tensor(self.grid_size).to(rf.grid_size.device) == rf.grid_size
             )
             # rf.shrink(new_aabb, apply_correction)
             self.grid_size = rf.grid_size
-        self.nSamples = rf.nSamples * self.multiplier
-        self.stepsize = rf.stepsize / self.multiplier
         ic(self.nSamples, self.stepsize)
 
     def sample_ray_ndc(self, rays_o, rays_d, focal, is_train=True, N_samples=-1):
