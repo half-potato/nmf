@@ -1,0 +1,8 @@
+scenedir: nerf_synthetic/relighting/ball_christmas
+dataset_name: blender
+downsample_train: 1
+downsample_test: 1
+ndc_ray: false
+near_far: [2.5, 5]
+aabb_scale: 2
+gt_bg: christmas_photo_studio_04_4k.exr

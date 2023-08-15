@@ -81,13 +81,24 @@ def render_test(args):
         ckpt, args.model.arch, near_far=test_dataset.near_far, strict=False
     )
 
+    tensorf = tensorf.to(device)
+    tensorf.train()
+    tensorf.sampler.update(tensorf.rf, init=True)
+    tensorf.sampler.updateAlphaMask(tensorf.rf, grid_size=[266] * 3)
+    tensorf.load_state_dict(ckpt["state_dict"], strict=False)
+    ic(tensorf.sampler.near_far)
+    # for i in range(1000):
+    #     tensorf.sampler.check_schedule(i, 1, tensorf.rf)
+
+    # if tensorf.bright_sampler is not None:
+    #     tensorf.bright_sampler.update(tensorf.bg_module)
     if args.fixed_bg is not None:
         bg_sd = torch.load(args.fixed_bg)
         from modules import bg_modules
 
         # bg_module = bg_modules.HierarchicalCubeMap(bg_resolution=2048, num_levels=1, featureC=128, activation='softplus', power=2, lr=1e-2)
         bg_module = IntegralEquirect(
-            bg_resolution=1024,
+            bg_resolution=512,
             mipbias=0,
             activation="exp",
             lr=0.001,
@@ -123,18 +134,7 @@ def render_test(args):
         # bg_module.brightness += torch.log(offset)
 
         # bg_module.mul += 1
-        tensorf.bg_module = bg_module
-    tensorf = tensorf.to(device)
-    tensorf.train()
-    tensorf.sampler.update(tensorf.rf, init=True)
-    tensorf.sampler.updateAlphaMask(tensorf.rf, grid_size=[266] * 3)
-    tensorf.load_state_dict(ckpt["state_dict"], strict=False)
-    ic(tensorf.sampler.near_far)
-    # for i in range(1000):
-    #     tensorf.sampler.check_schedule(i, 1, tensorf.rf)
-
-    # if tensorf.bright_sampler is not None:
-    #     tensorf.bright_sampler.update(tensorf.bg_module)
+        tensorf.bg_module = bg_module.to(device)
 
     logfolder = os.path.dirname(args.ckpt)
     if args.render_train:
