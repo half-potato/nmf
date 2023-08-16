@@ -19,6 +19,7 @@ d_init_val: 0.1
 app_init_val: 0.1
 # init_mode: trig
 density_shift: -4
+numer_grad: True
 # grid_size: [512, 512, 512]
 # grid_size: [128, 128, 128]
 dbasis: False

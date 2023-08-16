@@ -1,4 +1,4 @@
-scenedir: nerf_synthetic/coffee_christmas
+scenedir: nerf_synthetic/relighting/coffee_christmas
 dataset_name: blender
 downsample_train: 1
 downsample_test: 1

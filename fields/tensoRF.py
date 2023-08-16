@@ -8,13 +8,14 @@ from icecream import ic
 from modules import safemath
 
 # uncomment for no numerical derivative
-from modules.grid_sample3d import grid_sample as grid_sample3
-from modules.grid_sample_Cinf import grid_sample as grid_sample2
+from modules.grid_sample3d import grid_sample as _grid_sample_nonumer
+from modules.grid_sample_Cinf import grid_sample as grid_sample_numer
 
 from .tensor_base import TensorVoxelBase
 
-# def grid_sample2(*args, smoothing, **kwargs):
-#     return grid_sample3(*args)
+
+def grid_sample_nonumer(*args, smoothing, **kwargs):
+    return _grid_sample_nonumer(*args)
 
 
 def grid_sample(*args, smoothing, **kwargs):
@@ -23,7 +24,15 @@ def grid_sample(*args, smoothing, **kwargs):
 
 class TensoRF(torch.nn.Module):
     def __init__(
-        self, grid_size, dim, init_mode, interp_mode, init_val, lr, smoothing=0.5
+        self,
+        grid_size,
+        dim,
+        init_mode,
+        interp_mode,
+        init_val,
+        lr,
+        smoothing=0.5,
+        numer_grad=True,
     ):
         super().__init__()
 
@@ -41,6 +50,7 @@ class TensoRF(torch.nn.Module):
             dim, self.grid_size, init_val, 0
         )
         self._dim = dim
+        self.grad_grid_sample = grid_sample_numer if numer_grad else grid_sample_nonumer
 
     def dim(self):
         return self._dim * 3
@@ -171,7 +181,7 @@ class TensoRF(torch.nn.Module):
     def forward(self, xyz_normed, enable_xyz_grad=False):
         if not enable_xyz_grad:
             xyz_normed.detach_()
-        gs = grid_sample2 if enable_xyz_grad else grid_sample
+        gs = self.grad_grid_sample if enable_xyz_grad else grid_sample
         coordinate_plane, coordinate_line = self.coords(xyz_normed)
         feature = []
         for idx_plane in range(len(self.app_plane)):
@@ -267,6 +277,7 @@ class TensorVMSplit(TensorVoxelBase):
         init_mode="trig",
         d_init_val=0.1,
         app_init_val=0.1,
+        numer_grad=True,
         *args,
         **kwargs,
     ):
@@ -289,6 +300,7 @@ class TensorVMSplit(TensorVoxelBase):
             d_init_val,
             self.lr,
             smoothing,
+            numer_grad=numer_grad,
         )
         self.app_rf = model(
             self.grid_size[0],
@@ -298,6 +310,7 @@ class TensorVMSplit(TensorVoxelBase):
             app_init_val,
             self.lr,
             smoothing,
+            numer_grad=numer_grad,
         )
         self.basis_mat = torch.nn.Linear(self.app_rf.dim(), self.app_dim, bias=False)
         self.dbasis_mat = torch.nn.Linear(self.density_rf.dim(), 1, bias=False)
