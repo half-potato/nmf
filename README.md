@@ -27,6 +27,7 @@ python train.py -m expname=v38_noupsample model=microfacet_tensorf2 dataset=ficu
 
 # Recreating Experiments
 Note that something is currently wrong with computation of metrics in the current code and the scripts `reval_lpips.ipynb` and `reeval_norm_err.ipynb` currently have to be run. `tabularize.ipynb` can be used to create the tables, while other fun visualizations are available.
+You can also download our relighting experiments from [here](https://drive.google.com/file/d/1CgyA1Fjis3dDDjAV3SFDJd-BGrgbOhf8/view?usp=sharing).
 
 # Other datasets
 Other dataset configurations are available in `configs/dataset`. Real world datasets are available and do work. 
