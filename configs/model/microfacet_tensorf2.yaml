@@ -66,7 +66,7 @@ arch:
     detach_N_iters: 0
     anoise: 0.25
     no_emitters: True
-    diffuse_mixing_mode: "lambda"
+    diffuse_mixing_mode: "fresnel"
     freeze: False
     rays_per_ray: 128
     test_rays_per_ray: 128
