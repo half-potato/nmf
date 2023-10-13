@@ -382,7 +382,8 @@ def evaluate(
             except:
                 pass
                 # traceback.print_exc()
-            loss = torch.mean((ims.rgb_map.clip(0, 1) - gt_rgb.clip(0, 1)) ** 2)
+            rgb_map = (ims.rgb_map.clip(0, 1) * 255).floor() / 255
+            loss = torch.mean((rgb_map - gt_rgb.clip(0, 1)) ** 2)
             PSNRs.append(-10.0 * np.log(loss.item()) / np.log(10.0))
 
             # fig, axs = plt.subplots(2, 2)
@@ -393,9 +394,9 @@ def evaluate(
             # plt.show()
 
             if compute_extra_metrics:
-                ssim = rgb_ssim(ims.rgb_map, gt_rgb, 1)
-                l_a = rgb_lpips(gt_rgb.numpy(), ims.rgb_map.numpy(), "alex", device)
-                l_v = rgb_lpips(gt_rgb.numpy(), ims.rgb_map.numpy(), "vgg", device)
+                ssim = rgb_ssim(rgb_map, gt_rgb, 1)
+                l_a = rgb_lpips(gt_rgb.numpy(), rgb_map.numpy(), "alex", device)
+                l_v = rgb_lpips(gt_rgb.numpy(), rgb_map.numpy(), "vgg", device)
                 ssims.append(ssim)
                 l_alex.append(l_a)
                 l_vgg.append(l_v)

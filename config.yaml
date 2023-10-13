@@ -1,0 +1,274 @@
+render_mode: center
+basedir: ./log
+filter_rays: false
+expname: v1_neural_sm1
+datadir: /optane/nerf_datasets
+render_only: false
+render_train: false
+render_test: true
+render_path: false
+add_timestamp: false
+nSamples: 1000000.0
+N_vis: 5
+vis_every: 5000
+progress_refresh_rate: 1
+rm_weight_mask_thre: 0.0001
+step_ratio: 0.5
+ckpt: null
+lr_decay_iters: 30000
+lr_decay_target_ratio: 0.1
+lr_upsample_reset: 1
+fp16: false
+n_bg_iters: 1000
+save_often: false
+fixed_bg: null
+seed: 20211200
+gt_bg: null
+dataset:
+  scenedir: nerf_synthetic/car
+  dataset_name: blender
+  downsample_train: 1
+  downsample_test: 1
+  ndc_ray: false
+  near_far:
+  - 2
+  - 5
+  stack_norms: false
+  gt_bg: forest.exr
+model:
+  arch:
+    _target_: modules.tensor_nerf.TensorNeRF
+    _partial_: true
+    recur_alpha_thres: 0.001
+    lr_scale: 1
+    infinity_border: false
+    eval_batch_size: 4096
+    recur_stepmul: 0.5
+    hdr: false
+    bg_noise: 0.0
+    bg_noise_decay: 0.999
+    use_predicted_normals: false
+    orient_world_normals: true
+    align_pred_norms: true
+    detach_inter: false
+    geonorm_iters: -1
+    geonorm_interp_iters: 1000
+    contraction: AABB
+    tonemap:
+      _target_: modules.tonemap.SRGBTonemap
+    sampler:
+      _target_: samplers.alphagrid.AlphaGridSampler
+      _partial_: true
+      enable_alpha_mask: true
+      update_list:
+      - 2000
+      - 3000
+      - 4000
+      - 5500
+      - 7000
+      max_samples: 200000
+    model:
+      _partial_: true
+      _target_: models.microfacet.Microfacet
+      percent_bright: 0.0
+      min_rough_start: 0.0
+      min_rough_decay: 0.999
+      max_brdf_rays:
+      - 650000
+      - 450000
+      conserve_energy: true
+      target_num_samples:
+      - 1000000
+      russian_roulette: false
+      max_retrace_rays:
+      - 1000
+      start_std: 0.0
+      std_decay: 1.0
+      cold_start_bg_iters: 0
+      detach_N_iters: 0
+      anoise: 0.25
+      no_emitters: true
+      diffuse_mixing_mode: fresnel
+      freeze: false
+      rays_per_ray: 128
+      test_rays_per_ray: 128
+      brdf_sampler:
+        _target_: brdf_samplers.ggx.GGXSampler
+        _partial_: true
+      brdf:
+        _target_: modules.brdf.MLPBRDF
+        _partial_: true
+        mul_LdotN: false
+        feape: 0
+        dotpe: -1
+        h_encoder:
+          _target_: modules.ish.ListISH
+          degs:
+          - 0
+          - 1
+          - 2
+          - 4
+        d_encoder:
+          _target_: modules.ish.ListISH
+          degs:
+          - 0
+          - 1
+          - 2
+          - 4
+        hidden_w: 64
+        num_layers: 3
+        initializer: kaiming
+        bias: 2.444013196872686
+        activation: sigmoid
+        lr: 0.001
+      diffuse_module:
+        _partial_: true
+        _target_: modules.render_modules.RandHydraMLPDiffuse
+        pospe: -1
+        feape: 0
+        roughness_view_encoder: null
+        roughness_cfg:
+          hidden_w: 64
+          num_layers: 1
+        hidden_w: 64
+        num_layers: 1
+        initializer: xavier_sigmoid
+        lr: 0.001
+        start_roughness: 0.35
+        tint_bias: 0
+        diffuse_bias: 2.3266290713419666
+        diffuse_mul: 1.5
+        roughness_bias: 0.9577413492262228
+      visibility_module: null
+    bg_module:
+      _target_: modules.integral_equirect.IntegralEquirect
+      bg_resolution: 512
+      mipbias: 1
+      activation: exp
+      lr: 0.02
+      init_val: -0.6
+      mul_lr: 0
+      brightness_lr: 0
+      betas:
+      - 0.9
+      - 0.99
+      mul_betas:
+      - 0.9
+      - 0.9
+      mipbias_lr: 0.0001
+      mipnoise: 0.0
+    rf:
+      _partial_: true
+      _target_: fields.tensoRF.TensorVMSplit
+      distance_scale: 25
+      density_n_comp: 16
+      appearance_n_comp: 24
+      app_dim: 24
+      step_ratio: 0.5
+      density_res_multi: 1
+      contract_space: false
+      smoothing: 1
+      activation: softplus
+      interp_mode: bilinear
+      init_mode: rand
+      d_init_val: 0.1
+      app_init_val: 0.1
+      density_shift: -10
+      numer_grad: true
+      dbasis: false
+      grid_size:
+      - 64
+      - 64
+      - 64
+      N_voxel_init: 262144
+      N_voxel_final: 27000000
+      upsamp_list:
+      - 500
+      - 1000
+      - 2000
+      - 3000
+      - 4000
+      - 5500
+      - 7000
+      lr: 0.02
+      lr_net: 0.001
+      triplanar: false
+      num_pretrain: 0
+      calibrate: false
+  params:
+    L1_weight_initial: 8.0e-05
+    L1_weight_rest: 4.0e-05
+    clip_grad: null
+    weight_decay: 0
+    eps: 1.0e-08
+    betas:
+    - 0.9
+    - 0.99
+    starting_batch_size: 100
+    min_batch_size: 4096
+    max_batch_size: 8000
+    target_num_samples: 200000
+    TV_weight_density: 0.0
+    TV_weight_app: 0.0
+    TV_weight_bg: 0
+    envmap_lambda: 0
+    pred_lambda: 0.0003
+    final_pred_lambda: 0.0003
+    diffuse_lambda: 0
+    ori_lambda: 0.1
+    final_ori_lambda: null
+    brdf_lambda: 0
+    normal_err_lambda: 0
+    distortion_lambda: 0
+    visibility_lambda: 0
+    charbonier_eps: 0.001
+    ortho_weight: 0
+    N_visibility_rays: 128
+    n_iters: 30000
+    charbonier_loss: false
+    start_density: 0.001
+    batch_size: 4096
+    lr: null
+    lr_init: 1
+    lr_final: 0.001
+    lr_delay_mult: 0.1
+    lr_delay_steps: 100
+    bg_col: white
+field:
+  _partial_: true
+  _target_: fields.tensoRF.TensorVMSplit
+  distance_scale: 25
+  density_n_comp: 16
+  appearance_n_comp: 24
+  app_dim: 24
+  step_ratio: 0.5
+  density_res_multi: 1
+  contract_space: false
+  smoothing: 1
+  activation: softplus
+  interp_mode: bilinear
+  init_mode: rand
+  d_init_val: 0.1
+  app_init_val: 0.1
+  density_shift: -10
+  numer_grad: true
+  dbasis: false
+  grid_size:
+  - 64
+  - 64
+  - 64
+  N_voxel_init: 262144
+  N_voxel_final: 27000000
+  upsamp_list:
+  - 500
+  - 1000
+  - 2000
+  - 3000
+  - 4000
+  - 5500
+  - 7000
+  lr: 0.02
+  lr_net: 0.001
+  triplanar: false
+  num_pretrain: 0
+  calibrate: false
