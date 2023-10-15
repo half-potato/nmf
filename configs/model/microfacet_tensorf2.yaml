@@ -39,11 +39,11 @@ arch:
   #   # pospe: -1
   #   # feape: 2
   #   # pospe: 0
-  #   pospe: -1
-  #   feape: 0
+  #   pospe: 12
+  #   feape: -1
   #
-  #   hidden_w: 64
-  #   num_layers: 3
+  #   hidden_w: 128
+  #   num_layers: 4
   #   initializer: 'kaiming'
   #   size_multi: 2.5e-3
   #   # allocation: 3
@@ -207,7 +207,7 @@ params:
   TV_weight_bg: 0
   envmap_lambda: 0
   pred_lambda: 3e-4
-  final_pred_lambda: 3e-4
+  final_pred_lambda: Null
   diffuse_lambda: 0
   ori_lambda: 0.1
   final_ori_lambda: Null

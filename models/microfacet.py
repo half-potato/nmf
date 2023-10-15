@@ -61,7 +61,8 @@ class Microfacet(torch.nn.Module):
         self.russian_roulette = russian_roulette
         self.target_num_samples = target_num_samples
         self.max_brdf_rays = max_brdf_rays
-        self.max_retrace_rays = max_retrace_rays
+        self.start_max_retrace_rays = max_retrace_rays
+        self.max_retrace_rays = self.start_max_retrace_rays
         self.percent_bright = percent_bright
         self.cold_start_bg_iters = cold_start_bg_iters
         self.conserve_energy = conserve_energy
@@ -70,7 +71,7 @@ class Microfacet(torch.nn.Module):
         self.detach_N = True
         self.rays_per_ray = rays_per_ray
         self.test_rays_per_ray = test_rays_per_ray
-        self.outputs = {"diffuse": 3, "roughness": 1, "tint": 3, "spec": 3}
+        self.outputs = {"diffuse": 3, "roughness": 1, "tint": 3, "spec": 3, "albedo": 3}
 
         self.mean_ratios = None
         self.ratio_list = None
@@ -233,7 +234,7 @@ class Microfacet(torch.nn.Module):
         return im
 
     def reset_counter(self):
-        self.max_retrace_rays = [1000]
+        self.max_retrace_rays = self.start_max_retrace_rays
         self.mean_ratios = None
         self.ratio_list = None
 
@@ -505,6 +506,7 @@ class Microfacet(torch.nn.Module):
                     color_contribution += torch.rand_like(color_contribution)
                     cc_as = color_contribution.argsort()
                     M = max(cc_as.shape[0] - num_retrace_rays, 0)
+                    ic(M, num_retrace_rays)
                     retrace_ray_inds = cc_as[M:]
 
                     if self.russian_roulette:
@@ -667,4 +669,5 @@ class Microfacet(torch.nn.Module):
             debug["tint"] = brdf_rgb * lam
         debug["roughness"] = matprop["r1"]
         debug["spec"] = spec
+        debug["albedo"] = albedo
         return rgb, debug
