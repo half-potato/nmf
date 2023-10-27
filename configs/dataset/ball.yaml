@@ -4,5 +4,5 @@ downsample_train: 1
 downsample_test: 1
 ndc_ray: false
 near_far: [2.5, 5]
-aabb_scale: 1
+aabb_scale: 2
 gt_bg: forest.exr
