@@ -363,7 +363,7 @@ def evaluate(
                 # ic(u @ vh)
                 # mask = (gt_normal[..., 0] == 1) & (gt_normal[..., 1] == 1) & (gt_normal[..., 2] == 1)
                 # gt_normal[mask] = 0
-                pnorms = ims.normal
+                pnorms = ims.world_normal
 
                 pnorms = (pnorms * 127 + 128).int()
                 pnorms = (pnorms - 128) / 127
