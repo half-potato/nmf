@@ -31,3 +31,5 @@ You can also download our relighting experiments from [here](https://drive.googl
 
 # Other datasets
 Other dataset configurations are available in `configs/dataset`. Real world datasets are available and do work. 
+
+Here is a [link](https://drive.google.com/file/d/131eN_Kfo-_-TOPwWjCyc02KjyOTY7bxR/view?usp=sharing) to the relighting dataset.
