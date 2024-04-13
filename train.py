@@ -84,7 +84,8 @@ def render_test(args):
     tensorf = tensorf.to(device)
     tensorf.train()
     tensorf.sampler.update(tensorf.rf, init=True)
-    tensorf.sampler.updateAlphaMask(tensorf.rf, grid_size=[266] * 3)
+    grid_size = ckpt['state_dict']['sampler.alphaMask.alpha_volume'].shape[2:]
+    tensorf.sampler.updateAlphaMask(tensorf.rf, grid_size=grid_size)
     tensorf.load_state_dict(ckpt["state_dict"], strict=False)
     ic(tensorf.sampler.near_far)
     # for i in range(1000):
